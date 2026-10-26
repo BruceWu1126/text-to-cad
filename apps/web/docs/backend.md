@@ -130,8 +130,12 @@ and `content-security-policy: default-src 'none'; sandbox`, so a file opened
 straight in the browser (a robot description's XML can carry an XHTML
 `<script>`) runs no script and has an origin of its own. The renderers fetch the
 bytes, which neither header affects. No `Access-Control-*` header is ever
-served, so another site can make the browser send a request but never read the
-answer.
+served to a page by its cookie or a link in its URL, so another site can make the
+browser send a request but never read the answer. The one exception is the
+engine's, before any route: a request carrying a day link as its `Authorization`
+Bearer (a CAD card reading the engine directly, `apps/mcp`), and its preflight,
+are answered for the origin that sent them, with no credentials
+(`cadgen.viewer.engine_app.EngineApp.preflight`).
 
 ## Engine documents: a STEP and an `.xbf`
 
@@ -187,7 +191,8 @@ fetch every read of it is made with (the CAD app's goes over its tunnel).
 | `GET /__cad/prompt-files/<name>` | One of those files (a PNG or JSON), from the prompt-files directory only. |
 
 Every POST must send `x-cadgen-viewer: 1`. The custom header forces a browser
-preflight for cross-origin POSTs, and the server sends no CORS headers. When
+preflight for cross-origin POSTs, and the server answers it only for a request
+that carries a day link as its Bearer credential (above). When
 bound to loopback, Host validation also refuses non-local names as a
 DNS-rebinding defense. The trust model is documented in
 `cadgen.viewer.http_app`; keep these gates intact.

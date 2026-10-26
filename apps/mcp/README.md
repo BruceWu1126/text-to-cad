@@ -31,7 +31,9 @@ terminal UI show none and are served as text clients.
   update button, Full size where the host can show a view full size, Display and
   Preview, and last Open in browser), the tool strip
   ending in Display and Preview, the file sidebar, the view cube, and Quick Edit. A
-  newer card retires the older ones.
+  newer card retires the older ones. The Claude app's Code tab draws the card too, but carries none of its calls
+  back: there the card tries the engine directly, else links the CAD Viewer (**A card says
+  why it cannot work**, below).
 
 A client that renders no MCP Apps never loads this page. Its `cad_show` opens the
 model's page in this machine's CAD Viewer, `/<id>` (the file registered by its id, as
@@ -242,6 +244,51 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   rows) stand where the models will be; a model being opened shows a spinner over
   its picture, and takes no second press, until the launch switches to the
   viewer, whose own progress takes over.
+- **A card says why it cannot work, in words a person can act on.** Three states, never
+  confused, and never a host's or a transport's own error string (`host/channel.ts`,
+  `Connection.tsx`, `tunnel.ts`'s `tunnelFailure`):
+  - **No channel.** A host can draw the card and carry none of its calls back: the Claude
+    app's **Code tab** (observed 2026-10-25) frames `cad_show`'s card as "Widget from
+    text-to-cad:cad cad_show", with an expand control of its own, and answers every
+    `tools/call` the card makes with its own error, "IPC not available for MCP tool call";
+    the server never sees the view open, so `cad_view` and `cad_screenshot` answer that it
+    has not opened. The card knows its channel: at `ui/initialize` a host that declares
+    `serverTools` carries calls (a tab host is trusted as before, whatever it declares), one
+    that says nothing gets a single `GET /__cad/server` before anything is drawn, and a call
+    the host itself refuses (a JSON-RPC error: not a timeout, not the engine's answer) before
+    any call came back means none. The card then tries the engine directly (below); failing
+    that it shows one notice and nothing else, no home and no library: "This chat can't
+    connect the CAD viewer to its engine. Open the model in the CAD Viewer instead." (the
+    home's says "Open the CAD Viewer instead."), and **Open in CAD Viewer**, the launch's
+    `browser` page, through `ui/open-link` where the host declares `openLinks`, else as a
+    plain link to a new window. With no page in the launch it says "Ask your agent to open
+    the model in the CAD Viewer instead." and links nothing.
+  - **The plugin stopped.** Calls came back, then four syncs in a row failed: the banner over
+    the view says what to do in that host: "The CAD plugin stopped responding in this
+    thread. Quit and reopen Codex to restart it." in a tab, "The CAD plugin stopped
+    responding. Quit and reopen this app to restart it, then ask your agent to show the model
+    again." inline.
+  - **The engine refused or failed.** Its own one-line reason, where the viewer shows a
+    request's failure. A call that got no reply fails in words of ours ("This chat cannot
+    connect the CAD viewer to its engine.", "The CAD plugin did not answer in time.", "The
+    CAD plugin could not be reached.").
+- **No channel, then the engine directly.** Every launch a tool hands an inline card carries,
+  where the engine gives a page, `browser` (the CAD Viewer's page of what it shows, the same
+  day link `/__cad/browser` and a text client's `cad_show` give, loopback only) and `engine`
+  (its origin), so the card needs no call to read them (`cadgen/mcp/server.py`, `_reach`); a
+  tab host's launches carry neither, its card always having its channel.
+  With no channel, the card reads `GET <engine>/__cad/server` with the link's token as a
+  Bearer credential (`host/direct.ts`, at most five seconds). If it answers, the whole card
+  runs over direct HTTP: the tunnel's fetch is swapped for one that sends the same paths to
+  the engine, so no caller changes; the view makes no sync, which only the host could carry
+  (the agent cannot read or capture it), and its client polls its catalog itself. For that
+  read to pass, an inline host's resource names the engine's origin among its
+  `connectDomains` (a host must not allow an origin it was not given; a tab host's resource
+  is unchanged), and the engine answers exactly that request's CORS: a day link in the
+  `Authorization` header, from the origin that sent it, with no credentials
+  (`cadgen/viewer/engine_app.py`). A host may still refuse the origin (an `http:` loopback
+  one), block the fetch in its sandbox, or ask about local network access; any failure ends
+  on the notice and its link.
 - **Nothing is held open, and a view makes one call a second.** A host relays
   every call its views make through a few slots they all share, and holds a call
   until one frees: a call held open by one view queues every model load, picture
@@ -282,7 +329,9 @@ values have no reader and cannot hide it. Settings files need no conversion.
 
 | Module | What it is |
 | --- | --- |
-| `bridge.ts` | JSON-RPC 2.0 over `postMessage`: requests, the opening tool's result, host context, teardown |
+| `bridge.ts` | JSON-RPC 2.0 over `postMessage`: requests, the opening tool's result, host context, teardown; a failed request's `kind` (the host refused it, it timed out, the page closed) |
+| `channel.ts` | whether the host carries the page's calls to its server: what it declared (`serverTools`, `openLinks`), then what its calls showed (`Connection.tsx` routes the card by it) |
+| `direct.ts` | the engine reached over HTTP where the host carries no call: the launch's `engine` and day link, the probe, and the `fetch` that swaps for the tunnel's |
 | `server.ts` | typed calls to the page's three tools: its sync, its answer to a capture, and `cad_http` |
 | `tunnel.ts` | the `fetch` over `cad_http`, a long body a range at a time, and the CAD client over it (`App.tsx` makes one per view): the library, Open, Reveal and the person's settings among its requests |
 | `prompt.ts` | Quick Edit's chat: `chatReach`, what the host's chat takes, and the prompt port over it — Queue through `ui/update-model-context` (a text block titled `Quick edit · <file>` naming the snapshot path, kept until the host clears its model context), Send through `ui/message` — with references as absolute paths (Copy Prompt spells them as copied references are) |
