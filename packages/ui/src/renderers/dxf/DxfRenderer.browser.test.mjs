@@ -157,6 +157,9 @@ const wheelAt = (page, box, point, deltaY) => page.mouse.move(box.x + point.x, b
 /** The wheel delta this renderer reads as `factor`: it zooms by exp(-deltaY * 0.0015). */
 const deltaForFactor = factor => -Math.log(factor) / 0.0015;
 
+// The room the view measures for its tool strip at the pane's top, which a fit keeps clear of.
+const stripRoom = page => page.evaluate(() => Number.parseFloat(getComputedStyle(document.querySelector('[data-slot="cad-file-view"]')).getPropertyValue('--cad-tools-bottom')) || 0);
+
 test('a drawing opens fitted and centred, in the theme’s ink, and flips with the theme', async (t) => {
   const { page, pane, errors } = await open(t, 'sample.dxf');
   await drawn(pane);
@@ -172,14 +175,16 @@ test('a drawing opens fitted and centred, in the theme’s ink, and flips with t
 
   const light = await frame(pane);
   const box = inkBox(light);
-  // Fitted: the drawing's own aspect, centred, filling the pane but for the gutter.
+  const strip = await stripRoom(page);
+  // Fitted: the drawing's own aspect, centred, filling the pane below its tool strip but for the gutter.
+  assert.ok(strip > 0, `the strip's room is measured: ${strip}`);
   assert.ok(Math.abs(box.centreX - light.width / 2) <= 2, `centred across: ${box.centreX} of ${light.width}`);
-  assert.ok(Math.abs(box.centreY - light.height / 2) <= 2, `centred down: ${box.centreY} of ${light.height}`);
+  assert.ok(Math.abs(box.centreY - (strip + (light.height - strip) / 2)) <= 2, `centred down, under the strip: ${box.centreY} of ${light.height}`);
   const aspect = box.width / box.height;
   assert.ok(Math.abs(aspect - MODEL.width / MODEL.height) < 0.05, `the drawing's own aspect: ${aspect}`);
   // The pane is wider than the drawing, so height is the binding axis: the ink
   // reaches to the 16 px gutter and no further.
-  assert.ok(Math.abs(box.height - (light.height - 32)) <= 3, `fitted to the gutter: ${box.height} in ${light.height}`);
+  assert.ok(Math.abs(box.height - (light.height - strip - 32)) <= 3, `fitted to the gutter: ${box.height} in ${light.height}`);
 
   // Default pen: the theme's foreground, on the theme's background. The outline is
   // default-pen line-work.
@@ -306,7 +311,7 @@ test('a pane that is resized re-fits only while the view is still the one it ope
   const resized = await frame(pane, fittedShot);
   const refitted = inkBox(resized);
   assert.ok(refitted.height < fitted.height * 0.8, `re-fitted smaller: ${fitted.height} -> ${refitted.height}`);
-  assert.ok(Math.abs(refitted.height - (resized.height - 32)) <= 3, `fitted to the new pane: ${refitted.height} in ${resized.height}`);
+  assert.ok(Math.abs(refitted.height - (resized.height - await stripRoom(page) - 32)) <= 3, `fitted to the new pane: ${refitted.height} in ${resized.height}`);
 
   // Touched: the person's framing is theirs and a resize does not take it back — but it is
   // kept in the terms it was chosen in, not in pixels. The view holds the same zoom
@@ -320,9 +325,10 @@ test('a pane that is resized re-fits only while the view is still the one it ope
   await shrink('460px');
   const grownShot = await frame(pane, chosenShot);
   const kept = inkBox(grownShot);
-  // The canvas is the pane less its navbar; the share of it the drawing covers is the
-  // person's zoom, and that is what survives.
-  const share = (ink, shot) => ink.height / (shot.height - 32);
+  // The canvas is the pane less its navbar; the share of what a fit fills (below the strip, inside
+  // the gutter) that the drawing covers is the person's zoom, and that is what survives.
+  const strip = await stripRoom(page);
+  const share = (ink, shot) => ink.height / (shot.height - strip - 32);
   assert.ok(Math.abs(share(kept, grownShot) - share(chosen, chosenShot)) < 0.02,
     `half the fit, before and after: ${share(chosen, chosenShot)} -> ${share(kept, grownShot)}`);
   assert.ok(kept.height > chosen.height * 1.3,
