@@ -6,7 +6,7 @@ structure (``document.Loaded.structure``): its parts with their names, keys, col
 materials and element names, its instances with world matrices, its tree, and its version, and
 for each part already meshed the faces its mesher left without triangles
 (``unmeshed``) with ``BRepCheck``'s verdict on each (``unmeshedCheck``);
-``GET /api/doc/<id>/version?after=V&progress=N&wait=S`` answers ``{"version", "patch",
+``GET /api/doc/<id>/version?after=V&progress=N&wait=S`` answers ``{"version",
 "building", "failed", "progress"}`` once the version is not ``V``, or the count ``progress`` is
 not ``N`` (without ``progress=``, the version alone is waited on), or after ``S`` seconds:
 ``building`` is the last progress frame of the build writing the document now (``progress.py``;
@@ -36,13 +36,12 @@ draw a document in (``render/look.py``), which a page lights and dresses its sce
 one (``page/``), with three.js served from a ``node_modules`` folder (``--three``, or the
 nearest one above the working directory).
 
-**The document stays in memory.** A document is read from its file once, when it is first
-served. After that a model's worker hands the daemon each build's document as a patch
-(``patch``): its structure, the buffers of the parts the worker meshed, and the shape
-bytes of parts the daemon holds no shape for; the document is replaced in memory and the
-page, waiting on the version, is answered at once. The file is read again only when some
-other process rewrote it: its modification time and size are compared when the version
-is asked for, except while a build is writing it (``hold``).
+**A file follows its disk.** A file is read once, when it is first served, and again whenever
+its modification time or size is not what was read: they are compared each time the document is
+asked for, and while a page waits on its version twice a second (``_wait``). That is all that
+moves a file's version: whatever program wrote the file -- a model's run writing the xbf it
+declares among them -- nothing is sent of it, and a file names no model. A part whose geometry
+key the new version shares with the old keeps its tessellation (one cache, by key).
 
 **A STEP is read in a reader process, held by its bytes.** OCCT's XCAF reader works in many
 times the memory of what it makes and its allocator keeps most of it, so the server never
@@ -206,8 +205,8 @@ class MeshCache:
             return len(found)
 
 
-# The process's one mesh cache: the daemon's server serves from it, and in a worker the
-# build's patch, its exports and a snapshot it draws all take a part's buffer from it.
+# The process's one mesh cache: the daemon's server serves from it, and in a worker a
+# build's exports and a snapshot it draws take a part's buffer from it.
 MESHES = MeshCache()
 
 
@@ -570,7 +569,6 @@ class Served:
     stat: tuple | None
     shapes: dict[str, Any]
     names: dict[str, str]
-    patch: dict[str, Any] | None = None
     data: dict[str, bytes] = field(default_factory=dict)  # shape bytes made from live shapes
     # A model's whole document, as the xbf bytes its worker made of it before it retired (the
     # drain): what an export, a snapshot or an inspection of it reads once no worker holds it.
@@ -690,7 +688,6 @@ class Server:
         self.on_hold_end: Callable[[str], None] = lambda _holder: None
         self.provenance = provenance
         self.load_lock = threading.RLock()
-        self.held: dict[str, int] = {}
         self.changed = threading.Condition()
         self.watch_lock = threading.Lock()
         self.watchers: dict[str, int] = {}
@@ -985,22 +982,6 @@ class Server:
             self._changed()
         return evicted
 
-    def versions(self) -> dict[str, str]:
-        """Every served document's id and the version served of it."""
-        with self.load_lock:
-            return {ident: doc.version for ident, doc in self.served.items()}
-
-    def served_keys(self) -> dict[str, list[str]]:
-        """Every served document's id and the keys of the parts it holds: what a build of it
-        changed is what these lack."""
-        with self.load_lock:
-            return {ident: sorted(doc.shapes) for ident, doc in self.served.items()}
-
-    def shape_keys(self) -> list[str]:
-        """The keys of every part whose shape a served document holds."""
-        with self.load_lock:
-            return sorted({key for doc in self.served.values() for key, shape in doc.shapes.items() if shape is not None})
-
     def _read(self, ident: str, path: Path) -> Served:
         if path.suffix.lower() in FOREIGN:
             return self._read_step(ident, path)
@@ -1111,8 +1092,6 @@ class Server:
         with self.load_lock:
             doc = self.served[ident]
             self.used[ident] = next(self.uses)
-            if self.held.get(ident):
-                return doc
             stat = _stat(doc.path)
             if stat is None or stat == doc.stat:
                 return doc
@@ -1157,77 +1136,10 @@ class Server:
                 found.append(ident)
         return found
 
-    def hold(self, documents: list[str]) -> list[str]:
-        """Documents a build is writing (ids or paths): their files are not read again until
-        ``release``. The ids held."""
-        with self.load_lock:
-            held = self._ids(documents)
-            for ident in held:
-                self.held[ident] = self.held.get(ident, 0) + 1
-        return held
-
-    def release(self, held: list[str]) -> None:
-        with self.load_lock:
-            for ident in held:
-                left = self.held.get(ident, 0) - 1
-                if left > 0:
-                    self.held[ident] = left
-                else:
-                    self.held.pop(ident, None)
-        self._changed()
-
     def _changed(self) -> None:
         with self.changed:
             self.generation += 1
             self.changed.notify_all()
-
-    def patch(self, header: dict[str, Any], payload: bytes, arrived: float) -> dict[str, Any] | None:
-        """A worker's document for one served path (see the module docstring): the new
-        structure in place of the old, the buffers it brought held, its shapes kept; every
-        part neither held nor brought is sent to the pool. Returns what it did, or None for
-        a path not served."""
-        started = time.perf_counter()
-        path = document_key(header["path"])
-        ident = file_id(path)
-        if ident not in self.served:
-            return None
-        view = memoryview(payload)
-        at = 0
-        for key, size, unmeshed in header.get("meshes") or []:
-            self.cache.put(key, bytes(view[at:at + size]), {int(o): text for o, text in unmeshed.items()})
-            at += size
-        brought: dict[str, bytes] = {}
-        for key, size in header.get("shapes") or []:
-            brought[key] = bytes(view[at:at + size])
-            at += size
-        structure = header["structure"]
-        mtime, _sep, size = structure["version"].partition("-")
-        with self.load_lock:
-            old = self.served[ident]
-            shapes: dict[str, Any] = {}
-            names: dict[str, str] = {}
-            for prototype in structure["prototypes"]:
-                key = prototype["key"]
-                shapes[key] = brought.get(key) or old.shapes.get(key) or self._shape(key)
-                names[key] = prototype["name"]
-            data = {key: made for key, made in old.data.items() if key in shapes}
-            doc = self.served[ident] = Served(ident, path, structure, (int(mtime), int(size)), shapes, names, None, data)
-            self.used[ident] = next(self.uses)
-            applied = time.perf_counter()
-            doc.patch = {"worker": header.get("timings") or {}, "arrived": arrived, "applied": time.time(),
-                         "seconds": round(applied - started, 4), "meshes": len(header.get("meshes") or []),
-                         "shapes": len(brought), "bytes": len(payload)}
-        self._changed()
-        self._grown(ident)
-        self.prefetch(doc)
-        return doc.patch
-
-    def _shape(self, key: str) -> Any:
-        for doc in self.served.values():
-            found = doc.shapes.get(key)
-            if found is not None:
-                return found
-        return None
 
     def shape_of(self, doc: Served, key: str) -> Any:
         """A part's shape bytes, from the document, or -- for one no process sent -- from
@@ -1365,7 +1277,7 @@ class Server:
                     progress is not None and self.build_of(ident)["progress"] != progress):
                 return doc
             with self.changed:
-                # Woken by a patch, a release or a build's progress; the file is looked at twice a second.
+                # Woken by a document put in place or a build's progress; the file is looked at twice a second.
                 self.changed.wait_for(lambda: self.generation != generation, timeout=min(left, 0.5))
 
     def topology(self, key: str, data: bytes) -> Any:
@@ -1493,7 +1405,7 @@ class Server:
                     doc = self.wait(ident, after, seconds, int(given) if given.isdigit() else None,
                                     page=bool(getattr(handler, "page", False)))
                     build = self.build_of(ident)
-                    return self.json(handler, {"version": doc.version, "patch": doc.patch, **build})
+                    return self.json(handler, {"version": doc.version, **build})
                 doc = self.document(ident)
                 if len(parts) == 3:
                     from cadgen.engine.mesh_format import TESSELLATION

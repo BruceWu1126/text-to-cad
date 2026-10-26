@@ -23,9 +23,9 @@ stdin and its original stdout -- a JSON line and, when it says ``bytes``, that m
 it: ``{"op": "hold", "path", "structure", "meshes": [[key, size]], "bytes"}`` (the structure, then
 the buffers of the parts it lacks) answered ``{"held": {...}}``; ``{"op": "frame", "still"}``
 answered ``{"done": report, "bytes"}`` and the PNG, ``{"refused": why}`` (a request the document
-does not offer, before anything is drawn) or ``{"failed": why}``. When the served document is
-patched -- a build of it, or its file rewritten -- the daemon sends the new version at once, with
-the buffers of the parts the process lacks: the next picture is warm. No timer stops it: it goes
+does not offer, before anything is drawn) or ``{"failed": why}``. A picture of a version the
+process does not hold -- a model built again, a file rewritten -- sends it that version first, with
+the buffers of the parts it lacks (``_sync``): its other parts' shapes are kept. No timer stops it: it goes
 with the daemon, under the workers' memory cap (``CADGEN_ENGINE_WORKER_RSS_MB``, ``worker.rss_cap_mb``),
 which counts its memory with theirs and retires an idle one, least recently drawn first, before any
 worker (``daemon.Pool.shed``, ``Renders.retire``), and after a frame that leaves it alone over that
@@ -789,22 +789,6 @@ class Renders:
         report["timings"] = {**timings, **report.get("timings", {})}
         report["mesh"] = render.meshed
         return data, report
-
-    def patched(self, ident: str) -> None:
-        """A served document (by its id) was patched: its render process, if it has one, is sent
-        the new version now, off the patch's thread, so the next picture is warm."""
-        render = self.processes.get(ident)
-        if render is None or not render.alive():
-            return
-
-        def send() -> None:
-            try:
-                with render.lock:
-                    self._sync(render, self.server.document(ident))
-            except Exception:  # noqa: BLE001 - the next snapshot syncs it again, and says why if it cannot
-                render.version = None
-
-        threading.Thread(target=send, daemon=True).start()
 
     def status(self) -> list[dict[str, Any]]:
         return [{"document": str(render.path), "pid": render.pid, "version": render.version, "held": render.held,

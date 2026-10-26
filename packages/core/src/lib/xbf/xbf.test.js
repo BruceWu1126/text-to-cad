@@ -49,7 +49,7 @@ function engine({ structure = STRUCTURE, parts = {}, version = null, base = "htt
     if (!url.startsWith(`${base}/api/doc/abc123`)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
     const rest = url.slice(`${base}/api/doc/abc123`.length).replace(/\?tessellation=[^&]*$/, "");
     if (rest === "") return new Response(JSON.stringify(structure));
-    if (rest.startsWith("/version")) return new Response(JSON.stringify(version || { version: structure.version, patch: null }));
+    if (rest.startsWith("/version")) return new Response(JSON.stringify(version || { version: structure.version }));
     const part = /^\/part\/([^/]+)$/.exec(rest);
     if (part) return new Response(parts[part[1]] || partBytes(part[1]));
     const fact = /^\/part\/([^/]+)\/(face|edge|vertex)\/(\d+)$/.exec(rest);
@@ -105,7 +105,7 @@ test("a document is its structure and one fetch per part key, however many insta
 test("a document read through the viewer's relay is read under it, every read of it with the fetch it was read with", async () => {
   // The CAD app's page: every request is absolute on its tunnel's placeholder origin.
   const relayed = "http://cad.invalid/__cad/xbf/api/doc/abc123";
-  const { fetch, asked } = engine({ base: "http://cad.invalid/__cad/xbf", version: { version: "9-9", patch: null } });
+  const { fetch, asked } = engine({ base: "http://cad.invalid/__cad/xbf", version: { version: "9-9" } });
   const document = await loadXbfDocument(relayed, { fetch });
   assert.deepEqual(document.source, { url: relayed, origin: "http://cad.invalid", base: "http://cad.invalid/__cad/xbf", doc: "abc123" });
   assert.equal(document.parts.size, 2);
@@ -473,7 +473,7 @@ test("a highlight's screen-space lines are registered with the viewport showing 
 });
 
 test("a sibling draws the same geometry with its own objects; versions and facts are asked of the engine", async () => {
-  const { fetch, asked } = engine({ version: { version: "9-9", patch: { seconds: 0.1 } } });
+  const { fetch, asked } = engine({ version: { version: "9-9" } });
   const document = await loadXbfDocument(URL_BASE, { fetch });
   const scene = createXbfScene(THREE, document);
   scene.setHiddenParts(["i2"]);
@@ -484,15 +484,15 @@ test("a sibling draws the same geometry with its own objects; versions and facts
   assert.deepEqual(sibling.hiddenParts(), ["i2"]);
   sibling.dispose();
   assert.deepEqual(await waitForXbfVersion(URL_BASE, STRUCTURE.version, { fetch, wait: 5 }),
-    { version: "9-9", patch: { seconds: 0.1 }, building: null, failed: null, progress: null });
+    { version: "9-9", building: null, failed: null, progress: null });
   assert.match(asked.at(-1), /\/version\?after=.*&wait=5$/);
   // A build of the document: its stage while it runs, its error once it fails, and the count to wait past.
   const frame = { phase: "body", label: "Building geometry", detail: "peg", done: 1, total: 2, determinate: true };
   const failed = { model: "bracket.py::bracket", error: "ValueError: no peg", progress: frame };
   for (const build of [{ building: frame, failed: null, progress: 3 }, { building: null, failed, progress: 4 }]) {
-    const building = engine({ version: { version: STRUCTURE.version, patch: null, ...build } });
+    const building = engine({ version: { version: STRUCTURE.version, ...build } });
     assert.deepEqual(await waitForXbfVersion(URL_BASE, STRUCTURE.version, { fetch: building.fetch, wait: 5, progress: 2 }),
-      { version: STRUCTURE.version, patch: null, ...build });
+      { version: STRUCTURE.version, ...build });
     assert.match(building.asked.at(-1), /\/version\?after=.*&wait=5&progress=2$/);
   }
   assert.deepEqual(await fetchXbfElementFacts(URL_BASE, PLATE.key, "face", 3, { fetch }), { kind: "face", ordinal: 3, area: 12.5 });

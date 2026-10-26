@@ -204,9 +204,7 @@ class ServedByIdTest(unittest.TestCase):
         self.assertEqual(self.server.put(link, {"version": "two", "prototypes": []}, {}), ident)
         self.assertEqual([row["id"] for row in self.server.listing()], [ident])
         self.assertEqual(canonical(canonical(link)), canonical(link), "a canonical path is its own spelling")
-        held = self.server.hold([str(link)])
-        self.assertEqual(held, [ident], "a build writing the link holds the one document")
-        self.server.release(held)
+        self.assertEqual(self.server._ids([str(link)]), [ident], "a build writing the link names the one document")
 
 
 def setUpModule() -> None:

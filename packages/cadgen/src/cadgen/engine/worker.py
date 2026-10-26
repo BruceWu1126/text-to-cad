@@ -2,17 +2,14 @@
 
 The daemon starts one per script and talks to it over the worker's stdin and its
 original stdout. A request is one JSON object per line: ``{"id", "op": "build", "script",
-"functions", "cwd", "run", "env"}`` (``run``: the calling process's run, ``build.build``; ``env``: its environment, ``adopt``), and, when the daemon serves documents, ``served`` (each served
-document's id and the version served of it), ``served_keys`` (each served document's id and
-the keys of the parts it holds), ``held`` (the geometry keys it holds a mesh for) and
-``shapes`` (the keys it holds a shape for). The answers are frames: a JSON object on one
-line and, when it has ``bytes``, exactly that many bytes after it. A build is answered by
-``{"id", "log"}`` frames while it builds and ``{"id", "progress"}`` frames saying where it is
-(``progress.py``: each stage, and each body a build runs), a ``{"id", "patch", "bytes"}`` frame (below) for
-each served xbf the moment the build has put it in place -- before the build goes on to
-its exports -- one ``{"id", "done", "rssMb"}`` (the build's reports, and the worker's resident
-memory after it, in MiB) or ``{"id", "failed"}`` (with ``kind`` where it is a refusal: ``refusal``),
-and last ``{"id", "settled"}``. What the
+"functions", "cwd", "run", "env"}`` (``run``: the calling process's run, ``build.build``; ``env``: its
+environment, ``adopt``). The answers are frames: a JSON object on one line and, when it has
+``bytes``, exactly that many bytes after it. A build is answered by ``{"id", "log"}`` frames while it
+builds and ``{"id", "progress"}`` frames saying where it is (``progress.py``: each stage, and each
+body a build runs), then one ``{"id", "done", "rssMb"}`` (the build's reports, and the worker's
+resident memory after it, in MiB) or ``{"id", "failed"}`` (with ``kind`` where it is a refusal:
+``refusal``). A file the build writes is sent nowhere: a page serving it as a file reads it from
+the disk, as it reads any file another program wrote. What the
 model prints goes to the worker's stderr, which the daemon passes on. The worker exits when
 its stdin closes: the daemon's pool closes it to retire the worker (``daemon.Pool``). Its first
 frame, ``{"ready": pid, "rssMb"}``, says it is up and its resident memory then.
@@ -27,21 +24,6 @@ element of a document this worker built (``doc``, its id) (``build.made_by``): i
 ``{"id", "where": {...} | null}``, by the thread that reads the requests -- during a
 build too, from the last build that named the document -- so a page asking about an
 element never waits on a build.
-
-A patch is the document as the daemon serves it, made in this process from the tree the
-build saved (``document.tree_structure``), so the daemon never reads the file it was
-saved as: ``patch.path``, ``patch.structure``, ``patch.meshes`` -- ``[key, size,
-unmeshed]`` for each part the build changed: one the served document does not have and
-whose mesh the daemon does not hold, meshed here (``mesh.mesh_shape``, the kernel's face parallelism on) --
-and ``patch.shapes`` -- ``[key, size]`` for each part whose shape the daemon does not
-hold, as ``mesh.shape_bytes``; the payload is the meshes' buffers, then the shapes' bytes,
-in that order. A part is meshed from the very bytes that are sent, so a mesh the daemon
-makes again of it is the same; and they are the part's bytes as its xbf reads back
-(``mesh.shape_bytes``), so a daemon that only read the file meshes the key alike. Only what the build changed is meshed here, and only for a
-document the daemon serves: a build of a document nobody serves meshes nothing, and the
-parts of a served one the build did not change are meshed by the daemon's pool, when they
-are asked for -- the build's answer never waits on a whole document's mesh. Each report
-says how many parts the build meshed (``meshed``).
 
 A worker whose resident memory alone is over the workers' memory cap after a build
 (``CADGEN_ENGINE_WORKER_RSS_MB``, by default a quarter of the machine's memory, which the daemon holds
@@ -67,7 +49,7 @@ this worker built as the engine's cache keeps it (``cache``): the whole document
 (``document.to_bytes``), answered ``{"id", "saved": {"ident", "generation"}, "bytes"}`` and the
 bytes, or ``{"id", "saved": {"ident", "generation", "error"}}``. It is never on the run path: the
 worker does it only when no other request waits (a request that comes meanwhile waits for the one
-serialisation), and it answers no ``done`` or ``settled``. A ``result`` request with ``document``
+serialisation), and it answers no ``done``. A ``result`` request with ``document``
 reads the bytes after its line (the cache's file) as ``export`` does a held document's: its
 structure and shape bytes, as a built document's.
 
@@ -95,11 +77,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable
 
-from cadgen.engine.ids import canonical, file_id
 
-# How long a build waits for the daemon to say it holds a patch before it writes its
-# derived files: the viewer is woken first, unless the daemon is too slow to say so.
-PATCH_WAIT = 30.0
 # How long the worker waits for a next request, once it has answered, before it collects.
 COLLECT_IDLE = 0.5
 # A build on a worker whose kernel is not loaded (a fresh worker, or one that came before the
@@ -109,90 +87,6 @@ COLLECT_IDLE = 0.5
 # it has already looked at takes 2 to 3.
 KERNEL_PATIENCE = 5.0
 KERNEL_NOTICE = "loading the CAD kernel for the first time in this environment, up to a minute"
-# The daemon's word that it holds the patch of a path (``{"op": "patched", "path"}``).
-_PATCHED: dict[str, threading.Event] = {}
-
-
-class Patcher:
-    """One build's patches (see the module docstring): ``saved`` is called the moment the
-    build has put an xbf in place, and returns once the daemon holds the patch -- so the
-    viewer's version has moved before any derived file is written; ``finish`` remembers
-    the build's keys."""
-
-    def __init__(self, request: dict[str, Any], send: Callable[[dict[str, Any], bytes], None], *,
-                 acknowledged: bool = False) -> None:
-        # By document id (``ids.file_id`` of each xbf the daemon serves).
-        self.served = dict(request.get("served") or {})
-        self.held = set(request.get("held") or [])
-        self.served_keys = {ident: set(keys) for ident, keys in (request.get("served_keys") or {}).items()}
-        self.meshed = 0
-        self.have = set(request.get("shapes") or [])
-        self.send = send
-        self.acknowledged = acknowledged
-
-    def saved(self, path: Path, tree: Any) -> None:
-        try:
-            self._patch(Path(canonical(path)), tree)
-        except Exception:  # noqa: BLE001 - without a patch the daemon reads the file
-            traceback.print_exc()
-
-    def _patch(self, path: Path, tree: Any) -> None:
-        from cadgen.engine.export import structure_of
-        from cadgen.engine.mesh import mesh_shape, shape_bytes
-        from cadgen.engine.serve import MESHES
-
-        ident = file_id(path)
-        if ident not in self.served:
-            return
-        stat = path.stat()
-        if self.served[ident] == f"{stat.st_mtime_ns}-{stat.st_size}":
-            return  # the daemon serves this very file
-        clock = time.perf_counter()
-        structure = structure_of(tree, path)
-        made = time.perf_counter()
-        meshes, buffers, shapes, data = [], [], [], []
-        parts = {}
-        for part in tree.parts:
-            parts.setdefault(part.key, part)
-        served = self.served_keys.get(ident, set())
-        for key, part in parts.items():
-            fresh = key not in served and key not in self.held
-            if not fresh and key in self.have:
-                continue
-            shape = shape_bytes(part.shape)
-            if fresh:
-                # The process's one mesh cache: a part this worker meshed for an export is
-                # not meshed again for the viewer, nor the other way round.
-                buffer = MESHES.get(key)
-                if buffer is None:
-                    found = mesh_shape(shape, parallel=True)
-                    buffer = found.to_bytes()
-                    MESHES.put(key, buffer, found.unmeshed)
-                    self.meshed += 1
-                buffers.append(buffer)
-                meshes.append([key, len(buffer), {str(o): text for o, text in (MESHES.unmeshed(key) or {}).items()}])
-                self.held.add(key)
-            if key not in self.have:
-                data.append(shape)
-                shapes.append([key, len(shape)])
-                self.have.add(key)
-        done = time.perf_counter()
-        self.served[ident] = structure["version"]
-        waiting = _PATCHED.setdefault(str(path), threading.Event()) if self.acknowledged else None
-        if waiting is not None:
-            waiting.clear()
-        self.send({"patch": {"path": str(path), "structure": structure, "meshes": meshes, "shapes": shapes,
-                             "timings": {"structure": round(made - clock, 4), "mesh": round(done - made, 4),
-                                         "sent": time.time()}}}, b"".join(buffers + data))
-        if waiting is not None:
-            waiting.wait(PATCH_WAIT)  # the viewer's version moves before a derived file is written
-
-    def finish(self, reports: list[dict[str, Any]]) -> None:
-        """Each report says how many parts this build meshed."""
-        for report in reports:
-            report["meshed"] = self.meshed
-
-
 # --- the worker's memory cap ----------------------------------------------------------------------
 
 
@@ -582,7 +476,6 @@ def main() -> int:
                 protocol.write(payload)
             protocol.flush()
 
-    from cadgen.engine import document
     from cadgen.engine.build import BuildError, build, made_by
     from cadgen.engine.progress import Progress, building
 
@@ -602,9 +495,7 @@ def main() -> int:
                 request = json.loads(line)
                 if request.get("bytes"):
                     request["payload"] = asked.read(int(request["bytes"]))
-                if request.get("op") == "patched":
-                    _PATCHED.setdefault(str(request.get("path")), threading.Event()).set()
-                elif request.get("op") == "where":
+                if request.get("op") == "where":
                     try:
                         found = made_by(request["doc"], request["key"], request["kind"], int(request["ordinal"]))
                     except Exception:  # noqa: BLE001 - a question it cannot answer is answered with nothing
@@ -696,7 +587,6 @@ def main() -> int:
                     return 1
             finally:
                 leave()
-                send({"id": ident, "settled": True, "op": op})
             owed = True
             continue
         if op == "adopt":
@@ -704,11 +594,7 @@ def main() -> int:
             continue
         if op != "build":
             send({"id": ident, "failed": f"unknown request {op!r}"})
-            send({"id": ident, "settled": True, "op": op})
             continue
-        patcher = Patcher(request, lambda message, payload: send({"id": ident, **message}, payload),
-                          acknowledged=bool(request.get("acknowledged")))
-        document.SAVED_LISTENERS.append(patcher.saved)
         try:
             adopt(request.get("env"), own)
             cwd = request.get("cwd")
@@ -724,7 +610,6 @@ def main() -> int:
                                 verify=bool(request.get("verify")), profile=bool(request.get("profile")),
                                 run=request.get("run"), cache=request.get("cache"))
             said.attach(reports)
-            patcher.finish(reports)
             resident = resident_after_build()
             retirement(reports, resident)  # said in its reports: the daemon drains it, then retires it
             # Its memory now, which the daemon's status shows (``rssMb``).
@@ -737,8 +622,6 @@ def main() -> int:
                 return 1
         finally:
             leave()
-            document.SAVED_LISTENERS.remove(patcher.saved)
-            send({"id": ident, "settled": True})
         owed = True  # answered: the cycles the build left, collected once idle
     return 0
 

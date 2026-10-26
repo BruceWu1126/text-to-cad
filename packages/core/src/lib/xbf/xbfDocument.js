@@ -190,10 +190,10 @@ export async function loadXbfDocument(source, { previous = null, fetch: fetchImp
 
 /**
  * Wait on the engine for a version of the document other than `after`: the engine answers at
- * once when it has one, else when a build's patch lands, else after `wait` seconds with the
- * same version. Given `progress` (the count of the document's build last heard), it answers too
+ * once when it has one, else when one comes (a model built again, a file's bytes rewritten), else
+ * after `wait` seconds with the same version. Given `progress` (the count of the document's build last heard), it answers too
  * when that count moves: a build writing the document reports its stage, or fails.
- * @returns {Promise<{ version: string, patch: object | null, building: object | null,
+ * @returns {Promise<{ version: string, building: object | null,
  *   failed: { model?: string, error?: string, progress?: object | null } | null, progress: number | null }>}
  *   `building`: the last progress frame of the build writing the document now (`progress.py`'s);
  *   `failed`: the last build of it that failed, until one succeeds or another begins; `progress`:
@@ -205,7 +205,7 @@ export async function waitForXbfVersion(source, after, { wait = XBF_VERSION_WAIT
   const query = `after=${encodeURIComponent(after || "")}&wait=${encodeURIComponent(wait)}${counted}`;
   const answer = await getJson(fetchImpl, `${where.url}/version?${query}`, "the document's version", signal);
   const record = value => (value && typeof value === "object" && !Array.isArray(value) ? value : null);
-  return { version: String(answer?.version || ""), patch: answer?.patch || null, building: record(answer?.building),
+  return { version: String(answer?.version || ""), building: record(answer?.building),
     failed: record(answer?.failed), progress: Number.isInteger(answer?.progress) ? answer.progress : null };
 }
 

@@ -76,9 +76,6 @@ _XCAF_LOCK = threading.RLock()
 # The last document ``to_xcaf`` made and its tree; per path, the tree last saved there.
 _MADE: list = []
 _SAVED: dict[Path, "Tree"] = {}
-# Called with (path, tree) the moment ``save`` has put a new file in place: a worker sends
-# the document on before the build goes on to its exports.
-SAVED_LISTENERS: list = []
 
 
 @dataclass
@@ -1148,17 +1145,13 @@ def _apart(shape: Any) -> Any:
 def write_bytes(path: Path, data: bytes, tree: "Tree | None" = None) -> tuple[bool, int]:
     """A document's xbf bytes (``to_bytes``: the bytes ``save`` writes) at ``path``, landed whole
     and only where the file does not hold them already (``atomic_replace.put``). ``tree``, the tree
-    the document was made from, is remembered as the one at ``path`` (``saved``) and, when the file
-    is written, told to ``SAVED_LISTENERS`` as ``save`` tells it. Returns whether the file was
-    written, and its size."""
+    the document was made from, is remembered as the one at ``path`` (``saved``). Returns whether
+    the file was written, and its size."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if tree is not None:
         _SAVED[path.resolve()] = tree
     written, _size = put(path, lambda temporary: temporary.write_bytes(data))
-    if written and tree is not None:
-        for listener in list(SAVED_LISTENERS):
-            listener(path.resolve(), tree)
     return written, len(data)
 
 
@@ -1189,13 +1182,7 @@ def save(doc: Any, path: Path, *, compare: bool, tree: "Tree | None" = None) -> 
             raise OSError(f"could not save {path}: {status}")
         _fix_date(temporary)
 
-    fresh, size = put(path, write, compare=compare, staged=path.with_suffix(".xbf").name)
-    if not fresh:
-        return False, size
-    if tree is not None:
-        for listener in list(SAVED_LISTENERS):
-            listener(path.resolve(), tree)
-    return True, size
+    return put(path, write, compare=compare, staged=path.with_suffix(".xbf").name)
 
 
 # The creation date the BinXCAF storage driver writes in the file's info section, the

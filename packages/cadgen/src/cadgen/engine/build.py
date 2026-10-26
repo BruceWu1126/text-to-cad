@@ -770,8 +770,7 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
 def _outputs(plan: list, report: dict[str, Any], log: Callable[[str], None],
              save: Callable[[Path], tuple[bool, int]], source: Callable[[], Any], kept: bool = False) -> None:
     """A model's declared files, each exactly an export of its document appended to the run: the xbf
-    first (``save``: the document's own bytes, and the viewer woken with it, before any derived file
-    is written), then each derived file translated from the document (``source``:
+    first (``save``: the document's own bytes), then each derived file translated from the document (``source``:
     ``export.translate``) -- every one landed only where the file does not hold its bytes already
     (``atomic_replace.put``), as ``cadgen export`` writes. Nothing remembers what was written: every
     run that reaches a declared file translates it and compares, so a file someone deleted or edited

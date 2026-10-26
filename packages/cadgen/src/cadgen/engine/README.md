@@ -317,7 +317,7 @@ holds; `GET /api/doc/<id>` takes it, and a document served at a pose is `<id>~<d
 daemon keys by it the worker that built each model document (`builders`, from which `connected`
 asks the server's watched ids; a file the build wrote is no key there) and the live models' book
 (`models.py`); a worker keys by it what its builds named (`build._BUILT`, which `made_by` answers
-from) and the served documents it patches.
+from).
 The worker pool alone is keyed otherwise: by the canonical path of the script a worker runs, a
 process's key, not a document's.
 
@@ -1021,7 +1021,9 @@ edited is written again from the document with nothing run. Nothing is recorded 
 written, and nothing records which model wrote a file: an exported or declared file on disk is a
 plain file to every surface. A verb given its path reads the file, in the documents worker, never
 the document of the model whose build wrote it (`Daemon._routed`), and the engine lists a model that
-declares files like any other.
+declares files like any other. A page given its path serves it as it serves any file: its version
+is the file's, it is read again when the file's bytes change (**The page's route**), and it names no
+model -- no `made_by`, no worker kept warm, and nothing of a run sent to it.
 
 **The last run.** A document is what its model's last run made, and that is all the engine knows
 of the code: it never compares a script, a module or an input file on disk with what a build read,
@@ -1183,13 +1185,16 @@ Each model's report holds its last frame (`progress`), so a failed build
 says where it was; a worker that dies during a build fails it with where it was in the words.
 
 **The page's route.** `GET /api/doc/<id>/version?after=V&progress=N&wait=S` answers
-`{"version", "patch", "building", "failed", "progress"}` once the version is not `V`, or the
+`{"version", "building", "failed", "progress"}` once the version is not `V`, or the
 count `progress` is not `N`, or after `S` seconds (60 at most); without `progress=` it waits on
 the version alone. `building` is the last frame of the build writing the document now, null when
 none is; `failed` is the last build of it that failed, `{"model", "error", "progress"}` -- its
 error, and its last frame -- null once another begins or one succeeds; `progress` is a count that
 moves whenever either does. A page sends back the last answer's `progress`, so each frame and the
-build's end wake it, and nothing polls.
+build's end wake it, and nothing polls. A file's version is its modification time and size: the
+server looks at them each time the file is asked for and at least twice a second while a page waits on it,
+and reads the file again when they changed -- whatever program wrote it, a model's run writing the
+xbf it declares among them: no run sends a file's page anything (**Document lifetime**).
 
 ## The viewer and the snapshot
 
@@ -1294,10 +1299,10 @@ scene made), and the annotation's ink and the measurements are drawn over the pi
 for gets a render process of its own, started on its first picture and holding the document --
 each part's buffer from the daemon's one mesh cache (nothing meshed again), its OCCT shapes, a
 scene and its presentations on a hidden OpenGL context: a picture of it is a frame of that
-process, answered as PNG bytes that the verb writes to OUT (tom: about a tenth of a second). When
-the served document is patched -- a build of it, or its file rewritten -- the process is sent the
-new version at once with the buffers of the parts it lacks: the parts it shares with the last keep
-their shapes, the new ones are made, and its scene is made again before any picture asks. It goes
+process, answered as PNG bytes that the verb writes to OUT (tom: about a tenth of a second). A
+picture of a version the process does not hold -- a model built again, a file rewritten -- sends
+it that version first, with the buffers of the parts it lacks: the parts it shares with the last
+keep their shapes, the new ones are made, and its scene is made again. It goes
 with the daemon, and after a picture that leaves it over the workers' memory cap it says so
 (`retired`) and exits. `daemon=False`, and a model's own document in its worker, draw in that
 process. The context is a hidden window: Cocoa on macOS, an X server's (Xvfb on a machine with no
@@ -1549,8 +1554,8 @@ child whose file cannot be written fails the build. A part is written free
 (`document.unchecked`): OCCT marks a shape put in a compound as no longer free, which would
 make a child's part, placed in its caller's assembly, other bytes than its own build's.
 
-The xbf is saved first and the viewer woken with it: the worker waits for the daemon to hold
-the patch (`{"op": "patched"}` on its pipe) before it writes a derived file.
+The xbf is saved first, then each derived file. Nothing of them is sent to a page: one serving
+a declared file follows that file's bytes (**Document lifetime**).
 
 **Functions** (`api`, also `cadgen.export`, `cadgen.snapshot` and `cadgen.inspect`; `serve`,
 `status`, `stop`, `delete` and `server` only the CLI calls): one per command, each through the daemon. No function builds source text;
@@ -2124,14 +2129,8 @@ document served at that pose, its `kinematics.pose` the values it stands at.
 snapshot**), the same for every document; `GET /api/look/environment` is its environment, the
 Radiance image `render/studio.hdr`.
 `GET /api/doc/<id>/version?after=V&wait=S` answers as soon as the version is not
-`V` (or after `S` seconds, at most 60): the page waits on it, so a build's patch
-reaches it at once. The answer carries the patch's timings.
-
-Between the worker and the daemon a patch is one frame on the worker's pipe: a
-JSON line `{"id", "patch": {"path", "structure", "meshes": [[key, size,
-unmeshed]], "shapes": [[key, size]], "timings"}, "bytes": N}`, then exactly `N`
-bytes: the meshes' buffers, then the shapes' binary shape bytes, in the order
-listed.
+`V` (or after `S` seconds, at most 60): the page waits on it, so a model's new build,
+or a file's new bytes, reaches it at once.
 
 `GET /api/doc/<id>/part/<key>` returns one part's buffer. A client reads it
 with typed-array views, without parsing. It is sent immutable, so a page asks

@@ -603,8 +603,8 @@ if __name__ == "__main__":
 
 class DaemonRenderTest(unittest.TestCase):
     """`cadgen snapshot` drawn by OCCT through the daemon: a render process per served
-    document, warm from its second picture, sent each build's patch with only the parts it
-    lacks, gone with the daemon; and in this process with ``daemon=False`` from Python. Nothing is written but
+    document, warm from its second picture, sent its file's new version by the next picture with
+    only the parts it lacks, gone with the daemon; and in this process with ``daemon=False`` from Python. Nothing is written but
     the pictures, and the daemon's door, lock and clients' pipes."""
 
     def setUp(self) -> None:
@@ -645,21 +645,12 @@ class DaemonRenderTest(unittest.TestCase):
         warm = self.snapshot("warm.png")
         self.assertEqual(warm["process"]["pid"], pid)
         self.assertFalse({"meshMs", "holdMs", "sceneMs"} & set(warm["timings"]), warm["timings"])
-        self.build(14)  # the worker's patch reaches the render process: the new part alone
+        self.build(14)  # the file is rewritten: the next picture reads it, and makes the new part alone
         version = f"{(self.folder / 'XBF/pair.xbf').stat().st_mtime_ns}-{(self.folder / 'XBF/pair.xbf').stat().st_size}"
-        deadline = time.monotonic() + 60
-        seen: list[list[dict]] = []  # each render listing while waiting: what a missed patch leaves to read
-        while time.monotonic() < deadline and not (seen and seen[-1] and seen[-1][0]["version"] == version):
-            seen.append(self.renders())
-            time.sleep(0.1)
-        self.assertTrue(seen[-1] and seen[-1][0]["version"] == version,
-                        f"the patch to {version} did not reach the render process: first listing {seen[0]}, last "
-                        f"listed {next((s for s in reversed(seen) if s), None)}, last {seen[-1]}")
-        render = seen[-1][0]
-        self.assertEqual((render["version"], render["held"]["made"], render["held"]["kept"]), (version, 1, 1))
         edited = self.snapshot("edited.png")
-        self.assertEqual(edited["process"]["pid"], pid, "the same process, patched")
-        self.assertFalse({"meshMs", "holdMs", "sceneMs"} & set(edited["timings"]), "patched before it was asked")
+        self.assertEqual(edited["process"]["pid"], pid, "the same process, sent the file's new version")
+        [render] = self.renders()
+        self.assertEqual((render["version"], render["held"]["made"], render["held"]["kept"]), (version, 1, 1))
         self.assertNotEqual((self.folder / "edited.png").read_bytes(), (self.folder / "first.png").read_bytes())
         # A model, by its id, is drawn from the document its worker holds, in that worker.
         from cadgen.engine.ids import model_id
