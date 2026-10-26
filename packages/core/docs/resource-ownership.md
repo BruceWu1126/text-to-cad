@@ -88,12 +88,11 @@ cannot change the assembly's framing or hide the real parts.
 ### Instancing and culling
 
 Repeated compatible opaque surfaces share instanced draws and retain
-occurrence identity; mirrors, transparency and deformation use explicit
-fallback paths.
+occurrence identity; mirrors and transparency use explicit fallback paths.
 
 Later publications of the same model retain compatible surface instance sets and
 their original occurrence slots. Only changed membership or render passes replace those sets;
-selected, hidden and deformed occurrences keep inactive slots until eligible
+selected and hidden occurrences keep inactive slots until eligible
 again. Transform passes reuse each mesh's matrix while observing mutable
 source transforms and effect matrices on every update.
 

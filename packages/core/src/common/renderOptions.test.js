@@ -313,9 +313,6 @@ test("macro views fit visible occurrences without collapsing depth inside an ass
       const projected = point.applyMatrix4(records[0].effectMatrix).project(camera);
       assert.ok(projected.z > -1 && projected.z < 1);
     }
-    records[0].tubeSkinState = { active: true };
-    fitCameraDepthToBounds(camera, bounds, { placedObjects: records });
-    assertClose(camera.near, aggregateNear, 1e-8 * scale);
   }
 });
 
@@ -326,11 +323,11 @@ test("a perspective closeup with nothing to fit on keeps near at a fraction of t
     camera.position.set(0, -20 * scale, 15 * scale); camera.lookAt(0, 0, 10 * scale);
     const pivot = new THREE.Vector3(0, 0, 10 * scale);
     const pivotDepth = camera.position.distanceTo(pivot);
-    // The camera stands inside a part's own box, and a routine deforms another: the closeup
+    // The camera stands inside a part's own box, and another has no bounds: the closeup
     // fit has nothing to go on and near falls to the radius safety floor.
     const records = [
       { partBounds: { min: [-5 * scale, -25 * scale, 0], max: [5 * scale, 5 * scale, 20 * scale] } },
-      { partBounds: { min: [-2 * scale, -2 * scale, 9 * scale], max: [2 * scale, 2 * scale, 11 * scale] }, tubeSkinState: { active: true } }
+      { partBounds: null }
     ];
     fitCameraDepthToBounds(camera, bounds, { placedObjects: records });
     const collapsed = camera.near;

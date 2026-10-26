@@ -10,7 +10,6 @@ import {
   normalizeAnimationClips
 } from "./animationRuntime.js";
 import { animationClipList } from "./animationClock.js";
-import { tubeSkinsFixture } from "./__tests__/tubeSkinsFixture.js";
 
 // Keyframes written by hand, the way cadgen bakes them: a transform key is
 // [d, q, d', q'], the track's pivot moved by d while the part turns by q about it,
@@ -82,24 +81,8 @@ test("a sidecar's clips load as they are, and a sidecar with none loads as null"
   const swing = { id: "swing", label: "Swing", duration: 4, loop: true, tracks: [transformTrack([0], [key([0, 0, 0], 0)])] };
   const { clips } = await loadSourceAnimation({ animation: { clips: [swing] } });
   assert.deepEqual(clips, { swing: { ...swing, order: 0 } });
-  assert.notEqual(clips.swing.tracks[0], swing.tracks[0], "what a load attaches never reaches the sidecar");
+  assert.notEqual(clips.swing.tracks[0], swing.tracks[0], "a load copies the tracks it reads, so the sidecar is never touched");
   await assert.rejects(loadSourceAnimation({ animation: { clips: [swing] } }, { signal: AbortSignal.abort() }), { name: "AbortError" });
-});
-
-test("a clip that bends a tube plays cadgen's skins for it, read once at load", async () => {
-  const { animation, buffer } = tubeSkinsFixture();
-  const reads = [];
-  const resources = { readBytes: async (url) => { reads.push(url); return buffer; } };
-  const { clips } = await loadSourceAnimation({ animation }, { tubeSkinsUrl: "/__cad/tube-skins?file=cord.step", resources });
-  assert.deepEqual(reads, ["/__cad/tube-skins?file=cord.step"]);
-  const [track] = clips.curl.tracks;
-  assert.equal(track.skin.joints, 11);
-  // Each target is posed between the two keys either side of the time.
-  const tube = at(clips.curl, 0.55).deformations.get("o1.1");
-  assert.equal(tube.binding, track.skin.byOccurrence.get("o1.1"));
-  assert.equal(tube.index, 5);
-  assert.ok(Math.abs(tube.u - 0.5) < 1e-9, String(tube.u));
-  await assert.rejects(loadSourceAnimation({ animation }), /bends a tube, and no tube skins were named for it/);
 });
 
 test("between keys every component follows glTF's cubic curve through the keys and their rates", () => {
@@ -158,7 +141,7 @@ function through(matrix, point) {
   return new THREE.Vector3(...point).applyMatrix4(matrix).toArray().map((v) => Math.round(v * 1e6) / 1e6);
 }
 
-const frame = ({ matrices = [], styles = [] } = {}) => ({ matrices: new Map(matrices), styles: new Map(styles), deformations: new Map() });
+const frame = ({ matrices = [], styles = [] } = {}) => ({ matrices: new Map(matrices), styles: new Map(styles) });
 
 test("frame effects premultiply onto an existing pose matrix", () => {
   // Pose put the part at x=10; the clip then orbits the origin by 90deg. The

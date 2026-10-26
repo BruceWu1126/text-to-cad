@@ -1,12 +1,10 @@
-import { attachTubeSkins, decodeTubeSkins, tubeSkinPose } from "./tubeSkin.js";
-
 // The choreography half: play the clips a document's sidecar carries. A clip is
 // KEYFRAMES that cadgen baked when its model built (cadgen.clip in Python, keyed by
 // cadgen/_internal/animation_bake.py, which validated them); this module plays
 // them the way a glTF player plays its samplers, and works nothing else out.
 // It runs no model code, and knows nothing of mates, DOFs, presets, or the Pose
-// tab: it pushes matrices, styles and tube poses through the same effect records
-// the viewer already composes.
+// tab: it pushes matrices and styles through the same effect records the viewer
+// already composes.
 //
 // The section is {clips: [clip, ...]} in the model's declared order; a clip is
 // {id, label, duration, loop, tracks}. A track drives ONE channel of the
@@ -19,17 +17,13 @@ import { attachTubeSkins, decodeTubeSkins, tubeSkinPose } from "./tubeSkin.js";
 //              and q is normalized.
 //   opacity    0..1, or null for the material's own; lerps between numbers.
 //   visible    true, false, or null for the rest state; held.
-//   tube       a key cadgen poses as the joints of a skin. The joints, and the tube
-//              bound to them, are cadgen's tube skins (`tubeSkin.js`), which this
-//              loads with the clips; between keys the joints blend as glTF's LINEAR
-//              sampler blends them (lerp, slerp), and the tube skins between them.
 // Every evaluation starts from rest: a clip is a pure function of t, so scrub,
 // loop and seek are free.
 
 /** The clips of an animation section, by id. `order` is each clip's place in the
  * model's declaration (the first is the one a viewer opens on): an object lists
  * integer-like keys first, whatever order they were added in. Tracks are copied, so
- * what a load attaches to them never reaches the sidecar they came from. */
+ * nothing done to them reaches the sidecar they came from. */
 export function normalizeAnimationClips(block) {
   const clips = {};
   for (const [order, clip] of (block?.clips || []).entries()) {
@@ -46,32 +40,11 @@ export function isAnimationClip(clip) {
   return Array.isArray(clip?.tracks);
 }
 
-async function readBytes(url, { signal, resources }) {
-  if (resources) return resources.readBytes(url, { signal });
-  const response = await fetch(url, { signal });
-  if (!response.ok) {
-    throw new Error(`Failed to load the tube skins: HTTP ${response.status}`);
-  }
-  return response.arrayBuffer();
-}
-
-/** Load a sidecar's clips: `{clips}`, or null when it declares none. A clip that
- * bends a tube plays cadgen's skins for it, read here from `tubeSkinsUrl` (the
- * host names it: the catalog's `tubeSkinsUrl`, a snapshot job's), so evaluation
- * stays synchronous and a bending tube has no first frame at rest. */
-export async function loadSourceAnimation(sidecar, { signal, tubeSkinsUrl = "", resources } = {}) {
+/** Load a sidecar's clips: `{clips}`, or null when it declares none. */
+export async function loadSourceAnimation(sidecar, { signal } = {}) {
   signal?.throwIfAborted();
   if (!sidecar?.animation?.clips?.length) return null;
-  const clips = normalizeAnimationClips(sidecar.animation);
-  if (Object.values(clips).some((clip) => clip.tracks.some((track) => track.tube))) {
-    if (!tubeSkinsUrl) {
-      throw new Error("this model's animation bends a tube, and no tube skins were named for it");
-    }
-    const skins = decodeTubeSkins(await readBytes(tubeSkinsUrl, { signal, resources }));
-    signal?.throwIfAborted();
-    attachTubeSkins(clips, skins);
-  }
-  return { clips };
+  return { clips: normalizeAnimationClips(sidecar.animation) };
 }
 
 // (index of the key at or before t, fraction of the way to the next key)
@@ -113,7 +86,7 @@ function transformAt(THREE, track, index, u) {
 
 const lerp = (a, b, u) => a + (b - a) * u;
 
-/** Evaluate one clip at time t: `{matrices, styles, deformations}`, each keyed by
+/** Evaluate one clip at time t: `{matrices, styles}`, each keyed by
  * occurrence id. A looping clip wraps t; one that does not holds its end. */
 export function evaluateAnimationClip(THREE, clip, t) {
   const duration = clip.duration || 1;
@@ -121,7 +94,6 @@ export function evaluateAnimationClip(THREE, clip, t) {
   localT = clip.loop !== false ? localT % duration : Math.min(localT, duration);
   const matrices = new Map();
   const styles = new Map();
-  const deformations = new Map();
   const style = (id, key, value) => {
     const current = styles.get(id) || {};
     current[key] = value;
@@ -142,14 +114,9 @@ export function evaluateAnimationClip(THREE, clip, t) {
       const value = track.visible[index];
       if (value === null) continue;
       for (const id of track.targets) style(id, "visible", value);
-    } else if (track.tube) {
-      for (const id of track.targets) {
-        const pose = tubeSkinPose(track, id, index, u);
-        if (pose) deformations.set(id, pose);
-      }
     }
   }
-  return { matrices, styles, deformations };
+  return { matrices, styles };
 }
 
 // Merge an evaluated frame into the viewer's per-part effect records — the same
@@ -187,10 +154,6 @@ export function applyAnimationFrameToEffects(THREE, effectsByPartId, frame) {
       ? new THREE.Matrix4().multiplyMatrices(matrix, effect.matrix)
       : matrix.clone();
     transformCount += 1;
-  }
-  for (const [partId, deformation] of frame.deformations || []) {
-    const effect = ensureEffect(partId);
-    if (effect) { effect.deformation = deformation; transformCount += 1; }
   }
   for (const [partId, style] of frame.styles || []) {
     const effect = ensureEffect(partId);

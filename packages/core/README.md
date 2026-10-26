@@ -74,13 +74,11 @@ protocol relationship never imports Python or discovers an interpreter.
   `{clips: [{id, label, duration, loop, tracks}, ...]}`, which cadgen bakes
   from the model's Python clips when it builds, as a glTF player plays its
   samplers (a transform's keys CUBICSPLINE). Each track drives one channel
-  (transform, opacity, visible or tube) of the document occurrence ids it
+  (transform, opacity or visible) of the document occurrence ids it
   lists; an evaluation is a pure function of t, so scrub, loop and seek are
   free. It runs no model code, resolves no names and checks nothing cadgen
   checked. Neither half references the other; they meet only in the effect
-  records. A bending tube plays cadgen's [tube skins](docs/tube-skins.md):
-  joints along its centerline, blended between keys, its mesh skinned to them
-  in that same shared effects pass.
+  records.
 - **One scene builder per file family, two callers**: a GLB, an STL or 3MF, a
   robot description (URDF, SRDF, SDF) and an engine document (an `.xbf`, or a STEP,
   which opens as one) are each drawn by ONE builder here
@@ -134,9 +132,8 @@ src/
                    #   source (render-source loading), sceneSettings (shared
                    #   CAD/Render contract), camera, themeSettings internals,
                    #   displaySettings
-  lib/             # subsystems: parts/ (a stored mesh's codec), selectors/
-                   #   (ref runtime), assembly/ (package composition),
-                   #   render/ (format mesh loaders; the GLB and mesh scene
+  lib/             # subsystems: selectors/ (ref runtime), assembly/
+                   #   (package composition), render/ (format mesh loaders; the GLB and mesh scene
                    #   builders), viewer/ (exploded view, part visual state,
                    #   the surface look, the scene contract), urdf/ (a robot
                    #   payload's meshes loaded; the robot parts and scene
@@ -164,7 +161,6 @@ Where the mechanism is written:
 |---|---|
 | [docs/render-pipeline.md](docs/render-pipeline.md) | The staged pipeline (`buildModel` → `renderModel` → `captureModel`), the unified display state, the two lighting recipes, the photographic rig, display modes, CAD edges and per-component geometry sharing |
 | [docs/resource-ownership.md](docs/resource-ownership.md) | Ownership and disposal, the selector/BVH demand boundary, recomposition and instancing reuse, the decode worker pool, part-store admission |
-| [docs/tube-skins.md](docs/tube-skins.md) | Playing cadgen's tube skins: the payload, joint blending, GPU and CPU skinning, edges and bounds |
 
 ## Public modules and lifetimes
 

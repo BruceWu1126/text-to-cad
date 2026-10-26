@@ -357,8 +357,8 @@ plane and bounds independently of Floor. Otherwise the subject's near plane
 clips foreground guides, or the far plane truncates their finite span. A
 perspective camera passes its `pivot` (the point it looks at): its near plane
 never comes nearer than 1/256 of the pivot's depth, so a closeup the fit cannot
-measure (the camera inside a part's own box, or a routine deforming what it
-measures) keeps its depth resolution instead of making close surfaces fight.
+measure (the camera inside a part's own box, or a part with no bounds to
+measure) keeps its depth resolution instead of making close surfaces fight.
 Snapshots draw every preset the same way: ordinary depth, fitted to each output
 with the same inputs (its placed records, the studio floor's elevation, the
 drawn grid's span and the camera's target as pivot). A logarithmic buffer would
@@ -482,10 +482,9 @@ and Color by part policy without app state.
 (copied out of the decoded GLB body's one buffer, its u16 indices widened to
 u32) and is never expanded per triangle corner.
 
-**CAD edges are not a surface shader.** `partMeshData.js` emits indexed line
-segments (`cadEdgePositions` + `cadEdgeIndices` + `cadEdgeClassRanges`, from
-the same mesh's edge table and points, ~1.5 bytes per surface triangle)
-and `cadScene.js` draws them as ONE instanced screen-space line draw per
+**CAD edges are not a surface shader.** A component's `meshData` carries
+indexed line segments (`cadEdgePositions` + `cadEdgeIndices` +
+`cadEdgeClassRanges`, ~1.5 bytes per surface triangle) and `cadScene.js` draws them as ONE instanced screen-space line draw per
 component (`cadEdgeInstances.js`): the instances are every (segment,
 occurrence) pair, decoded in the vertex shader from a per-component segment
 texture (32 B per drawn segment, cached on the component) and a per-set
@@ -526,11 +525,7 @@ Per-occurrence highlight, dim, hide, focus, exploded placement and selection
 are slots in that texture, written by the same record passes
 (`applyDisplayRecordTransform`, `applyPartVisualState`,
 `syncRecordEdgeMaterials`) that drive a plain line object; highlighted
-occurrences draw in a second pass at the highlight render order. A deformed
-tube leaves its slot for private screen-space lines, one per drawn class, that
-bend with the surface and preserve the same class weights and colours.
-Basic-only hosts use separate per-class materials too, so appearance changes
-retain private edge geometry and cannot recolour another scene's component.
+occurrences draw in a second pass at the highlight render order.
 GPU cost per component: two textures, one 4-vertex quad, two materials, one
 draw call (+1 while any occurrence is highlighted).
 
@@ -540,11 +535,10 @@ on the component object (`part.sourceMesh`), never on the composed package
 occurrence and publish reuses the one upload. A publish of the
 same model reaches the live scene through `api.update({ source })`, which
 reconciles records by occurrence id — records already on screen keep their
-mesh, materials, visual and deformation state and BVH; only new occurrences are
+mesh, materials, visual state and BVH; only new occurrences are
 built and only departed ones disposed (ownership and disposal:
-[resource-ownership.md](resource-ownership.md)). Effects that change vertex
-positions or normals acquire writable attributes before deforming them;
-material refreshes leave component data unchanged. This keeps large assemblies
+[resource-ownership.md](resource-ownership.md)). Material refreshes leave
+component data unchanged. This keeps large assemblies
 from duplicating these buffers for display. Assemblies keep geometry in their
 component buffers; they allocate no combined copy of all positions, normals and
 indices. Rendering visits the placed components directly, and
