@@ -705,14 +705,21 @@ class CadApp:
         return {"notice": updates.notice()}
 
     def _report_activity(self, payload: dict) -> None:
-        """What the page did: a person touched it (``touched``), a Quick Edit was sent (``quickEdit``), or
-        the page crashed (``crash``: its signature, made by the page as ``cadgen.analytics.signature``
-        makes one, and taken only if it is one). Noted in memory, and sent only with consent. (A model it
-        shows is counted when it joins the library: ``_change_recents``.)"""
+        """What the page did: a person touched it (``touched``), a Quick Edit was sent (``quickEdit``), used its
+        controls (``controls``: each ``{control, count, seconds}``, a name of ``cadgen.analytics.CONTROLS`` and
+        how often and how long, taken only as that), or the page crashed (``crash``: its signature, made by the
+        page as ``cadgen.analytics.signature`` makes one, and taken only if it is one). Noted in memory, and sent
+        only with consent. (A model it shows is counted when it joins the library: ``_change_recents``.)"""
+        from cadgen.analytics import CONTROLS
+
         if payload.get("touched") is True:
             self.analytics.viewed()
         if payload.get("quickEdit") is True:
             self.analytics.used("quick_edit")
+        controls = payload.get("controls")
+        for entry in controls[:len(CONTROLS)] if isinstance(controls, list) else ():
+            if isinstance(entry, dict) and set(entry) <= {"control", "count", "seconds"}:
+                self.analytics.controlled(entry.get("control"), entry.get("count"), entry.get("seconds", 0))
         crash = payload.get("crash")
         if isinstance(crash, dict) and crash.get("where") == "page":
             self.analytics.crashed(crash)

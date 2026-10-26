@@ -40,6 +40,11 @@ exits, each batch under an id of its own and stamped with the time it was made:
   (``FEATURES``);
 - ``health`` (the engine's daemon, told by the verb it answered): warm workers started, crashed and
   retired (``refusals``, builds refused for want of memory, is always 0: nothing is refused);
+- ``control`` (the apps, told by their pages): how many times a person used each of a CAD view's controls
+  (``CONTROLS``: a tool, a tool's mode or setting, a Display or Preview setting, a menu item, a button), and
+  for a tool that stays on (the tool in hand, Preview) the whole seconds it was on -- a name of the page's
+  closed list, never a value typed, a setting's value (unless that is a name of the list: a render mode,
+  an axis) or anything of the file's;
 - ``exception``: a crash in cadgen's own code (``signature``), and how many times it happened that
   window -- where (``WHERE``), the error's type, whether the process went on, and its innermost frames
   in code that may be named: each a file inside cadgen, the standard library or one of cadgen's
@@ -144,16 +149,19 @@ from cadgen.settings import read_section, settings_path, update_section
 LOG = logging.getLogger("cadgen.analytics")
 
 PRIVACY_URL = "https://www.texttocad.dev/privacy-policy"
-# 6: the engine's documents (kind ``xbf``) and a command's sender (process ``cli``); 5: why builds and snapshots
+# 7: the controls a person used in a CAD view (``control``), and room for one event each (``MAX_EVENTS``); 6: the
+# engine's documents (kind ``xbf``) and a command's sender (process ``cli``); 5: why builds and snapshots
 # failed, and each batch's id and time; 4: why tool calls failed; 3: the old build daemon's counts, and files as
 # numbers; 2: the install's channel replaced `source`
-SCHEMA = 6
+SCHEMA = 7
 # What a yes agreed to: the fields and events this module sends. Raise it when that grows, and a yes
 # to less counts as no answer again; a no stays a no. Restarts and updates that send nothing new keep
 # the answer: it lives in the person's state directory, not the install. Neither schema 4, 5 nor 6 raised it
 # (nor ``NOTICE``): each says more of what was told already -- why a counted call, build or snapshot failed,
 # in a word of ours; one more format; one more of cadgen's processes sending what commands counted, which
-# the daemon sent before -- and a batch's random id and time link nothing its process's id did not.
+# the daemon sent before -- and a batch's random id and time link nothing its process's id did not. Nor schema 7:
+# which of a view's controls a person used, and how long a tool was in hand, is the use a view already counted
+# (``view``, ``feature``'s Quick Edit) told apart by control, under the same install and process ids.
 DISCLOSURE = 1
 # What the notice told (``notify``): what is sent by default, without a yes. Raise it when that grows,
 # and the next ``cadgen`` command says it again; nothing is sent by default until it has.
@@ -265,6 +273,49 @@ SNAPSHOT_FAILURES = frozenset({"bad_request", "no_file", "input_error", "browser
 # exports (``@stl``, ``@glb``, ``@threemf``), a snapshot (or an engine export) that posed joints or played an
 # animation, an engineering drawing (``@eng_drawing``), and a CAD view's Quick Edit sending its prompt.
 FEATURES = frozenset({"assembly", "declared_mesh", "kinematics", "animation", "drawing", "quick_edit"})
+# What a person used in a CAD view, as its page names it (``@text-to-cad/ui``'s ``usage/controls.js``; the
+# receiver's ``CONTROLS``): the strip's tools and Preview, each a mode that stays on, their modes and settings,
+# Display's and Preview's settings, the routines and Position, the sidebar's sections and trees, a part's menu,
+# the view cube, Quick Edit's Copy, Queue and Send, the navbar's and app menu's items, Export by format, and the
+# home's. A name of this list and nothing else: a value of the page's (a render mode's name) only where it is one.
+CONTROLS = frozenset({
+    "select", "pencil", "shapes", "measure", "explode", "clip", "preview",
+    "select_filter_all", "select_filter_parts", "select_filter_faces", "select_filter_edges", "select_filter_position",
+    "select_filter_links", "select_group_faces", "select_group_edges",
+    "measure_filter_all", "measure_filter_vertices", "measure_filter_edges", "measure_filter_faces",
+    "measure_taken", "measure_delete", "measure_clear",
+    "pencil_pen", "pencil_highlighter", "pencil_eraser",
+    "shapes_rectangle", "shapes_line", "shapes_arrow", "shapes_ellipse", "shapes_text",
+    "annotate_mark", "annotate_color", "annotate_stroke_width", "annotate_on_surface", "annotate_on_plane",
+    "annotate_restyle", "annotate_fill", "annotate_delete", "annotate_clear", "annotate_copy", "undo", "redo",
+    "explode_amount", "explode_reset", "clip_amount", "clip_axis_x", "clip_axis_y", "clip_axis_z", "clip_part_colors",
+    "clip_reverse", "clip_reset",
+    "display_solid", "display_shaded", "display_parts", "display_xray", "display_hidden_line", "display_wireframe",
+    "display_grid", "projection_orthographic", "projection_perspective",
+    "preview_settings", "preview_orbit", "preview_orbit_speed", "preview_parts_color_mode", "preview_parts_colors",
+    "preview_parts_color", "preview_lighting_quality", "preview_lighting_exposure", "preview_lighting_rotation",
+    "preview_lighting_size", "preview_lighting_fill", "preview_background_color", "preview_background_opacity",
+    "preview_floor_enabled", "preview_floor_color", "preview_floor_opacity", "preview_floor_placement",
+    "preview_floor_finish", "preview_reset",
+    "animation_play", "animation_clip", "animation_speed", "animation_loop", "animation_autoplay", "animation_release",
+    "position_joint", "position_preset", "position_reset", "position_knob",
+    "sidebar_tree", "sidebar_position", "sidebar_animation", "sidebar_layers", "sidebar_sdf",
+    "tree_filter", "tree_visibility", "layer_visibility",
+    "menu_copy_reference", "menu_select", "menu_isolate", "menu_exit_all_isolates", "menu_hide_others", "menu_show_all",
+    "menu_hide", "menu_reveal", "menu_expand", "menu_collapse", "menu_expand_all", "menu_collapse_all", "menu_zoom_fit",
+    "menu_zoom_selection",
+    "look_at", "isolate", "view_cube", "view_cube_drag", "fit",
+    "quick_edit_copy", "quick_edit_queue", "quick_edit_send",
+    "navbar_back", "navbar_forward", "explorer", "explorer_filter", "file_copy_path", "file_reveal", "home",
+    "theme_system", "theme_light", "theme_dark", "language", "feedback",
+    "export_step", "export_stl", "export_threemf", "export_glb", "export_dxf", "export_xbf", "export_original",
+    "home_search", "home_layout_grid", "home_layout_list", "home_pin", "home_unpin", "home_remove", "home_delete",
+    "home_open", "home_pick", "home_folder",
+})
+# The most one page's report (``Recorder.controlled``) may say of a control: a page reports at least every minute
+# it is shown, and counts a tool's seconds only while it is.
+CONTROL_COUNT = 10_000
+CONTROL_SECONDS = 3_600
 # The engine daemon's warm workers: started (each imports the CAD kernel), crashed (died mid-build), recycled
 # (retired over their memory cap), and builds refused for want of memory (none: the engine refuses nothing).
 HEALTH = ("workers", "crashes", "recycles", "refusals")
@@ -281,8 +332,9 @@ EVENTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "snapshot_failure": (("kind", "reason"), ("count",)),
     "feature": (("feature",), ("count",)),
     "health": ((), HEALTH),
+    "control": (("control",), ("count", "seconds")),
 }
-MAX_EVENTS = 64  # a batch's most (the receiver's too): any more wait for the next batch
+MAX_EVENTS = 256  # a batch's most (the receiver's too, from schema 7): any more wait for the next batch
 # A crash (``signature``): where it happened -- a CAD tool's call, a viewer's route, another request a
 # server answered (the CAD app's), a build a worker ran, a ``cadgen`` command, or a page --
 # its type, and its frames.
@@ -1228,14 +1280,14 @@ class _Tally:
         for key in sorted(self.rows):
             names, counted = EVENTS[key[0]]
             events.append({"name": key[0], **dict(zip(names, key[1:])),
-                           **{name: round(value, 1) if name in ("seconds", "longest") else int(value)
+                           **{name: round(value, 1) if name in ("seconds", "longest") and key[0] != "control" else int(value)
                               for name, value in zip(counted, self.rows[key])}})
         return events + [{"name": "exception", **found, "count": count} for found, count in self.crashes.values()]
 
 
 class Recorder:
     """Notes one process's use -- tool calls, view activity, files on screen, builds, snapshots,
-    features and the engine daemon's health -- and sends it while sharing is on. Every method is guarded
+    features, a view's controls and the engine daemon's health -- and sends it while sharing is on. Every method is guarded
     (see the module docstring): it never raises, and none waits on the network."""
 
     def __init__(self, *, process: str = "app", path: Path | None = None,
@@ -1401,6 +1453,17 @@ class Recorder:
         """One of ``FEATURES`` was used."""
         if feature in FEATURES:
             self._note("feature", (feature,), {"count": 1})
+
+    @_guarded(lambda: None)
+    def controlled(self, control: Any, count: Any, seconds: Any = 0) -> None:
+        """A CAD view's page says a person used one of ``CONTROLS`` ``count`` times since it last said, and that a
+        tool that stays on was on ``seconds`` whole seconds meanwhile. Anything else -- a name not on the list, a
+        number that is not a whole one, or more than one report could say -- is not counted."""
+        def whole(value: Any, most: int) -> bool:
+            return type(value) is int and 0 <= value <= most
+
+        if control in CONTROLS and whole(count, CONTROL_COUNT) and whole(seconds, CONTROL_SECONDS) and (count or seconds):
+            self._note("control", (control,), {"count": count, "seconds": seconds})
 
     @_guarded(lambda: None)
     def crashed(self, error: BaseException | dict[str, Any], where: str = "", **detail: Any) -> None:

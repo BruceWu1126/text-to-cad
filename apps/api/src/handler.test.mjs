@@ -213,6 +213,50 @@ test("schema 6 counts the engine's documents, and names the sender a command sta
   ]) assert.equal((await send(memory(), 'POST', '/v1/events', JSON.parse(JSON.stringify(bad)))).status, 400, JSON.stringify(bad));
 });
 
+// Schema 7: schema 6, with the controls a person used in a CAD view, from the CAD app and the browser viewer alike.
+const CONTROLS = {
+  ...ENGINE, schema: 7, process: 'viewer', client: { name: 'cadgen-viewer', version: '0.8.0' }, presentation: 'browser',
+  events: [
+    { name: 'control', control: 'pencil', count: 2, seconds: 95 },
+    // On all window, taken up in an earlier one: no use, its seconds alone.
+    { name: 'control', control: 'preview', count: 0, seconds: 300 },
+    { name: 'control', control: 'display_xray', count: 1, seconds: 0 },
+    { name: 'view', calls: 4 },
+  ],
+};
+
+test('schema 7 counts the controls a person used, and how long a tool that stays on was on', async () => {
+  const store = memory();
+  assert.equal((await send(store, 'POST', '/v1/events', CONTROLS)).status, 204);
+  assert.deepEqual(store.rows.map(fieldsOf).map(({ id, at, ...fields }) => fields),
+    CONTROLS.events.map(({ name, ...counts }) => ({ event: name, ...counts })));
+  assert.ok(store.rows.every(row => row.process === 'viewer' && row.at === CONTROLS.at && /^[0-9a-f-]{36}$/.test(row.id)));
+  // The CAD app sends them too, and room for one event per control a window used.
+  const tools = [...Array(150)].map((_, index) => ({ name: 'tool', tool: `cad_${'abcdefghij'[index % 10]}${'abcdefghijklmno'[Math.floor(index / 10)]}`,
+    calls: 1, errors: 0 }));
+  const app = { ...CONTROLS, process: 'app', client: BATCH.client, presentation: 'tabs', events: [...CONTROLS.events, ...tools] };
+  assert.equal((await send(memory(), 'POST', '/v1/events', app)).status, 204);
+  // Every schema before it is read as ever, schema 6 unchanged.
+  for (const earlier of [SCHEMA_1, SCHEMA_2, BATCH, { ...BATCH, schema: 4 }, NAMED, ENGINE]) {
+    const kept = memory();
+    assert.equal((await send(kept, 'POST', '/v1/events', earlier)).status, 204, `schema ${earlier.schema}`);
+    assert.ok(kept.rows.every(row => row.event !== 'control'));
+  }
+  for (const bad of [
+    { ...ENGINE, events: [CONTROLS.events[0]] }, // schema 6 never counted a control
+    { ...ENGINE, events: tools.slice(0, 65) }, // nor sent more than 64
+    { ...CONTROLS, events: [{ name: 'control', control: 'my_model.step', count: 1, seconds: 0 }] }, // a name outside the vocabulary
+    { ...CONTROLS, events: [{ name: 'control', control: 'Select', count: 1, seconds: 0 }] },
+    { ...CONTROLS, events: [{ name: 'control', control: 'display_mode', value: 'xray', count: 1, seconds: 0 }] }, // no value beside it
+    { ...CONTROLS, events: [{ name: 'control', control: 'pencil', count: 1 }] }, // seconds always said
+    { ...CONTROLS, events: [{ name: 'control', control: 'pencil', count: 1, seconds: 1.5 }] }, // whole seconds only
+    { ...CONTROLS, events: [{ name: 'control', control: 'pencil', count: 0, seconds: 0 }] }, // counting nothing
+    { ...CONTROLS, events: [{ name: 'control', control: 'pencil', count: -1, seconds: 3 }] },
+    { ...CONTROLS, events: [CONTROLS.events[0], CONTROLS.events[0]] }, // once per control
+    { ...CONTROLS, events: [...Array(257)].map(() => CONTROLS.events[0]) },
+  ]) assert.equal((await send(memory(), 'POST', '/v1/events', JSON.parse(JSON.stringify(bad)))).status, 400, JSON.stringify(bad).slice(0, 200));
+});
+
 test('every schema a released cadgen sends is stored: a copy nobody updated keeps counting', async () => {
   const store = memory();
   assert.equal((await send(store, 'POST', '/v1/events', SCHEMA_1)).status, 204);

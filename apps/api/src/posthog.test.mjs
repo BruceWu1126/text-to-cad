@@ -62,8 +62,8 @@ test("the build daemon's counts are PostHog events of their own, each a window's
     channel: 'claude-directory', platform: 'linux', arch: 'x86_64', country: 'NZ' };
   const countsOf = event => Object.fromEntries(Object.entries(event).filter(([key]) => key !== 'name'));
   assert.deepEqual(batch.map(event => event.properties), DAEMON.events.map(event => ({ ...context, ...countsOf(event) })));
-  assert.deepEqual(Object.keys(EVENTS).sort(), ['build', 'build_failure', 'exception', 'feature', 'files', 'health', 'snapshot',
-    'snapshot_failure', 'tool', 'tool_failure', 'view']);
+  assert.deepEqual(Object.keys(EVENTS).sort(), ['build', 'build_failure', 'control', 'exception', 'feature', 'files', 'health',
+    'snapshot', 'snapshot_failure', 'tool', 'tool_failure', 'view']);
   // Schemas before 5 name no batch: PostHog makes up each event's uuid and stamps it as it arrives, as ever.
   assert.ok(batch.every(event => !('uuid' in event) && !('timestamp' in event)));
 });
@@ -90,6 +90,18 @@ test("why builds and snapshots failed are PostHog's build_failed and snapshot_fa
   assert.deepEqual([snapshot.event, snapshot.properties.kind, snapshot.properties.reason, snapshot.properties.count],
     ['snapshot_failed', 'step', 'browser', 1]);
   assert.ok(!('id' in build.properties) && !('at' in build.properties) && !('batch' in build.properties));
+});
+
+test("a viewer's controls are PostHog's control_used: uses and seconds on, by control and process, to add up", async () => {
+  const controls = {
+    ...NAMED, schema: 7, process: 'viewer', client: { name: 'cadgen-viewer', version: '0.8.0' }, presentation: 'browser',
+    events: [{ name: 'control', control: 'measure', count: 1, seconds: 240 }, { name: 'control', control: 'display_xray', count: 2, seconds: 0 }],
+  };
+  const [measure, xray] = await at(controls);
+  assert.deepEqual([measure.event, measure.properties.control, measure.properties.count, measure.properties.seconds,
+    measure.properties.process], ['control_used', 'measure', 1, 240, 'viewer']);
+  assert.deepEqual([xray.event, xray.properties.control, xray.properties.count, xray.properties.seconds], ['control_used', 'display_xray', 2, 0]);
+  assert.ok(measure.uuid && measure.timestamp === '2026-10-09T11:59:00.000Z', 'named as every schema 5 on is');
 });
 
 test('a batch sent again is the same PostHog events, uuid and time alike, so PostHog counts it once', async () => {

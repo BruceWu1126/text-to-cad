@@ -287,7 +287,7 @@ class ServerCountsTest(_Tmp):
             {"name": "view", "calls": 1},
         ])
         self.assertEqual((payload["schema"], payload["process"], payload["channel"], payload["presentation"],
-                          payload["client"]["name"]), (6, "app", "claude-directory", "tabs", "codex-mcp-client"))
+                          payload["client"]["name"]), (7, "app", "claude-directory", "tabs", "codex-mcp-client"))
         # Under an id of its own, stamped with the time it was made: a random id, and a whole second.
         self.assertEqual(str(uuid.UUID(payload["batch"], version=4)), payload["batch"])
         self.assertIsInstance(payload["at"], int)
@@ -302,6 +302,51 @@ class ServerCountsTest(_Tmp):
         recorder = Recorder(path=self.path)
         recorder.started(client={"name": "Café Studio", "version": "1.105 (Universal)"}, presentation="inline")
         self.assertEqual(recorder._context["client"], {"name": "Caf-Studio", "version": "1.105-Universal-"})
+
+    def test_a_views_controls_are_counted_by_name_and_seconds_only_with_consent(self) -> None:
+        # The page's report of what a person used (`@text-to-cad/ui`'s `usage/controls.js`), through the CAD app's
+        # own route: counted only under the person's yes.
+        server, sent = self.serve("claude-directory")
+        report = {"controls": [{"control": "pencil", "count": 2, "seconds": 95}, {"control": "display_xray", "count": 1, "seconds": 0}]}
+        self.assertEqual(self.http(server, "POST", "/__cad/analytics/activity", report)[0], 204)
+        self.assertFalse(server.analytics.flush(), "nobody told, nothing said yes: nothing goes")
+        self.consent(server, True)
+        for activity in (report, {"controls": [
+            {"control": "pencil", "count": 0, "seconds": 300},  # on all the next minute: its seconds alone
+            {"control": "secret-bracket.step", "count": 1, "seconds": 0},  # a name not on the list
+            {"control": "display_mode", "count": 1, "seconds": 0, "value": "xray"},  # nothing beside the three
+            {"control": "measure", "count": 1.5, "seconds": 0}, {"control": "measure", "count": True, "seconds": 0},
+            {"control": "clip", "count": 1, "seconds": 7200},  # more than one report says
+            {"control": "explode", "count": 0, "seconds": 0},
+        ]}):
+            self.assertEqual(self.http(server, "POST", "/__cad/analytics/activity", activity)[0], 204)
+        # The agent cannot speak for the person's hands.
+        self.assertEqual(self.http(server, "POST", "/__cad/analytics/activity", report, agent=True)[0], 403)
+        self.assertTrue(server.analytics.flush())
+        self.assertEqual(sent[-1]["schema"], 7)
+        self.assertEqual([event for event in sent[-1]["events"] if event["name"] == "control"], [
+            {"name": "control", "control": "display_xray", "count": 1, "seconds": 0},
+            {"name": "control", "control": "pencil", "count": 2, "seconds": 395},
+        ])
+        self.assertNotIn("secret", json.dumps(sent))
+        # Off, nothing more is noted or sent.
+        self.consent(server, False)
+        self.http(server, "POST", "/__cad/analytics/activity", report)
+        self.assertFalse(server.analytics.flush())
+        self.assertEqual(len(sent), 1)
+
+    def test_a_window_of_controls_goes_in_one_batch(self) -> None:
+        # One event per control a window used, beside the rest: past schema 6's 64, within one batch.
+        choose(True, by="cli", path=self.path)
+        sent: list[dict] = []
+        recorder = Recorder(process="viewer", path=self.path, send=lambda payload: sent.append(payload) or True)
+        from cadgen.analytics import CONTROLS
+        for control in sorted(CONTROLS):
+            recorder.controlled(control, 1)
+        self.assertTrue(recorder.flush())
+        self.assertEqual(len(sent[0]["events"]), len(CONTROLS))
+        self.assertLessEqual(len(json.dumps(sent[0]).encode()), 64 * 1024, "the receiver's MAX_BYTES")
+        self.assertFalse(recorder.flush(), "all of it went")
 
     def test_a_server_nobody_used_sends_nothing(self) -> None:
         # Codex starts a server per thread, and some only to list tools: none of them is a user.

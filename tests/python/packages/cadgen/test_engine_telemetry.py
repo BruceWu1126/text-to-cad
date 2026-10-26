@@ -105,11 +105,11 @@ class EngineTelemetryTest(unittest.TestCase):
         stopped = facts(ok=False, error=error("KeyboardInterrupt", here=True))
         self.assertEqual(engine_telemetry.counts(stopped, "script")["builds"][0]["outcome"], "cancelled")
 
-        # Kept as a command's counts are, and sent by the sender as the process ``cli``, in schema 6.
+        # Kept as a command's counts are, and sent by the sender as the process ``cli``, in schema 7.
         for found, via in ((built, "script"), (facts(ok=False, error=model), "script"), (died, "command")):
             self.assertTrue(analytics.spool(engine_telemetry.counts(found, via), path=self.settings))
         [payload] = self.sent()
-        self.assertEqual((payload["schema"], payload["process"]), (6, "cli"))
+        self.assertEqual((payload["schema"], payload["process"]), (7, "cli"))
         self.assertEqual(payload["events"], [
             {"name": "build", "kind": "xbf", "via": "command", "count": 1, "failed": 0, "crashed": 1, "cancelled": 0,
              "cached": 0, "seconds": 0.5, "longest": 0.5},
@@ -205,7 +205,7 @@ class EngineTelemetryTest(unittest.TestCase):
         self.assertFalse(self.settings.with_name(analytics.SPOOL).exists())
         [kept] = [json.loads(line) for line in self.settings.with_name(analytics.KEPT).read_text(encoding="utf-8").splitlines()]
         self.assertEqual((kept["batch"]["process"], kept["batch"]["schema"], kept["batch"]["events"][0]["kind"]),
-                         ("cli", 6, "xbf"))
+                         ("cli", 7, "xbf"))
 
 
 class ThroughTheDaemonTest(unittest.TestCase):
