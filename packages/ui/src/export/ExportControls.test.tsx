@@ -8,7 +8,7 @@ import { ExportControls } from '../../dist/export/ExportControls.js';
 import { useExportView } from '../../dist/export/context.js';
 import { I18nProvider } from '../../dist/i18n/index.js';
 import { ViewerMobileContext } from '../../dist/file-viewer/responsive.js';
-import { ViewerHostContext } from '../../dist/host/context.js';
+import { ViewerElementContext, ViewerHostContext } from '../../dist/host/context.js';
 
 Object.assign(globalThis, { React });
 // jsdom has no pointer capture, which a press on a Sonner toast takes.
@@ -19,10 +19,11 @@ const part = { doc: 'doc', revision: 'v1', file: '/part.xbf', name: 'part.xbf' }
 type Shown = typeof part & { planar?: boolean };
 function Document({ view }: { view: Shown }) { useExportView(view); return <div>Model</div>; }
 const host = { environment: { colorScheme: 'light' } } as any;
-function mount(service: any, downloads: any, { locale = 'en', phone = false, view = part as Shown } = {}) {
-  // The overlay renders inside the viewer, which says whether its width is a phone's and its colour scheme.
+function mount(service: any, downloads: any, { locale = 'en', phone = false, view = part as Shown, viewer = { current: null } as any } = {}) {
+  // The overlay renders inside the viewer, which says whether its width is a phone's, its colour
+  // scheme, and the element its navbar is in.
   return render(<I18nProvider locale={locale}><ExportControls service={service} downloads={downloads} file={view.file}>{({ navbar, overlay }: any) => <><nav>{navbar}</nav><Document view={view} />
-    <ViewerHostContext.Provider value={host}><ViewerMobileContext.Provider value={phone}>{overlay}</ViewerMobileContext.Provider></ViewerHostContext.Provider></>}</ExportControls></I18nProvider>);
+    <ViewerHostContext.Provider value={host}><ViewerElementContext.Provider value={viewer}><ViewerMobileContext.Provider value={phone}>{overlay}</ViewerMobileContext.Provider></ViewerElementContext.Provider></ViewerHostContext.Provider></>}</ExportControls></I18nProvider>);
 }
 function server() {
   const waiting = new Map<string, { resolve(value: any): void; reject(error: unknown): void }>();
@@ -104,7 +105,7 @@ it('a choice starts its export at once with a spinning toast; the menu stays the
   // Kept with its session's epoch while it is under way, so that a reload picks it up again.
   expect(downloads.remember).toHaveBeenLastCalledWith([{ request, filename: 'part.glb' }]);
   // The page's name for the file while it is made, in a spinner's single line with no buttons.
-  const { item, buttons } = await shown('loading', 'Exporting part.glb…');
+  const { item, buttons } = await shown('loading', 'Preparing part.glb…');
   expect(item.querySelector('[data-icon] svg.animate-spin')).toBeTruthy();
   expect(buttons).toEqual([]);
   await user.click(screen.getByRole('button', { name: 'Export', exact: true }));
@@ -125,7 +126,7 @@ it('a ready file is handed to the browser once, and only then does its toast say
   mount(service, downloads);
   const user = userEvent.setup({ skipHover: true });
   await exportOnce(user);
-  await shown('loading', 'Exporting part.step…');
+  await shown('loading', 'Preparing part.step…');
   const [id] = [...jobs.keys()];
   await finish(id);
   const { buttons } = await shown('success', 'Exported part.step');
@@ -150,7 +151,7 @@ it('an export the server refuses, or a job that fails, is an error toast with th
   await user.click(within(refused.item).getByRole('button', { name: 'Dismiss export status' }));
   await waitFor(() => expect(toasts()).toEqual([]));
   await exportOnce(user, 'STL');
-  await shown('loading', 'Exporting part.stl…');
+  await shown('loading', 'Preparing part.stl…');
   const [id] = [...jobs.keys()];
   await answer(id, { state: 'failed', stage: 'Export failed', error: 'STL needs a solid; this document holds none.', finishedAt: Date.now() / 1000 });
   expect((await shown('error', 'STL needs a solid; this document holds none.')).buttons).toEqual(['Dismiss export status']);
@@ -166,10 +167,10 @@ it('a dropped connection keeps the toast spinning until the poll resumes, then t
   await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
   const [id] = [...jobs.keys()];
   await act(async () => waiting.get(id)!.reject(new TypeError('Failed to fetch')));
-  await shown('loading', 'Exporting part.step…');
+  await shown('loading', 'Preparing part.step…');
   // Asked again after its pause, it answers ready.
   await waitFor(() => expect(service.status).toHaveBeenCalledTimes(2), { timeout: 3000 });
-  await shown('loading', 'Exporting part.step…');
+  await shown('loading', 'Preparing part.step…');
   await finish(id);
   await shown('success', 'Exported part.step');
   expect(downloads.save).toHaveBeenCalledTimes(1);
@@ -217,19 +218,26 @@ it('the menu and the toast speak the page language, never the server stage', asy
   const user = userEvent.setup({ skipHover: true });
   await user.click(screen.getByRole('button', { name: 'エクスポート', exact: true }));
   await user.click(screen.getByRole('menuitem', { name: 'STEP' }));
-  await shown('loading', 'part.step をエクスポート中…');
+  await shown('loading', 'part.step を準備中…');
   expect(screen.queryByText(/Waiting for worker/)).toBeNull();
 });
 
-it('the toasts stand at the bottom right, at the bottom centre on a phone\'s view', async () => {
+it('the toasts stand at the top right under the viewer\'s navbar, by its 16px gutter, at every width', async () => {
   for (const phone of [false, true]) {
     const { service } = server();
-    const { unmount } = mount(service, { save: vi.fn() }, { phone });
+    // The viewer's element and its navbar, which ends 48px down.
+    const viewer = document.createElement('div');
+    const bar = Object.assign(document.createElement('header'), { getBoundingClientRect: () => ({ top: 0, bottom: 48 }) });
+    bar.setAttribute('data-viewer-navbar', '');
+    viewer.append(bar);
+    const { unmount } = mount(service, { save: vi.fn() }, { phone, viewer: { current: viewer } });
     const user = userEvent.setup({ skipHover: true });
     await exportOnce(user);
-    await shown('loading', 'Exporting part.step…');
+    await shown('loading', 'Preparing part.step…');
     const list = document.querySelector<HTMLElement>('[data-sonner-toaster]')!;
-    expect([list.dataset.yPosition, list.dataset.xPosition]).toEqual(['bottom', phone ? 'center' : 'right']);
+    expect([list.dataset.yPosition, list.dataset.xPosition]).toEqual(['top', 'right']);
+    await waitFor(() => expect(['--offset-top', '--offset-right', '--mobile-offset-top', '--mobile-offset-right'].map(name => list.style.getPropertyValue(name)))
+      .toEqual(['64px', '16px', '64px', '16px']));
     toast.dismiss();
     unmount();
   }

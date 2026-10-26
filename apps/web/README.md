@@ -189,9 +189,9 @@ it goes is the browser's own setting (its download bubble and folder, or its Sav
 person who asked for one), and the page never claims it was saved. The link's URL carries no
 token: the session cookie authenticates it, as it does every request the page makes.
 
-Each export has one single-line toast (Sonner, bottom right; bottom centre on a phone's view):
+Each export has one small single-line toast (Sonner, at the view's top right under the navbar):
 a spinner while it is queued or running, and while a dropped connection is asked again,
-**Exporting part.step…**; then a check once the file is handed to the browser, **Exported part.step**,
+**Preparing part.step…**; then a check once the file is handed to the browser, **Exported part.step**,
 which goes by itself; or the engine's one-line reason, which stays until dismissed. Exports
 run independently; choosing a format again starts another.
 

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDownToLine } from 'lucide-react';
 import { toast } from 'sonner';
 import { ExportRequestError, exportPause, type ExportJob, type ExportRequest, type ExportService } from '@text-to-cad/core/client';
 import type { DownloadPort, ExportRecord } from '../host/types.js';
+import { ViewerElementContext } from '../host/context.js';
 import { Button } from '../primitives/button.jsx';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../primitives/dropdown-menu.jsx';
 import { Toaster } from '../primitives/sonner.jsx';
@@ -37,7 +38,7 @@ async function runExport({ record, service, downloads, t, signal, onRequest }: {
   let request = record.request;
   // The page's name for the file while it is made (a queued job's is a placeholder); then the
   // ready job's, the one its Content-Disposition gives every browser.
-  toast.loading(t()('export.exporting', { name: record.filename }), { id });
+  toast.loading(t()('export.preparing', { name: record.filename }), { id });
   const fail = (reason: string) => toast.error(reason || t()('export.failed'), { id, duration: Infinity, closeButton: true });
   let job: ExportJob | null = null;
   let failures = 0;
@@ -70,12 +71,48 @@ async function runExport({ record, service, downloads, t, signal, onRequest }: {
   }
 }
 
-/** The exports' toasts: bottom right, bottom centre on a phone's view. Rendered inside the viewer,
- * so it reads the viewer's own width (`useViewerMobile`) and its host's colour scheme. */
+const GUTTER = 16;
+/**
+ * A toast as small as a menu item: one line of the menu's text (`text-tiny`, regular weight), its
+ * padding, a 14px icon, and as wide as its text above Sonner's narrow-screen layout (a window up to
+ * 600px, where Sonner spans its toasts across the screen). Sonner's own stylesheet is unlayered, so
+ * each of these is `!important` to win over it; `primitives/sonner.jsx` stays shadcn's.
+ */
+const TOAST_CLASSES = {
+  toast: 'gap-1.5! px-2.5! py-1.5! text-tiny! min-[601px]:w-max! min-[601px]:max-w-[calc(100vw-2rem)]!',
+  title: 'font-normal! leading-4!',
+  icon: 'size-3.5! [&_svg]:size-3.5!',
+};
+
+/** Where the toasts start: under the viewer's navbar (its top where it has none), by the gutter. */
+function useBelowNavbar(mobile: boolean) {
+  const viewer = useContext(ViewerElementContext);
+  const [top, setTop] = useState(GUTTER);
+  useEffect(() => {
+    const element = viewer?.current;
+    if (!element) return;
+    const measure = () => {
+      const bar = element.querySelector('[data-viewer-navbar]');
+      setTop(Math.round(bar ? bar.getBoundingClientRect().bottom : element.getBoundingClientRect().top) + GUTTER);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    const bar = element.querySelector('[data-viewer-navbar]');
+    if (bar) observer.observe(bar);
+    return () => observer.disconnect();
+  }, [viewer, mobile]);
+  return top;
+}
+
+/** The exports' toasts, at the view's top right under its navbar. Rendered inside the viewer, so it
+ * reads the viewer's own width (`useViewerMobile`), its navbar and its host's colour scheme. */
 function ExportToaster() {
   const { t } = useI18n();
-  const mobile = useViewerMobile();
-  return <Toaster position={mobile ? 'bottom-center' : 'bottom-right'} toastOptions={{ closeButtonAriaLabel: t('export.dismiss') }} />;
+  const top = useBelowNavbar(useViewerMobile());
+  const offset = { top, right: GUTTER, left: GUTTER };
+  return <Toaster position="top-right" offset={offset} mobileOffset={offset}
+    toastOptions={{ closeButtonAriaLabel: t('export.dismiss'), classNames: TOAST_CLASSES }} />;
 }
 
 export function ExportControls({ service, downloads, file, children }: {
