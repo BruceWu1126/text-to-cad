@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@text-to-cad/ui/primitives/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@text-to-cad/ui/primitives/popover";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@text-to-cad/ui/primitives/tabs";
 import { useI18n } from "@text-to-cad/ui/i18n";
 import { cn } from "@text-to-cad/ui/utils";
 
@@ -12,8 +13,10 @@ import { FLOATING_SURFACE_CLASS } from "../../lib/floatingSurface.js";
 import { useViewerMobile } from "../responsive.js";
 
 import { AppMenu } from "./AppMenu.jsx";
+import { DocumentGlyph } from "./DocumentGlyph.jsx";
 import { entryMenu } from "./entry-menu.js";
 import { FolderExplorer } from "./FolderExplorer.jsx";
+import { RecentList } from "./RecentList.jsx";
 
 /**
  * The row above a file and above the host's home: ONE navbar, the same in every app, so a person
@@ -22,9 +25,9 @@ import { FolderExplorer } from "./FolderExplorer.jsx";
  *
  * Left, in this order: the text-to-cad logo, which opens the app's menu (`AppMenu`: Back to files
  * where the host has a home, then the person's settings, feedback and links); Back and Forward,
- * where the host keeps the view's own history (`history`); the open file's name, which opens the
- * file explorer where the host's files can be browsed; and the ⋯ menu of what the host can do with
- * the file.
+ * where the host keeps the view's own history (`history`); the open document's name, after its
+ * kind's glyph, which opens the name menu (Recent, the host's library, and Files, the explorer)
+ * where the view can show another; and the ⋯ menu of what the host can do with the file.
  *
  * Right, only what a host or a file adds: the host's update button while its install is behind
  * (`update`, the blue `UpdateButton` from `@text-to-cad/ui/update`); the file's own actions (the
@@ -89,34 +92,69 @@ function FileMenu({ path, platform, capabilities, onAction }) {
 }
 
 /**
- * The open file's name. Where the host's files can be browsed it is also the explorer's door: the
- * name, transparent until the pointer is on it, opening the explorer under it. Where they cannot,
- * it is the name alone, in the same place.
+ * What the name opens: Recent and Files, two stock tabs on top of the explorer's own style, each
+ * there only where the host has it (one alone has no tabs). Recent is the host's library, by last
+ * activity, a row opening its document; Files is the explorer (`FolderExplorer`), from the file's
+ * folder, or the folder a model was registered from. Built anew on each opening, on Recent over a
+ * model and on Files over a file.
  */
-function FileName({ path, name: given, explorer }) {
+function NameMenu({ path, kind, explorer, recent, onPick }) {
+  const { t } = useI18n();
+  const [tab, setTab] = useState(kind === "model" ? "recent" : "files");
+  const files = explorer ? <FolderExplorer source={explorer.source} file={path} folder={explorer.folder} onOpen={next => onPick(explorer.onOpen, next)} /> : null;
+  const recents = recent ? <RecentList recent={recent} current={path} onOpen={next => onPick(recent.onOpen, next)} /> : null;
+  if (!files || !recents) return files ?? recents;
+  return <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0" data-name-menu="">
+    <TabsList className="mx-2 mt-2 h-7 w-auto shrink-0 self-stretch">
+      <TabsTrigger value="recent">{t("explorer.recent")}</TabsTrigger>
+      <TabsTrigger value="files">{t("explorer.files")}</TabsTrigger>
+    </TabsList>
+    <TabsContent value="recent" className="flex min-h-0 flex-col">{recents}</TabsContent>
+    <TabsContent value="files" className="flex min-h-0 flex-col">{files}</TabsContent>
+  </Tabs>;
+}
+
+/**
+ * The open document's name, after its kind's glyph (a model's code glyph, a file's type icon).
+ * Where the view can show another document it is also the name menu's door: the name, transparent
+ * until the pointer is on it, opening Recent and Files under it. Where it cannot, it is the name
+ * alone, in the same place.
+ */
+function FileName({ path, name: given, kind = "file", explorer, recent }) {
   const [open, setOpen] = useState(false);
   const mobile = useViewerMobile();
   const name = given || path.split("/").pop() || path;
-  if (!explorer) return <span className="min-w-0 truncate px-1" data-file-name="">{name}</span>;
-  // Opened, its filter has the keyboard, so typing finds a file at once; a phone keeps its keyboard
-  // down, the explorer holding focus itself. Nothing else is focused for the person on opening.
+  const glyph = <DocumentGlyph model={kind === "model"} path={path} className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.5} />;
+  if (!explorer && !recent) return <span className="flex min-w-0 items-center gap-1 px-1" data-file-name="">{glyph}<span className="truncate">{name}</span></span>;
+  // Opened, the explorer's filter has the keyboard, so typing finds a file at once; on Recent the
+  // menu holds it, and Down takes it into the rows. A phone keeps its keyboard down, the menu
+  // holding focus itself. Nothing else is focused for the person on opening.
   const focusFilter = event => {
     event.preventDefault();
     const content = event.currentTarget;
     (mobile ? content : content.querySelector("input") ?? content).focus({ preventScroll: true });
   };
+  const intoRows = event => {
+    if (event.key !== "ArrowDown" || event.target !== event.currentTarget) return;
+    const first = event.currentTarget.querySelector("[data-recent-row]:not(:disabled), [data-explorer-row]");
+    if (!first) return;
+    event.preventDefault();
+    first.focus();
+  };
+  const pick = (opener, next) => { setOpen(false); opener(next); };
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
-      <button type="button" className={cn(NAV_ITEM_CLASS, "min-w-0 shrink px-1 text-left")} data-file-name="">
+      <button type="button" className={cn(NAV_ITEM_CLASS, "min-w-0 shrink gap-1 px-1 text-left")} data-file-name="">
+        {glyph}
         <span className="truncate">{name}</span>
-        {/* The name opens the explorer; the chevron says so. A plain name (no explorer) has none. */}
+        {/* The name opens its menu; the chevron says so. A plain name (no menu) has none. */}
         <ChevronDown className="ml-0.5 size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
       </button>
     </PopoverTrigger>
-    <PopoverContent align="start" sideOffset={8} data-file-explorer="" onOpenAutoFocus={focusFilter}
+    <PopoverContent align="start" sideOffset={8} data-file-explorer="" onOpenAutoFocus={focusFilter} onKeyDown={intoRows}
       className={cn(FLOATING_SURFACE_CLASS, "flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-72 max-w-[calc(100vw-1rem)] flex-col overflow-hidden p-0")}>
-      {/* Remounted on each opening, so it starts in the open file's folder. */}
-      <FolderExplorer source={explorer.source} file={path} onOpen={next => { setOpen(false); explorer.onOpen(next); }} />
+      {/* Remounted on each opening, so it starts on its first tab, in the open file's folder. */}
+      <NameMenu path={path} kind={kind} explorer={explorer} recent={recent} onPick={pick} />
     </PopoverContent>
   </Popover>;
 }
@@ -129,8 +167,11 @@ function FileName({ path, name: given, explorer }) {
  * @param {import("../types.js").ViewerHistory | null} [props.history] The view's own history, where the host keeps one: Back and Forward after the logo.
  * @param {string | null} [props.file] The open file, by its absolute path (a document with no file of its own: its id).
  * @param {string} [props.name] The document's name where its path does not give it (a model's).
- * @param {{ source: Pick<import("../types").FileSource, "list" | "search">, onOpen(path: string): void } | null} [props.explorer]
- *   Where the host's files can be browsed: the explorer the name opens.
+ * @param {"model" | "file"} [props.kind] What the open document is: its glyph, and the name menu's first tab.
+ * @param {{ source: Pick<import("../types").FileSource, "list" | "search">, folder?: string | null, onOpen(path: string): void } | null} [props.explorer]
+ *   Where the host's files can be browsed: the name menu's Files, from `folder` where given.
+ * @param {{ list(): Promise<readonly import("../types").RecentDocument[]>, onOpen(path: string): void } | null} [props.recent]
+ *   The host's library: the name menu's Recent.
  * @param {{ platform: import("./entry-menu.js").Platform, capabilities: ReadonlySet<import("./entry-menu.js").EntryAction>,
  *   onAction(action: import("./entry-menu.js").EntryAction, path: string): void } | null} [props.fileMenu]
  * @param {import("react").ReactNode} [props.trailing] The file's actions.
@@ -141,7 +182,7 @@ function FileName({ path, name: given, explorer }) {
  * @param {(element: HTMLDivElement | null) => void} [props.controlsRef] The box the renderer draws its view controls into.
  * @param {string} [props.className]
  */
-export function ViewerNavbar({ onHome, menu = null, history = null, file = null, name, explorer = null, fileMenu = null, trailing = null, update = null, fullSize = null, openInBrowser = null, controlsRef, actions = null, className }) {
+export function ViewerNavbar({ onHome, menu = null, history = null, file = null, name, kind = "file", explorer = null, recent = null, fileMenu = null, trailing = null, update = null, fullSize = null, openInBrowser = null, controlsRef, actions = null, className }) {
   const { t } = useI18n();
   return (
     <header className={cn(NAVBAR_ROW_CLASS, "border-border bg-background text-foreground", className)} data-viewer-navbar="">
@@ -149,7 +190,7 @@ export function ViewerNavbar({ onHome, menu = null, history = null, file = null,
         {onHome || menu ? <LogoMenu onHome={onHome} menu={menu} /> : null}
         {history ? <HistoryButtons viewHistory={history} /> : null}
         {file ? <span className="flex min-w-0 items-center">
-          <FileName path={file} name={name} explorer={explorer} />
+          <FileName path={file} name={name} kind={kind} explorer={explorer} recent={recent} />
           {fileMenu ? <FileMenu path={file} {...fileMenu} /> : null}
         </span> : null}
       </nav>

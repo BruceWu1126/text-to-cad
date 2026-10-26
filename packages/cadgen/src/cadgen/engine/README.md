@@ -973,7 +973,8 @@ restart too), or a token of the build's own where the closure has none. A served
 generation (its structure's `version`, which a page waits on and the viewer's export compares)
 is a token of its build's own: a rebuild is a new generation, and no generation is a counter that
 a restart starts again. Recents is the registry's view (`cadgen.viewer.recents`): pinned
-first, then the most recently opened or built.
+first, then by last activity, the later of a row's `opened` (a page opened it) and `updated` (a
+file's time on disk, a model's run), each row carrying both; a model's script is never read for it.
 
 **The cache.** For every model and shape document -- never a file's, which is its own
 file -- the engine keeps `documents/<id>/document.xbf` in the cache folder its host names
@@ -2663,7 +2664,8 @@ holds (unsaved, detached) is refused with its state and the command that builds 
 (`cadgen run <the script that defines it>`; **Document lifetime**).
 `--query build` returns saved-file metadata/closure or live-build metadata; `--query closure` and
 `--query geometry` select the other queries explicitly. In the CAD Viewer a model's page is
-`/<id>`; it has no file of its own, so no Select File and no file menu.
+`/<id>`; it has no file of its own, so no file menu, and its name menu's Files lists the folder
+its record registered (the catalog row's `folder`).
 
 A shape with no function -- a REPL's, a notebook cell's -- is handed over instead: `model(shape,
 name="bracket")` returns the same kind of handle (**Shapes handed over**).

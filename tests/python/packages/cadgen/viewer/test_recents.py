@@ -55,7 +55,7 @@ class RecentStoreTest(unittest.TestCase):
         third = store.thumbnail("/a.step", b"\x89PNG three")
         self.assertEqual([path.name for path in store.thumbnails.iterdir()], [third])
 
-    def test_a_model_says_when_its_file_last_changed_and_a_gone_one_says_nothing(self) -> None:
+    def test_a_file_is_updated_when_it_last_changed_on_disk_and_a_gone_one_says_nothing(self) -> None:
         store = RecentStore(self.tmp / "state")
         model = self.tmp / "part.stl"
         model.write_bytes(b"solid t\nendsolid t\n")
@@ -63,8 +63,45 @@ class RecentStoreTest(unittest.TestCase):
         store.opened(str(model))
         store.opened(str(self.tmp / "gone.stl"))
         shown = {entry["name"]: entry for entry in (recent.public() for recent in store.list())}
-        self.assertEqual((shown["part.stl"]["modified"], shown["part.stl"]["missing"]), (1_700_000_000, False))
-        self.assertEqual((shown["gone.stl"]["modified"], shown["gone.stl"]["missing"]), (None, True))
+        self.assertEqual((shown["part.stl"]["updated"], shown["part.stl"]["missing"]), (1_700_000_000, False))
+        self.assertEqual((shown["gone.stl"]["updated"], shown["gone.stl"]["missing"]), (None, True))
+        self.assertGreater(shown["part.stl"]["opened"], 1_700_000_000, "opened is the page's, now")
+        self.assertNotIn("modified", shown["part.stl"])
+
+    def test_a_model_is_updated_by_its_run_never_its_scripts_time_and_says_when_a_page_opened_it(self) -> None:
+        from unittest import mock
+
+        from cadgen.viewer import recents
+
+        script = self.tmp / "parts.py"
+        script.write_text("", encoding="utf-8")
+        os.utime(script, (1_800_000_000, 1_800_000_000))  # edited after the run: no row says so
+        ident, built = model_id(script, "plate"), 1_700_000_000.0
+        Registry(self.tmp).put({"id": ident, "kind": "model", "root": str(self.tmp), "home": "parts.py",
+                                "entry": "plate", "revision": "r1", "built": built})
+        store = RecentStore(self.tmp)
+        timed = []
+        with mock.patch.object(recents, "_mtime", side_effect=lambda path: timed.append(path)):
+            [entry] = [recent.public() for recent in store.list()]
+        self.assertEqual(timed, [], "a model's script's time is never read")
+        self.assertEqual((entry["updated"], entry["opened"], entry["missing"]), (built, None, False))
+        store.opened(ident)  # a page opened it: its record says when, and its run's time stays
+        [entry] = [recent.public() for recent in store.list()]
+        self.assertEqual(entry["updated"], built)
+        self.assertGreater(entry["opened"], built)
+        self.assertEqual(Registry(self.tmp).get(ident)["built"], built)
+
+    def test_rows_are_ordered_by_last_activity_after_the_pinned(self) -> None:
+        store = RecentStore(self.tmp / "state")
+        old, new, pinned = (self.tmp / name for name in ("old.stl", "new.stl", "pinned.stl"))
+        for path in (old, new, pinned):
+            path.write_bytes(b"solid t\nendsolid t\n")
+            store.opened(str(path))
+        store.pin(str(pinned), True)
+        # Opened in that order, but old.stl written since: its last activity is the latest.
+        future = time.time() + 3600
+        os.utime(old, (future, future))
+        self.assertEqual([os.path.basename(entry.path) for entry in store.list()], ["pinned.stl", "old.stl", "new.stl"])
 
     def test_a_built_model_is_listed_by_its_id_and_one_whose_script_went_is_missing_until_removed(self) -> None:
         script = self.tmp / "parts.py"
@@ -90,8 +127,8 @@ class RecentStoreTest(unittest.TestCase):
         Registry(self.tmp).put({"id": ident, "kind": "shape", "root": str(self.tmp), "home": ".",
                                 "entry": "plate", "revision": "h1", "built": built})
         [entry] = [recent.public() for recent in RecentStore(self.tmp).list()]
-        self.assertEqual((entry["id"], entry["missing"], entry["rebuild"], entry["kind"], entry["modified"]),
-                         (ident, False, None, "shape", built), "a folder home is where it came from, not a lost file")
+        self.assertEqual((entry["id"], entry["missing"], entry["rebuild"], entry["kind"], entry["updated"], entry["folder"]),
+                         (ident, False, None, "shape", built, str(self.tmp)), "a folder home is where it came from, not a lost file")
         self.assertIn("a shape handed over", entry["shown"])
         self.assertIn("no script to rerun", entry["shown"])
 

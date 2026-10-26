@@ -3,7 +3,7 @@
 The shared React interface for text-to-cad. `FileViewer` is the complete file view:
 one file by its absolute path (`/a/b.step`, `C:/a/b.step`, `/`-separated in every
 app), or the host's home with none, under a navbar — the logo that opens the app's
-menu, the file's name and the explorer it opens, the file menu — with the file's
+menu, the file's name and the name menu it opens (Recent and Files), the file menu — with the file's
 content and the loading and error states ([FileViewer](docs/file-viewer.md)).
 `CadViewer` (`@text-to-cad/ui/cad-viewer`) is the CAD viewer every app shows:
 FileViewer over a CAD client, with the five CAD renderers, the home (the model
@@ -60,7 +60,8 @@ file sidebar's trees (Model tree, Links) are 24px lines in its smaller 11px text
 ([the file sidebar](docs/settings-ui.md#the-file-sidebar-and-the-tool-stack)). Both inset
 row backgrounds 4px from their horizontal edges, including selected, hovered and
 filtered rows; nesting adds indentation inside that gutter.
-The file explorer is a popover under the navbar's file name (`FolderExplorer.jsx`):
+The name menu is a popover under the navbar's file name: Recent and Files as stock Tabs over
+the explorer's rows (`RecentList.jsx`, `FolderExplorer.jsx`),
 18rem wide, no taller than 28rem or the room below it, with no resize handle. It
 floats over the view and never resizes it or moves its tools. A file's controls are
 the viewer's own: the tool strip at the view's top centre, the tool in hand's sub-toolbar
@@ -286,15 +287,15 @@ has a home, the person's settings (Share anonymous usage data), Send feedback
 (a new issue titled "Feedback: " where the host has a tracker), GitHub, Discord and, in
 gray, the version and who made it. Where the host keeps the view's own history (the CAD
 app's views), Back and Forward follow, disabled where they have nowhere to go. It names the
-file — the name opens the explorer — and offers its ⋯ menu (Copy path, Reveal). They share one look: transparent until the
+file after its kind's glyph — the name opens Recent and Files — and offers its ⋯ menu (Copy path, Reveal). They share one look: transparent until the
 pointer is on them or their menu is open, with no tooltip. At the right is only what a host
 or a file adds: the host's update button, a dismissed alert's icon, the host's Full size
 and, last, the view's own controls (a 3D view's Display and Preview). With no file a view
 shows the host's home, the model library, under the same navbar (its logo and menu, without
 Back to files, Back and Forward where the host keeps the view's history, and the host's
 update and Full size): its wordmark, byline and GitHub,
-Discord and X, then the models opened before, pinned first, with their pictures, and Open
-where the host has a file chooser. A file that
+Discord and X, then the library alone: the documents opened or built before, pinned first,
+with their pictures, each card's ⋯ menu ending in Delete, which asks first. A file that
 does not exist shows "File does not exist" and its path, and any other failure to open
 "Could not open that file" and why, each with Go home where the host has a home. A
 renderer's loading and update status is its own, in its viewport. An error appears as a

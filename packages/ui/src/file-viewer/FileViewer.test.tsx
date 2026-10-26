@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { isMissingFileError } from '@text-to-cad/core/client';
@@ -222,7 +222,7 @@ it('opens the explorer from the file\'s name where the host\'s files can be brow
   expect(fileName().tagName).toBe('SPAN');
 });
 
-it('has no Select File and no file menu on a document with no file of its own, which its name names', async () => {
+it('has no file menu on a document with no file of its own, which its name names, and no name menu where it has nothing to list', async () => {
   const id = '6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab';
   const list = vi.fn(async () => []);
   const model = { ...host, fileActions: { platform: 'darwin', perform: { 'copy-path': async () => {} } }, files: { id: 'one', list,
@@ -234,6 +234,20 @@ it('has no Select File and no file menu on a document with no file of its own, w
   expect([fileName().tagName, fileName().textContent]).toEqual(['SPAN', 'bracket']);
   expect(labels()).not.toContain('File actions');
   expect(list).not.toHaveBeenCalled();
+  cleanup();
+  // Registered from a folder, with the host's library: the name opens Recent first, and Files lists that folder.
+  const user = userEvent.setup();
+  const registered = { ...model, navigation: { openFile: vi.fn() }, files: { ...model.files,
+    stat: async (path: string) => ({ path, name: 'bracket', navigationPath: null, folder: '/models/parts', kind: 'file' as const, extension: 'xbf', size: 0 }) } };
+  const rows = [{ path: id, name: 'bracket', kind: 'model', opened: null, updated: Date.now() / 1000 }];
+  render(<FileViewer file={id} host={registered as any} renderers={[renderer]} state={{}} onStateChange={() => {}} recent={{ list: async () => rows }} />);
+  await screen.findByText('shown');
+  expect(fileName().tagName).toBe('BUTTON');
+  await user.click(fileName());
+  expect(screen.getByRole('tab', { name: 'Recent' }).getAttribute('aria-selected')).toBe('true');
+  await user.click(screen.getByRole('tab', { name: 'Files' }));
+  await waitFor(() => expect(list).toHaveBeenCalledWith('/models/parts', expect.anything()));
+  expect(labels()).not.toContain('File actions');
 });
 
 it('says why a file will not open, and that it does not exist when it is missing', async () => {

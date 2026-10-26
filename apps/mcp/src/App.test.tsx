@@ -70,16 +70,16 @@ function host(initial: HostContext, hostCapabilities: Record<string, unknown> = 
   };
   return { bridge, server };
 }
-// The home, as the server launches it: the library, with Open on a computer that has a chooser.
-const home: Launch = { protocol: 9, page: 'home', model: null, pick: true };
+// The home, as the server launches it: the library.
+const home: Launch = { protocol: 9, page: 'home', model: null };
 const sized = (notify: ReturnType<typeof vi.fn>) => notify.mock.calls.filter(([method]) => method === 'ui/notifications/size-changed');
 
 it('a tab host gets the page it always had, down to its bottom: the home, with no card to size and no full-size button', () => {
   const { bridge, server } = host({ displayMode: 'fullscreen', safeAreaInsets: { top: 4, bottom: 72 } });
   const { container } = render(<App bridge={bridge as any} server={server as any} launch={{ ...home, surface: 'sidebar' }} />);
-  // The home is the viewer with nothing open: its library, with this computer's Open.
+  // The home is the viewer with nothing open: its library, and no Open of its own.
   expect(viewer.props!.file).toBe('');
-  expect(typeof viewer.props!.library!.pick).toBe('function');
+  expect(typeof viewer.props!.library!.list).toBe('function');
   expect(container.querySelector('[aria-label="Full size"]')).toBeNull();
   expect(sized(bridge.notify)).toEqual([]);
   // The host's composer floats over the page's bottom: no strip is kept for it, and lists scroll
@@ -138,9 +138,9 @@ it('a model opened from the home is shown in place, joins the library with its p
 
 it('every view has the home and browses from its file\'s folder, but the host\'s file handler shows its file alone', () => {
   const { bridge, server } = host({ displayMode: 'fullscreen' });
-  render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 7, page: 'home', model: null, surface: 'tab', pick: false }} />);
-  // A thread's empty tab is the home; a computer with no chooser has no Open.
-  expect([viewer.props!.file, viewer.props!.library?.pick]).toEqual(['', undefined]);
+  render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 7, page: 'home', model: null, surface: 'tab' }} />);
+  // A thread's empty tab is the home.
+  expect(viewer.props!.file).toBe('');
   expect(viewer.props!.host.files.list).toBeDefined();
   cleanup();
   render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 7, page: 'viewer', model: '/work/a.step', surface: 'file' }} />);
@@ -245,7 +245,7 @@ it("a view keeps its own history of files, as a browser's tab does: the agent's 
   cleanup();
   // A view opened on the home: the home is its first step, so Back from the first file returns
   // there, and Forward to the file.
-  render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 7, page: 'home', model: null, surface: 'tab', pick: false }} />);
+  render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 7, page: 'home', model: null, surface: 'tab' }} />);
   expect(at()).toEqual(['', false, false]);
   act(() => viewer.props!.onShow('/work/a.step'));
   expect(at()).toEqual(['/work/a.step', true, false]);

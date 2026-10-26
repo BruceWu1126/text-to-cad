@@ -201,7 +201,7 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   server travels this way, as the web page asks its own: the models -- a STEP's
   and an `.xbf`'s reads too, dispatched directly to the engine's document router
   that serves them (`/__cad/api/...`) -- the
-  library and its pictures, Open (`/__cad/pick`), Reveal, the person's analytics
+  library and its pictures, Reveal, the person's analytics
   answer and language, the update check. One route is the server's own, not the
   viewer's: `/__cad/browser`, the web viewer's page of what the view shows, and
   `/__cad/browser/open`, which opens that page in the person's browser, for Open in browser. Only the clipboard stays the host's: a
@@ -296,8 +296,7 @@ tunnel (which also carries a Quick Edit's views and annotation to the server, wh
 explorer's folders and search over it (`createCadFileSource`), its chat, its file menu
 (copy path, Reveal), the app menu's links (its Send feedback and
 an alert's Report Issue open a new issue), followed through `ui/open-link`,
-and its home: the library, with Open, the desktop's file chooser, where any file can be
-chosen. A view keeps its tab record in memory (`App.tsx`): the model on screen keeps
+and its home: the library. A view keeps its tab record in memory (`App.tsx`): the model on screen keeps
 its view — camera, Display settings, pose — through updates of it, and leaving it for
 another model or the home drops it, as in the web Viewer. A view the
 host creates again (its frame re-created) starts afresh: nothing names a view across its
@@ -352,13 +351,13 @@ build. A build names itself in the app menu (`vite.config.mjs`, through
 (`CADGEN_MCP_APP_DIR` overrides it); a wheel serves `cadgen/_runtime/mcp`,
 built by `scripts/bundle/bundle.sh`.
 
-## Live model addresses
+## Live models
 
-The catalog and open/show actions accept `script.py::name` as well as file paths. Python scripts open to a declaration list read without
-execution; selecting a model explicitly builds it. The shared viewer's In memory
-collection reads the installation engine's live metadata. It never enters saved
-recents or thumbnail storage, and disappears on worker retirement or engine restart.
-Rebuilding a named model updates the same view through the document version stream.
+A model is shown by its document's id, as the web Viewer shows it: the view reads the document
+the engine holds and never builds or imports a script, and no folder lists one. It is in the
+library by the engine's record, which its run wrote, with its picture; its name menu opens on
+Recent, and its Files lists the folder its record registered. Rebuilding the model updates the
+same view through the document version stream.
 
 The stdio peer exits with its host session; it deletes only that MCP session.
 There is no viewer subprocess or file-backed sidebar registry to clean up.

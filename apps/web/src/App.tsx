@@ -41,9 +41,8 @@ const DOCUMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 
 /**
  * The CAD Viewer's page: one document at a time, by the id its URL's path names (`/<id>`: a model's,
- * or a file's, which the server registers when it is opened), or the home (`/`) — the models opened
- * before, Open, and the folder of the most recent launch. A file opened by its path (Select File, the
- * home) is asked for its id first, and shown by it. The browser's own history is the way back:
+ * or a file's, which the server registers when it is opened), or the home (`/`): the models opened
+ * before. A file opened by its path (Select File) is asked for its id first, and shown by it. The browser's own history is the way back:
  * showing a document or the home is a new entry.
  */
 export default function App({ client, server, tabStore, notice = null, language: chosenLanguage = null }: { client: CadClient; server: CadServerInfo; tabStore: TabStore; notice?: UpdateNotice | null; language?: string | null }) {
@@ -95,30 +94,21 @@ export default function App({ client, server, tabStore, notice = null, language:
     window.addEventListener('popstate', sync);
     return () => window.removeEventListener('popstate', sync);
   }, []);
-  // Once the catalog has the document: the page is named after it, and a file joins the library every
-  // CAD view shares (counted, as a code, for analytics). A model, known by its id alone, does not.
+  // Once the catalog has the document: the page is named after it, and the library every CAD view
+  // shares says it was opened now: a file joins it (counted, as a code, for analytics), and a model,
+  // known by its id alone and in it since its run, has its opened time.
   const shown = useCallback((path: string | null) => {
     const entry = path ? client.entryOf?.(path) : null;
     document.title = path ? `CAD | ${entry?.name || path.split('/').pop()}` : 'CAD';
-    if (path && !DOCUMENT_ID.test(path)) void client.changeRecents({ action: 'open', path }).catch(() => {});
+    if (path) void client.changeRecents({ action: 'open', path }).catch(() => {});
   }, [client]);
-  // The folder of the most recent launch, which the home shows: read again each time the home is.
-  const [start, setStart] = useState(server.start || '');
-  useEffect(() => {
-    if (file) return undefined;
-    const controller = new AbortController();
-    void client.serverInfo({ fresh: true, signal: controller.signal }).then(info => setStart(String(info.start || '')), () => {});
-    return () => controller.abort();
-  }, [client, file]);
-  // The home: the library every CAD view shares, and Open with the desktop's chooser where the
-  // server's computer has one. A card's picture is the server's, by name.
+  // The home: the library every CAD view shares. A card's picture is the server's, by name.
   const library = useMemo<ModelLibrarySource>(() => ({
     list: () => client.recents(),
     change: (action, entry) => client.changeRecents({ action, path: entry.path }),
     thumbnail: name => Promise.resolve(cadApiUrl('/__cad/thumbnail', { origin: client.origin, params: { name } })),
     open: async entry => { await show(entry.path); },
-    ...(server.pick ? { pick: async () => { const picked = await client.pick(); if (picked) await show(picked); } } : {}),
-  }), [client, server.pick, show]);
+  }), [client, show]);
   const appearance = useTabAppearance(tabStore);
   const changeColorScheme = useCallback((value: string) => tabStore.settings.update({ appearance: value as Appearance }), [tabStore]);
   // The app menu's Theme row, over every file and on the home.
@@ -166,7 +156,7 @@ export default function App({ client, server, tabStore, notice = null, language:
     .then(info => info, error => (isEngineRefused(error) ? { refused: true } : null)) });
   const refused = askedRefused ?? readRefused;
   return <div className="relative flex h-svh flex-col overflow-hidden">{engineGone ? <EngineStopped locale={locale} refused={refused} /> : null}<div className="min-h-0 flex-1">
-    <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={next => { void show(next); }} onShown={shown} start={start}
+    <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={next => { void show(next); }} onShown={shown}
       library={library} onThumbnail={client.keepThumbnail} appSettings={appSettings}
       update={updateNotice ? <UpdateButton notice={updateNotice} copy={prompt => browserClipboard.writeText(prompt)} onLink={openTab} /> : null}
       colorScheme={colorScheme} language={language} />

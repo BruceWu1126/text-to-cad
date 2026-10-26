@@ -21,7 +21,6 @@ from pathlib import Path
 from unittest import mock
 from urllib.parse import quote
 
-from cadgen._internal.picker import FilePicker, PickerFailed
 from cadgen.viewer import handler as handler_module
 from cadgen.viewer.http_app import create_cad_app, host_is_allowed, hostname_only
 
@@ -212,10 +211,9 @@ class ServerInfo(HttpLayerTestCase):
         self.assertEqual(info["port"], self.fixture.port)
         # Where a developer's relative links resolve, spelled with "/". A viewer has no root.
         self.assertEqual(info["start"], self.fixture.root.replace(os.sep, "/"))
-        self.assertIsInstance(info["pick"], bool)
         # No tolerance: the page reads each part's one display mesh by its key.
         self.assertEqual(list(info), ["app", "identityToken", "platform", "user",
-                                      "start", "pick", "port", "pid"])
+                                      "start", "port", "pid"])
         self.assertEqual(headers["cache-control"], "no-store")
 
     def test_json_is_compact_and_not_ascii_escaped(self):
@@ -274,7 +272,8 @@ class Catalog(HttpLayerTestCase):
 
     def test_a_model_by_its_id_is_its_row_at_the_build_held_and_one_not_held_names_its_state(self):
         ident = "6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab"
-        answers = {"model_info": {"model": {"source": {"name": "cube"}, "version": "v1"}}}
+        script = os.path.join(self.fixture.root, "parts", "cube.py")
+        answers = {"model_info": {"model": {"source": {"name": "cube", "script": script}, "version": "v1"}}}
         app = self.fixture.app
 
         def catalog():
@@ -287,6 +286,8 @@ class Catalog(HttpLayerTestCase):
             # The row's hash is the build the engine holds: a rebuild is a new revision of the row.
             [row] = catalog()[1]["entries"]
             self.assertEqual((row["id"], row["file"], row["sourcePath"], row["hash"]), (ident, ident, None, "model:v1"))
+            # Its Files tab lists the folder its record registered: the script's, never read.
+            self.assertEqual(row["folder"], os.path.dirname(script).replace(os.sep, "/"))
             answers["model_info"] = {"model": {"source": {"name": "cube"}, "version": "v2"}}
             self.assertEqual(catalog()[1]["entries"][0]["hash"], "model:v2")
             # One it does not hold says why, in the engine's words, and its state.
@@ -324,45 +325,6 @@ class ExplorerRoutes(HttpLayerTestCase):
                 self.assertEqual(self.read(route, folder / "arm" / "link.step")[0], 404)
         with mock.patch("cadgen.viewer.folders.list_folder", side_effect=PermissionError("denied")):
             self.assertEqual(self.read("folder", folder)[0], 403)
-
-
-class Pick(HttpLayerTestCase):
-    """The home's Open: the desktop's chooser, held for the page (and never opened by a test)."""
-
-    def pick(self, **behaviour):
-        with mock.patch.object(FilePicker, "choose", **behaviour):
-            status, _, body = self.fixture.request("POST", "/__cad/pick", headers={"x-cadgen-viewer": "1"})
-        return status, json.loads(body)
-
-    def test_a_cad_file_is_its_path_and_anything_else_says_why(self):
-        chosen = os.path.join(self.fixture.root, "part.step")
-        self.assertEqual(self.pick(return_value=chosen), (200, {"path": chosen.replace(os.sep, "/")}))
-        self.assertEqual(self.pick(return_value=None), (200, {"cancelled": True}))
-        status, answer = self.pick(return_value=os.path.join(self.fixture.root, "notes.txt"))
-        self.assertEqual(status, 400)
-        self.assertIn("notes.txt is not one", answer["error"])
-        self.assertEqual(self.pick(side_effect=PickerFailed("no chooser here")), (500, {"error": "no chooser here"}))
-        self.assertEqual(self.fixture.request("POST", "/__cad/pick")[0], 403, "a page from another site cannot open it")
-
-    def test_a_second_open_while_one_is_up_says_so(self):
-        opened, release, answers = threading.Event(), threading.Event(), []
-
-        def run(argv, **_):
-            opened.set()
-            release.wait(10)
-            return subprocess.CompletedProcess(argv, 1, b"", b"")  # the person cancelled
-
-        with mock.patch("cadgen._internal.picker._command", return_value=(["chooser"], {}, False)), \
-                mock.patch("cadgen._internal.picker.subprocess.run", side_effect=run):
-            first = threading.Thread(target=lambda: answers.append(
-                self.fixture.request("POST", "/__cad/pick", headers={"x-cadgen-viewer": "1"})[0]))
-            first.start()
-            self.assertTrue(opened.wait(10))
-            second = self.fixture.request("POST", "/__cad/pick", headers={"x-cadgen-viewer": "1"})
-            release.set()
-            first.join(10)
-        self.assertEqual((second[0], json.loads(second[2])), (500, {"error": "A file chooser is already open."}))
-        self.assertEqual(answers, [200])
 
 
 class StaticDistAndSpa(HttpLayerTestCase):
@@ -581,7 +543,7 @@ class MethodHandling(HttpLayerTestCase):
                 self.assertNotIn("content-type", {k.lower() for k in headers})
 
     def test_a_route_asked_with_its_other_method_answers_405_naming_its_own(self):
-        for method, path, allowed in (("GET", "/__cad/pick", "POST"), ("GET", "/__cad/reveal", "POST"),
+        for method, path, allowed in (("GET", "/__cad/reveal", "POST"),
                                       ("GET", "/__cad/analytics/activity", "POST"), ("POST", "/__cad/server", "GET, HEAD")):
             with self.subTest(method=method, path=path):
                 status, headers, body = self.fixture.request(method, path, headers={"x-cadgen-viewer": "1"})

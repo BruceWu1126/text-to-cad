@@ -1,14 +1,15 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 // The built module: its Settings is the renderer kit's, whose JSX lives in .js files this runner does not compile.
-import { ModelLibrary, editedLabel } from '../../dist/library/ModelLibrary.js';
+import { ModelLibrary, libraryCards, mainModel } from '../../dist/library/ModelLibrary.js';
+import { ageLabel, lastActivity } from '../../dist/lib/age.js';
 import type { LibraryModel, ModelLibrarySource } from './ModelLibrary.js';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 const NOW = Date.UTC(2026, 8, 30, 12);
 const model = (name: string, extra: Partial<LibraryModel> = {}): LibraryModel =>
-  ({ path: `/work/parts/${name}`, name, folder: '/work/parts', opened: 1, modified: Date.now() / 1000 - 16 * 3600, pinned: false, missing: false, thumbnail: null, pictured: null, ...extra });
+  ({ path: `/work/parts/${name}`, name, folder: '/work/parts', opened: 1, updated: Date.now() / 1000 - 16 * 3600, pinned: false, missing: false, thumbnail: null, pictured: null, ...extra });
 
 function library(models: LibraryModel[], extra: Partial<ModelLibrarySource> = {}): ModelLibrarySource {
   return {
@@ -20,6 +21,14 @@ function library(models: LibraryModel[], extra: Partial<ModelLibrarySource> = {}
     ...extra,
   };
 }
+
+// A card's ⋯ menu, opened as a press opens it: once a render, as a second menu opened after the first in one jsdom render stays shut.
+async function menu(name: string) {
+  const trigger = screen.getByRole('button', { name: `Actions for ${name}` });
+  await act(async () => { fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' }); });
+  return screen.findByRole('menu');
+}
+const items = (open: HTMLElement) => within(open).getAllByRole('menuitem').map(item => item.textContent);
 
 it('heads the home with the TEXTTOCAD wordmark over GitHub, Discord and X and nothing else (the update, Full size and theme are the navbar\'s); no tagline', async () => {
   const links = { version: '0.7.4', release: 'r', x: 'https://x.com/earthtojake', github: 'https://github.com/earthtojake/text-to-cad', discord: 'https://discord.gg/x',
@@ -35,41 +44,34 @@ it('heads the home with the TEXTTOCAD wordmark over GitHub, Discord and X and no
   expect(nav.nextElementSibling?.querySelector('h1')?.textContent).toBe('Recent');
 });
 
-it('offers Open only where the host has a chooser, and opens and pins through the host', async () => {
-  const pick = vi.fn(async () => {});
-  render(<ModelLibrary library={library([], { pick })} onLayoutChange={() => {}} />);
-  await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Open', exact: true })); });
+it('opens and pins through the host, and with nothing yet says how a file gets here, with no Open of its own', async () => {
+  render(<ModelLibrary library={library([])} onLayoutChange={() => {}} />);
   // The toolbar keeps its search and layout switch with nothing to list yet.
+  expect(await screen.findByText('Open a CAD file to see it here.')).toBeTruthy();
   expect(screen.getByRole('searchbox', { name: 'Search models' })).toBeTruthy();
   expect(screen.getByRole('group', { name: 'Layout' })).toBeTruthy();
-  expect(pick).toHaveBeenCalledTimes(1);
-  // Empty, the library is one card that opens the chooser.
-  const card = await screen.findByRole('button', { name: 'Open File' });
-  await act(async () => { fireEvent.click(card); });
-  expect(pick).toHaveBeenCalledTimes(2);
-  cleanup();
-  // With no chooser, it says how a file gets here.
-  render(<ModelLibrary library={library([])} />);
-  expect(await screen.findByText('Open a CAD file to see it here.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Open', exact: true })).toBeNull();
   cleanup();
 
   const inPlace = library([model('a.step'), model('b.stl', { missing: true })]);
   render(<ModelLibrary library={inPlace} />);
   const open = await screen.findByRole('button', { name: 'Open a.step' });
-  expect(screen.queryByRole('button', { name: 'Open', exact: true })).toBeNull();
   expect((screen.getByRole('button', { name: 'Open b.stl' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByRole('button', { name: 'Open b.stl' }).textContent).toContain('File unavailable');
   await act(async () => { fireEvent.click(open); });
   expect(inPlace.open).toHaveBeenCalledWith(expect.objectContaining({ name: 'a.step' }));
-  // Pinned files come first, in the one list of Files.
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Pin b.stl' })); });
+  // Pinned files come first, in the one list of Files: Pin is the card's menu's.
+  await act(async () => { fireEvent.click(within(await menu('b.stl')).getByRole('menuitem', { name: 'Pin' })); });
+  expect(inPlace.change).toHaveBeenLastCalledWith('pin', expect.objectContaining({ name: 'b.stl' }));
   const files = within(screen.getByRole('list', { name: 'Files' })).getAllByRole('listitem');
   expect(files.map(item => within(item).getAllByRole('button')[0].getAttribute('aria-label'))).toEqual(['Open b.stl', 'Open a.step']);
-  expect(screen.getByRole('button', { name: 'Unpin b.stl' }).getAttribute('aria-pressed')).toBe('true');
-  // A pinned card's pin is filled; a card has no Remove of its own.
-  expect(screen.getByRole('button', { name: 'Unpin b.stl' }).querySelector('svg')?.getAttribute('fill')).toBe('currentColor');
-  expect(screen.getByRole('button', { name: 'Pin a.step' }).querySelector('svg')?.getAttribute('fill')).toBe('none');
-  expect(screen.queryByRole('button', { name: 'Remove a.step' })).toBeNull();
+  // A pinned card says so at rest; its menu offers Unpin.
+  expect(within(files[0]).getByRole('img', { name: 'Pinned' })).toBeTruthy();
+  expect(within(files[1]).queryByRole('img', { name: 'Pinned' })).toBeNull();
+  cleanup();
+  render(<ModelLibrary library={library([model('b.stl', { pinned: true })])} />);
+  await screen.findByRole('button', { name: 'Open b.stl' });
+  expect(items(await menu('b.stl'))).toEqual(['Open', 'Unpin', 'Delete']);
 });
 
 it('stands placeholders where the models will be while the list is read, and opens one at a time with a spinner over it', async () => {
@@ -103,11 +105,11 @@ it('stands placeholders where the models will be while the list is read, and ope
   expect(source.open).toHaveBeenCalledTimes(2);
 });
 
-it('names a card by its file and when it was edited, and switches between a grid and a list', async () => {
+it('names a card by its file and how long ago it was last active, and switches between a grid and a list', async () => {
   const layouts: string[] = [];
   const { rerender } = render(<ModelLibrary library={library([model('bracket.step')])} layout="grid" onLayoutChange={layout => layouts.push(layout)} />);
   const card = await screen.findByRole('button', { name: 'Open bracket.step' });
-  expect(card.textContent).toMatch(/^bracket\.stepEdited \d+h ago$/);
+  expect(card.textContent).toMatch(/^bracket\.step16h ago$/);
   expect(card.textContent).not.toContain('/work');
   expect(screen.getByRole('button', { name: 'Grid' }).getAttribute('aria-pressed')).toBe('true');
   fireEvent.click(screen.getByRole('button', { name: 'List' }));
@@ -115,29 +117,183 @@ it('names a card by its file and when it was edited, and switches between a grid
   rerender(<ModelLibrary library={library([model('bracket.step')])} layout="list" onLayoutChange={layout => layouts.push(layout)} />);
   expect(screen.getByRole('button', { name: 'List' }).getAttribute('aria-pressed')).toBe('true');
   expect(screen.getByRole('list', { name: 'Files' }).className).toContain('cad-library-list');
-  // A row can be removed.
-  expect(screen.getByRole('button', { name: 'Remove bracket.step' })).toBeTruthy();
+  // A row has the card's one menu.
+  expect(screen.getByRole('button', { name: 'Actions for bracket.step' })).toBeTruthy();
 });
 
-it('deletes a model from its row, in the word Delete, and removes a file from the list, its file kept', async () => {
+it('gives each card one menu: Open, Copy path and Reveal where the host can, Pin, then Delete', async () => {
   const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
-  const source = library([model('bracket.step'), model('arm', { path: id, kind: 'model' }), model('plate', { path: 'b' + id.slice(1), kind: 'shape' })]);
-  render(<ModelLibrary library={source} layout="list" />);
-  const deleting = await screen.findByRole('button', { name: 'Delete arm' });
-  await act(async () => { fireEvent.click(deleting); });
-  expect(source.change).toHaveBeenLastCalledWith('delete', expect.objectContaining({ path: id }));
-  expect(screen.getByRole('button', { name: 'Delete plate' })).toBeTruthy();
-  expect(screen.queryByRole('button', { name: 'Remove arm' })).toBeNull();
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Remove bracket.step' })); });
-  expect(source.change).toHaveBeenLastCalledWith('remove', expect.objectContaining({ name: 'bracket.step' }));
-  expect(screen.queryByRole('button', { name: 'Delete bracket.step' })).toBeNull();
+  const copied: string[] = [], revealed: string[] = [];
+  const fileActions = { platform: 'darwin' as const, perform: { 'copy-path': ({ path }: { path: string }) => { copied.push(path); }, reveal: ({ path }: { path: string }) => { revealed.push(path); } } };
+  const source = library([model('bracket.step'), model('arm', { path: id, kind: 'model', script: '/work/parts/arm.py' })]);
+  const shown = async (name: string) => {
+    cleanup();
+    render(<ModelLibrary library={source} fileActions={fileActions} />);
+    await screen.findByRole('button', { name: `Open ${name}` });
+    return menu(name);
+  };
+  let open = await shown('arm');
+  expect(items(open)).toEqual(['Open', 'Copy path', 'Reveal in Finder', 'Pin', 'Delete']);
+  // Delete is the last, after a rule, and destructive.
+  expect(open.querySelector('[role=separator]')?.nextElementSibling?.textContent).toBe('Delete');
+  expect(within(open).getByRole('menuitem', { name: 'Delete' }).getAttribute('data-variant')).toBe('destructive');
+  // A model's path is its script's.
+  await act(async () => { fireEvent.click(within(open).getByRole('menuitem', { name: 'Copy path' })); });
+  expect(copied).toEqual(['/work/parts/arm.py']);
+  open = await shown('bracket.step');
+  await act(async () => { fireEvent.click(within(open).getByRole('menuitem', { name: 'Reveal in Finder' })); });
+  expect(revealed).toEqual(['/work/parts/bracket.step']);
+  open = await shown('bracket.step');
+  await act(async () => { fireEvent.click(within(open).getByRole('menuitem', { name: 'Open' })); });
+  expect(source.open).toHaveBeenCalledWith(expect.objectContaining({ name: 'bracket.step' }));
+  cleanup();
+  // A host that can do nothing with a file on disk offers neither.
+  render(<ModelLibrary library={library([model('bracket.step')])} />);
+  await screen.findByRole('button', { name: 'Open bracket.step' });
+  expect(items(await menu('bracket.step'))).toEqual(['Open', 'Pin', 'Delete']);
 });
 
-it('says how long ago a file changed in the largest unit that is at least one', () => {
-  const ago = (seconds: number) => editedLabel(NOW / 1000 - seconds, NOW);
-  expect([ago(20), ago(5 * 60), ago(16 * 3600), ago(3 * 86400)]).toEqual(['Edited just now', 'Edited 5m ago', 'Edited 16h ago', 'Edited 3d ago']);
-  expect(ago(40 * 86400)).toMatch(/^Edited \S/);
-  expect(editedLabel(null, NOW)).toBe('');
+it('marks each card with its kind\'s glyph, and the chips filter models from files', async () => {
+  const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
+  render(<ModelLibrary library={library([model('bracket.step'), model('arm', { path: id, kind: 'model', script: '/work/parts/arm.py' })])} />);
+  const arm = await screen.findByRole('button', { name: 'Open arm' });
+  expect(arm.querySelector('[data-glyph]')?.getAttribute('data-glyph')).toBe('model');
+  expect(screen.getByRole('button', { name: 'Open bracket.step' }).querySelector('[data-glyph]')?.getAttribute('data-glyph')).toBe('file');
+  const chips = screen.getByRole('group', { name: 'Show' });
+  expect(within(chips).getAllByRole('button').map(chip => [chip.textContent, chip.getAttribute('aria-pressed')]))
+    .toEqual([['All', 'true'], ['Models', 'false'], ['Files', 'false']]);
+  const names = () => within(screen.getByRole('list', { name: 'Files' })).getAllByRole('listitem').map(item => within(item).getAllByRole('button')[0].getAttribute('aria-label'));
+  fireEvent.click(within(chips).getByRole('button', { name: 'Models' }));
+  expect(names()).toEqual(['Open arm']);
+  fireEvent.click(within(chips).getByRole('button', { name: 'Files' }));
+  expect(names()).toEqual(['Open bracket.step']);
+  fireEvent.click(within(chips).getByRole('button', { name: 'All' }));
+  expect(names()).toEqual(['Open bracket.step', 'Open arm']);
+  cleanup();
+  // With one kind alone there is nothing to tell apart: no chips.
+  render(<ModelLibrary library={library([model('bracket.step')])} />);
+  await screen.findByRole('button', { name: 'Open bracket.step' });
+  expect(screen.queryByRole('group', { name: 'Show' })).toBeNull();
+});
+
+it('folds a script\'s models under one card named for its main model, collapsed until opened in place', async () => {
+  const ids = ['0', '1', '2'].map(digit => `8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f1${digit}`);
+  const script = '/work/juno/juno.py';
+  const source = library([
+    model('wheel', { path: ids[0], kind: 'model', script, updated: 30 }),
+    model('juno', { path: ids[1], kind: 'model', script, updated: 10 }),
+    model('axle', { path: ids[2], kind: 'model', script, updated: 20 }),
+    model('bracket.step'),
+  ]);
+  render(<ModelLibrary library={source} />);
+  const juno = await screen.findByRole('button', { name: 'Open juno' });
+  const cards = within(screen.getByRole('list', { name: 'Files' })).getAllByRole('listitem');
+  expect(cards.filter(card => card.classList.contains('cad-library-card')).length).toBe(2);
+  const more = screen.getByRole('button', { name: 'and 2 more' });
+  expect(more.getAttribute('aria-expanded')).toBe('false');
+  expect(screen.queryByRole('button', { name: 'Open wheel' })).toBeNull();
+  fireEvent.click(more);
+  expect(more.getAttribute('aria-expanded')).toBe('true');
+  const folded = screen.getByRole('list', { name: 'The other models of juno' });
+  expect(within(folded).getAllByRole('button').map(row => row.getAttribute('aria-label'))).toEqual(['Open wheel', 'Open axle']);
+  // The card opens its main model; a folded one opens itself.
+  await act(async () => { fireEvent.click(juno); });
+  expect(source.open).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'juno' }));
+  await act(async () => { fireEvent.click(within(folded).getByRole('button', { name: 'Open axle' })); });
+  expect(source.open).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'axle' }));
+  // A search for a folded model keeps its card.
+  fireEvent.change(screen.getByRole('searchbox', { name: 'Search models' }), { target: { value: 'axle' } });
+  expect(screen.getByRole('button', { name: 'Open juno' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Open bracket.step' })).toBeNull();
+});
+
+it('names a script\'s card for the model named as its script is, else the one built last', () => {
+  const at = (name: string, updated: number) => model(name, { kind: 'model', script: '/w/parts.py', updated });
+  expect(mainModel([at('a', 1), at('parts', 0), at('b', 2)]).name).toBe('parts');
+  expect(mainModel([at('a', 1), at('b', 3), at('c', 2)]).name).toBe('b');
+  const cards = libraryCards([at('a', 1), model('x.step'), at('b', 3)]);
+  expect(cards.map(card => [card.item.name, card.folded.map(item => item.name)])).toEqual([['b', ['a']], ['x.step', []]]);
+});
+
+it('asks before Delete, in words that say what stays on disk, and the card leaves at once', async () => {
+  const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
+  const bracket = model('bracket', { path: id, kind: 'model', script: '/work/parts/bracket.py' });
+  let settle!: () => void;
+  const source = library([bracket, model('bracket.step')], {
+    change: vi.fn(() => new Promise<readonly LibraryModel[]>(resolve => { settle = () => resolve([model('bracket.step')]); })),
+  });
+  render(<ModelLibrary library={source} />);
+  await screen.findByRole('button', { name: 'Open bracket' });
+  await act(async () => { fireEvent.click(within(await menu('bracket')).getByRole('menuitem', { name: 'Delete' })); });
+  const dialog = await screen.findByRole('alertdialog');
+  expect(within(dialog).getByRole('heading').textContent).toBe('Delete bracket?');
+  expect(within(dialog).getByText("Removes the engine's record and its saved build. The script and any exported files stay on disk. Run the script to build it again.")).toBeTruthy();
+  expect(within(dialog).getAllByRole('button').map(button => button.textContent)).toEqual(['Cancel', 'Delete']);
+  // Cancel deletes nothing.
+  await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' })); });
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(source.change).not.toHaveBeenCalled();
+  cleanup();
+  render(<ModelLibrary library={source} />);
+  await screen.findByRole('button', { name: 'Open bracket' });
+  await act(async () => { fireEvent.click(within(await menu('bracket')).getByRole('menuitem', { name: 'Delete' })); });
+  await act(async () => { fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' })); });
+  // Deleted through the client, and gone from the list before it answers.
+  expect(source.change).toHaveBeenCalledWith('delete', expect.objectContaining({ path: id }));
+  expect(screen.queryByRole('button', { name: 'Open bracket' })).toBeNull();
+  await act(async () => { settle(); });
+  expect(screen.queryByRole('button', { name: 'Open bracket' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Open bracket.step' })).toBeTruthy();
+});
+
+it('asks to delete a file from the viewer alone, and a script\'s card with all its models', async () => {
+  const file = library([model('bracket.step')]);
+  render(<ModelLibrary library={file} />);
+  await screen.findByRole('button', { name: 'Open bracket.step' });
+  await act(async () => { fireEvent.click(within(await menu('bracket.step')).getByRole('menuitem', { name: 'Delete' })); });
+  let dialog = await screen.findByRole('alertdialog');
+  expect(within(dialog).getByRole('heading').textContent).toBe('Delete bracket.step from the viewer?');
+  expect(within(dialog).getByText("Removes the engine's record of this file. The file itself stays on disk.")).toBeTruthy();
+  await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' })); });
+  expect(file.change).toHaveBeenCalledWith('remove', expect.objectContaining({ name: 'bracket.step' }));
+  cleanup();
+  const script = '/work/juno/juno.py';
+  const ids = ['0', '1', '2'].map(digit => `8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f1${digit}`);
+  const juno = library([model('juno', { path: ids[0], kind: 'model', script }), model('wheel', { path: ids[1], kind: 'model', script }),
+    model('axle', { path: ids[2], kind: 'model', script })], { change: vi.fn(async () => []) });
+  render(<ModelLibrary library={juno} />);
+  await screen.findByRole('button', { name: 'Open juno' });
+  await act(async () => { fireEvent.click(within(await menu('juno')).getByRole('menuitem', { name: 'Delete' })); });
+  dialog = await screen.findByRole('alertdialog');
+  expect(within(dialog).getByRole('heading').textContent).toBe('Delete juno and its 3 models?');
+  await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' })); });
+  await waitFor(() => expect(juno.change).toHaveBeenCalledTimes(3));
+  expect((juno.change as ReturnType<typeof vi.fn>).mock.calls.map(([action, item]) => [action, item.name])).toEqual([['delete', 'juno'], ['delete', 'wheel'], ['delete', 'axle']]);
+});
+
+it('says how long ago with no verb, in the largest unit that is at least one, then the short date', () => {
+  const ago = (seconds: number) => ageLabel(NOW / 1000 - seconds, NOW);
+  expect([ago(20), ago(5 * 60), ago(2 * 3600), ago(3 * 86400)]).toEqual(['now', '5m ago', '2h ago', '3d ago']);
+  expect(ago(40 * 86400)).toBe(new Date(NOW - 40 * 86400_000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+  expect(ageLabel(null, NOW)).toBe('');
+});
+
+it('dates a row by its last activity, the later of when it was opened and updated', () => {
+  expect(lastActivity({ opened: 10, updated: 20 })).toBe(20);
+  expect(lastActivity({ opened: 30, updated: 20 })).toBe(30);
+  expect(lastActivity({ opened: null, updated: 20 })).toBe(20);
+  expect(lastActivity({ opened: null, updated: null })).toBeNull();
+});
+
+it('shows a model by its run and a file by its opening, whichever came last', async () => {
+  const hour = 3600, now = Date.now() / 1000;
+  const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
+  render(<ModelLibrary library={library([
+    model('arm', { path: id, kind: 'model', opened: null, updated: now - 2 * hour }),
+    model('plate.step', { opened: now - 5 * hour, updated: now - 30 * hour }),
+  ])} />);
+  expect((await screen.findByRole('button', { name: 'Open arm' })).textContent).toBe('arm2h ago');
+  expect(screen.getByRole('button', { name: 'Open plate.step' }).textContent).toBe('plate.step5h ago');
 });
 
 it('shows why an open failed where the library shows it', async () => {
@@ -152,8 +308,8 @@ it('asks for a picture of each card on screen that has none or an old one, one a
   const edited = Date.now() / 1000 - 60;
   let models = [
     model('new.step'),
-    model('current.step', { thumbnail: 'current.png', pictured: edited + 30, modified: edited }),
-    model('old.step', { thumbnail: 'old.png', pictured: edited - 3600, modified: edited }),
+    model('current.step', { thumbnail: 'current.png', pictured: edited + 30, updated: edited }),
+    model('old.step', { thumbnail: 'old.png', pictured: edited - 3600, updated: edited }),
     model('gone.step', { missing: true }),
   ];
   const list = vi.fn(async () => models);
@@ -174,17 +330,17 @@ it('asks for a picture of each card on screen that has none or an old one, one a
 });
 
 // The home stays up while an agent rebuilds a model it lists: the card is pictured again.
-it('pictures a card again when its file is edited while the home is up', async () => {
+it('pictures a card again when it is updated while the home is up', async () => {
   const edited = Date.now() / 1000 - 60;
-  let models = [model('plate.step', { thumbnail: 'plate.png', pictured: edited + 30, modified: edited })];
+  let models = [model('plate.step', { thumbnail: 'plate.png', pictured: edited + 30, updated: edited })];
   const list = vi.fn(async () => models);
   const picture = vi.fn(async () => true);
   render(<ModelLibrary library={library(models, { list })} picture={picture} />);
   await screen.findByRole('button', { name: 'Open plate.step' });
   expect(picture).not.toHaveBeenCalled();
-  models = [{ ...models[0], modified: edited + 60 }];
+  models = [{ ...models[0], updated: edited + 60 }];
   await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
-  await waitFor(() => expect(picture.mock.calls.map(([item]) => item.modified)).toEqual([edited + 60]));
+  await waitFor(() => expect(picture.mock.calls.map(([item]) => item.updated)).toEqual([edited + 60]));
 });
 
 it('reads its list again every couple of seconds while the home is up, keeping the cards when nothing changed', async () => {

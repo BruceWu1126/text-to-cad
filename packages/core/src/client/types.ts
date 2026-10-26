@@ -8,6 +8,8 @@ export interface CadEntry {
   name?: string;
   /** The file to browse from; null for a document with no file of its own (a model's). */
   sourcePath?: string | null;
+  /** A model's: the folder its record registered (its script's), which its name menu's Files lists. */
+  folder?: string | null;
   kind?: string;
   format?: string;
   sourceFormat?: string;
@@ -20,24 +22,26 @@ export interface CadEntry {
 export interface CadServerInfo {
   autoReload?: boolean;
   identityToken?: string;
-  /** The folder of the most recent launch (`cadgen viewer`), which the home shows. */
+  /** The folder of the most recent launch (`cadgen viewer`), which a launch's relative files are read from. */
   start?: string;
-  /** Whether this computer has a file chooser for the home's Open. */
-  pick?: boolean;
   /** `darwin`, `win32` or `linux`: which file manager Reveal opens. */
   platform?: string;
   [key: string]: unknown;
 }
 /** A model in the library every CAD view shares (`GET /__cad/recents`): times in seconds. */
 export interface CadRecent {
-  path: string; name: string; folder: string; opened: number;
-  /** When the file last changed; null once it is gone. */
-  modified: number | null;
+  path: string; name: string; folder: string;
+  /** When a page last opened it; null for a model no page has opened. */
+  opened: number | null;
+  /** When it last changed: a file's time on disk (null once it is gone), a model's run. */
+  updated: number | null;
   pinned: boolean; missing: boolean;
   /** The picture's name, for `thumbnail()`, and when it was taken. */
   thumbnail: string | null; pictured: number | null;
   /** A CAD file on disk, or a document built from code: a model's, or a shape a program handed over. */
   kind: 'file' | 'model' | 'shape';
+  /** A model's or a shape's: the script it was built from (a shape's home). */
+  script?: string;
 }
 /** Whether the person's usage stats are sent (`/__cad/analytics`; nothing asks): `reason` says who decided. */
 export interface CadConsent { sharing: boolean; reason: 'default' | 'untold' | 'choice' | 'environment' | 'unavailable'; policy: string; saved?: boolean }
@@ -181,8 +185,6 @@ export interface CadWorkspaceService {
   keepThumbnail(png: Blob, path: string): Promise<CadRecent[]>;
   /** A library picture, by the name the library gives it, as a data URL; null when there is none. */
   thumbnail(name: string, options?: CadRequestOptions): Promise<string | null>;
-  /** Open: the model the person picks with the desktop's chooser, by its absolute path, or null. */
-  pick(): Promise<string | null>;
   /** Show a file, by its absolute path, in the desktop's file manager. */
   reveal(path: string): Promise<void>;
   /** Whether the person's usage stats are sent; with `share`, their answer (the app menu's toggle). */

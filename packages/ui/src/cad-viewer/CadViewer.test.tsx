@@ -238,16 +238,3 @@ test('a document named by its id is its row, joined by id: the host hears its fi
   const detached = failure('detached', `bracket (${id}) is detached: /m/parts.py is gone, and nothing builds it again; delete it from the home`);
   expect(detached.getByText('This model’s script is gone')).toBeTruthy();
 });
-
-test('the home shows the folder of the most recent launch, and a file in it opens', async () => {
-  const client = cadClient();
-  client.folder.mockImplementation(async (path: string) => ({ path, entries: [{ name: 'parts', kind: 'directory' }, { name: 'a.step', kind: 'file' }], truncated: false }));
-  const shows: string[] = [];
-  render(<CadViewer client={client as never} host={ports(client)} tabStore={createTabStore(memoryTabRecord())} live={createLiveRegistry()}
-    file="" start="/work/c" library={library} onShow={next => shows.push(next)} />);
-  const home = render(props().presentation!.home as ReactElement);
-  const folder = await home.findByRole('region', { name: 'Launch folder' });
-  expect(client.folder).toHaveBeenCalledWith('/work/c', expect.anything());
-  fireEvent.click(await within(folder).findByText('a.step'));
-  expect(shows).toEqual(['/work/c/a.step']);
-});

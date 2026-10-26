@@ -14,12 +14,29 @@ export interface FileMetadata extends FileEntry {
    * file menu.
    */
   navigationPath?: string | null;
+  /**
+   * A document with no file of its own: the folder it was registered from (a model's script's),
+   * where its Files tab starts.
+   */
+  folder?: string | null;
   size: number;
   extension: string;
   mime?: string;
   /** A source hint; each registration remains responsible for matching. */
   mediaType?: string;
   revision?: string;
+}
+/** A document of the host's library, as the name menu's Recent lists it (`@text-to-cad/ui/library`'s rows). */
+export interface RecentDocument {
+  /** A file's absolute path, a model's id: what `navigation.openFile` opens. */
+  path: string;
+  name: string;
+  /** `model` or `shape` for a document built from code; a file otherwise. */
+  kind?: string;
+  /** When a page last opened it, and when it was last updated, in seconds. */
+  opened?: number | null;
+  updated?: number | null;
+  missing?: boolean;
 }
 export interface FileActions {
   platform?: Platform;
@@ -182,6 +199,11 @@ export interface FileViewerProps {
   openInBrowser?: ReactNode;
   /** The view's own history, where the host keeps one: Back and Forward after the navbar's logo, over a file and on the home. */
   history?: ViewerHistory;
+  /**
+   * The host's library (a CAD host's Home), where it has one: the name menu's Recent tab lists it,
+   * models and files alike, by last activity, and a row opens its document through `navigation.openFile`.
+   */
+  recent?: { list(): Promise<readonly RecentDocument[]> };
   /** The host's notice, shown at the viewport's top-right once the file is on screen (`RendererViewProps.notice`). */
   notice?: ReactNode;
   onError?: (error: Error) => void;

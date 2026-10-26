@@ -1,7 +1,7 @@
 # FileViewer
 
 `@text-to-cad/ui/file-viewer` exports the complete file view: one file by its
-absolute path, under the navbar, with the explorer its name opens, renderer loading,
+absolute path, under the navbar, with the name menu its name opens (Recent and Files), renderer loading,
 and the loading and error pages.
 It imports no concrete renderer. Applications compose registrations from the
 separate `@text-to-cad/ui/renderers/*` entry points and their own
@@ -26,7 +26,7 @@ lifetime. Changing their object identity cancels outstanding document work.
 path is absolute and `/`-separated (`/a/b.step`, `C:/a/b.step`); containment and
 authorization remain in the host service. The host controls navigation
 (`navigation.openFile(path)` where the view can show another file, and `home()` where it
-has a home; a view that shows one file alone has neither, and no explorer) and keeps
+has a home; a view that shows one file alone has neither, and no name menu) and keeps
 `FileViewerState` in its tab store (`@text-to-cad/ui/tab-store`; `useTabViewerState`
 derives it): `renderers`, under encoded `[file path, renderer ID]` keys, each the
 file's view.
@@ -89,13 +89,14 @@ picture: the home's thumbnails); the CAD viewer's Preview keeps it. Over a file,
 - Back and Forward, where the host keeps the view's own history (`history`, a
   `ViewerHistory`: the CAD app's views; a browser's page has its own and hands none): two
   arrows, each there always and disabled where it has nowhere to go;
-- the open file's name: a button that opens the explorer where the source can both list
-  and search, and plain text otherwise;
+- the open file's name, after its kind's glyph (a model's code glyph, a file's type icon): a
+  button that opens the name menu where the view can show another document, and plain text
+  otherwise;
 - the ⋯ file menu: Copy path, and Reveal in Finder / Show in Explorer / Show in file
   manager, each only where the host's `fileActions` can do it, and no ⋯ where it can do
   none.
 
-The logo, Back and Forward, the name (where it opens the explorer) and the ⋯ are one kind of control: transparent
+The logo, Back and Forward, the name (where it opens the name menu) and the ⋯ are one kind of control: transparent
 at rest, the same accent background while the pointer is on it and while its menu is open, a
 pointer cursor, and no tooltip.
 
@@ -105,10 +106,18 @@ own view controls (a 3D view's Display and Preview, or Preview's settings and Ex
 follow, in the box FileViewer hands it (`navbarSlot`, `data-view-controls`), and last the
 host's Open in browser (`openInBrowser`), where the host has one.
 
-The explorer (`navigation/FolderExplorer.jsx`) is a popover under the file's name, a
-fixed 18rem wide and never resized. It floats over the view, so opening it resizes
-nothing, and it is built anew on each opening, so it starts in the open file's
-folder, its filter taking the keyboard (on a phone the explorer holds focus itself, so no
+The name menu is a popover under the file's name, a fixed 18rem wide and never resized. It
+floats over the view, so opening it resizes nothing, and it is built anew on each opening. Two
+stock shadcn Tabs top it, **Recent** and **Files**, over the explorer's own style; it opens on
+Recent over a model and on Files over a file, and a menu with one of the two has no tabs.
+**Recent** (`navigation/RecentList.jsx`) lists the host's library (`FileViewerProps.recent`, a
+`list()` of `RecentDocument`s), models and files alike, by last activity (the later of each
+row's `opened` and `updated`), eight at most, in the explorer's compact rows: the kind's glyph,
+the name, and its age with no verb at the right; the document on screen is highlighted, a row
+opens its document through `navigation.openFile`, and there is no footer.
+**Files** is the explorer (`navigation/FolderExplorer.jsx`). It starts in the open file's
+folder, or a document's `folder` where it has no file of its own (a model's registered folder),
+its filter taking the keyboard (on a phone the menu holds focus itself, so no
 keyboard comes up). It lists one folder at a time through `source.list`: the folder's
 subfolders, then its CAD files, the open file highlighted, in compact rows (a folder's glyph
 its disclosure chevron). A press on a subfolder opens it inline, under itself and a little

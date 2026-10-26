@@ -17,8 +17,8 @@ belong to apps through the [host contract](viewer-host.md).
 ## Ownership and layout
 
 FileViewer owns the navbar — the logo's app menu ([Settings](#settings)) included, built from
-the host's `links` and the `appSettings` `CadViewer` hands it — and the file explorer (a
-popover under the file's name). RendererShell owns the scene's chrome: the tool strip and
+the host's `links` and the `appSettings` `CadViewer` hands it — and the name menu (a popover
+under the file's name: Recent and Files, the file explorer). RendererShell owns the scene's chrome: the tool strip and
 the view's controls at its end (Display, Preview), the sub-toolbar of the tool in hand under
 it, the file sidebar, Quick Edit, the view cube and Preview. Renderers supply
 their tools, their tools' rows, their sidebar sections and their document state; the shell never
@@ -41,12 +41,13 @@ none.
   host keeps the view's own history (`history`: the CAD app's views, which no browser holds),
   **Back** and **Forward**, two arrows walking it as a browser's do, from file to file and to
   and from the home (a step like a file), each there always and disabled where it has
-  nowhere to go; then the open file's name and its ⋯. Each of these that
+  nowhere to go; then the open file's name, after its kind's glyph (a model's code glyph, a
+  file's type icon), and its ⋯. Each of these that
   is a control (`NAV_ITEM_CLASS`) is transparent at rest, takes the same accent background
   while the pointer is on it and while its menu is open, has a pointer cursor and no tooltip:
   it says what it is. The name
-  is that control where it opens the explorer (below), where the host's files can be
-  browsed; where they cannot it is plain text. The ⋯
+  is that control where it opens the name menu (below), where the view can show another
+  document; where it cannot it is plain text. The ⋯
   is the file menu: Copy path, and Reveal in Finder / Show in Explorer / Show in file
   manager, each only where the host can do it, and no ⋯ where it can do none. The name has
   no right-click menu and there are no crumbs. The left's controls sit edge to edge, spaced
@@ -78,20 +79,36 @@ none.
   host shows the view small — the same buttons, sizes and places as over a file. Under it,
   the page: the TEXTTOCAD wordmark and byline, then GitHub (its mark, a link to the project:
   it is open source), Discord and X, as icon links (GitHub and Discord are the app menu's
-  too, X its footer's "Made by"; no light/dark button: Theme is the menu's), then Recent with its search, grid/list switch
-  and Open where the host has a file chooser: the models opened before, pinned first, as cards
-  or rows.
+  too, X its footer's "Made by"; no light/dark button: Theme is the menu's), then Recent with its
+  search and grid/list switch, the type chips (All, Models, Files: shadcn Buttons, the chosen one
+  secondary) where models and files are both listed, then the documents opened or built before,
+  pinned first, then by last activity, as cards or rows. The home is the library alone: no Open,
+  no folder of a launch. A card is its picture, its kind's glyph, its name and its last activity
+  with no verb ("2h ago"); a pinned one shows its pin at rest. Its one ⋯ menu (a stock
+  DropdownMenu) holds Open, Copy path and Reveal where the host can, Pin or Unpin, a rule, then
+  Delete (destructive), which asks first in a stock AlertDialog saying what goes and what stays
+  on disk, Cancel / Delete; the card leaves the list at once. A script that declares several
+  models is one card, named for its main model, its others folded under it ("and 27 more"),
+  collapsed until opened in place.
   The update shows only for a release
   later than the version the page names, whatever the host says. A file that will not open
   shows a page under the navbar: "File does not exist" and the file's path, or "Could not
   open that file" and the reason, each with **Go home** where the host has a home. A view
   drawn as a picture (`compact`, the home's thumbnails) has no navbar either, and draws the
   model alone: no tools, view actions, cube or Quick Edit.
-- **File explorer** is a popover under the file's name (`FolderExplorer.jsx`), aligned to
-  the name's left edge, 18rem wide and never resized, as tall as its rows up to 28rem or
-  the room below it: past that its list scrolls. It floats over the view and the file
-  sidebar, so opening it resizes and moves nothing. It starts in the open file's folder and
-  lists one folder at a time — its subfolders, then its CAD files — in compact rows: one 24px
+- **Name menu** is a popover under the file's name, aligned to the name's left edge, 18rem wide
+  and never resized: two stock shadcn Tabs on top, **Recent** and **Files**, sized to the
+  explorer's type (`text-xs`, a 28px list), and under them the explorer's own style. It opens on
+  Recent over a model and on Files over a file; a host with one of the two has no tabs, and one
+  with neither a plain name. **Recent** (`RecentList.jsx`) is the host's library, models and files
+  alike, by last activity, eight at most, in the explorer's compact rows: the kind's glyph, the
+  name, and at the right its age with no verb ("2h ago"); the document on screen is highlighted,
+  a press opens a document as a pick in the explorer does, Up and Down walk the rows, and there is
+  no footer: the home is one click away. **Files** is the file explorer (`FolderExplorer.jsx`),
+  below. The menu is as tall as its rows up to 28rem or the room below it: past that its list
+  scrolls. It floats over the view and the file sidebar, so opening it resizes and moves
+  nothing. The explorer starts in the open file's folder (a model's: the folder its record
+  registered) and lists one folder at a time — its subfolders, then its CAD files — in compact rows: one 24px
   line of 12px text each, its kind a small light glyph in one column 5px in from the row's
   left end and 4px before the name (a folder its disclosure chevron, with no folder icon; a
   file its type's icon), as the file sidebar's trees draw theirs. A press on a subfolder opens it
@@ -104,9 +121,9 @@ none.
   and only the folder it is in, left alone beside the "…", is cut (its name a hint while it
   is). The folder it is in reads in the foreground color, the others muted; there is no up
   arrow, and the open file is highlighted, the list opening scrolled to centre its row, once (a
-  long folder's too). Opened, its filter has the keyboard, so typing
-  finds a file at once; on a phone the explorer itself holds focus, keeping the keyboard
-  down. "Filter files..." under the breadcrumb searches
+  long folder's too). Opened on Files, its filter has the keyboard, so typing
+  finds a file at once; opened on Recent, the menu holds it and Down takes it into the rows; on
+  a phone the menu itself holds focus, keeping the keyboard down. "Filter files..." under the breadcrumb searches
   every file nested under the folder (the server's bounded search, debounced 150ms, each
   keystroke cancelling the search before it); a search that stopped early says "Stopped
   early. Keep typing to narrow the search." Up and Down move between the filter and the

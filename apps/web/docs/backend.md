@@ -64,8 +64,8 @@ VIEWER_PYTHON=<checkout>/.venv/bin/python \
 The launch's folder is the first of `INIT_CWD` and the process working
 directory that is outside `apps/web`; otherwise Vite launches in `<checkout>/apps`. npm preserves its
 invocation directory in `INIT_CWD`, so the command above chooses that folder
-while `--prefix` locates the app. The folder is `serverInfo.start`: the home shows it,
-and it bounds nothing.
+while `--prefix` locates the app. The folder is `serverInfo.start`: a launch's relative files
+are read from it, and it bounds nothing.
 
 Vite serves the client from source with HMR. It spawns
 `python -m cadgen.viewer --api-only --json` (a launch) and proxies `/__cad` to that
@@ -165,7 +165,7 @@ fetch every read of it is made with (the CAD app's goes over its tunnel).
 
 | Route | Purpose |
 |---|---|
-| `GET /__cad/server` | Server identity: `identityToken`, `platform` (which file manager Reveal opens), `user`, `start` (the folder of the most recent launch, which the home shows), `pick` (a file chooser exists), `port`, `pid`. |
+| `GET /__cad/server` | Server identity: `identityToken`, `platform` (which file manager Reveal opens), `user`, `start` (the folder of the most recent launch, which its relative files are read from), `port`, `pid`. |
 | `GET /__cad/catalog?file=...` | One file's catalog row, with its document `id`, and its `revision`. |
 | `GET /__cad/catalog?id=...` | The row of the document of that id, or none and `missing`. |
 | `GET /__cad/folder?path=...` | One folder's subfolders and CAD files. |
@@ -174,10 +174,9 @@ fetch every read of it is made with (the CAD app's goes over its tunnel).
 | `GET /__cad/xbf?file=...` | A STEP, an `.xbf` or a document id, served by the cadgen engine: `{doc, url}`, `202 {state: "reading", retryMs}` while the engine reads it, or the engine's refusal (400). `&held=1`: `{held}`, without starting a read. |
 | `GET /__cad/api/...` | Direct engine routes: document structure, part buffers, element facts, groups, volume, look, image and version wait. |
 | `GET /__cad/drawing?file=...` | A `.dxf` flattened to 2D render primitives; the DXF pane's only source. |
-| `GET /__cad/recents` | The model library every CAD view shares. |
-| `POST /__cad/recents` | `{action, path, png?}`: `open` (an existing CAD file on screen; counted for analytics), `pin`, `unpin`, `remove`, `thumbnail`; answers the library as it now is. |
+| `GET /__cad/recents` | The model library every CAD view shares: pinned first, then by last activity; each row with `opened` (when a page last opened it) and `updated` (a file's time on disk, a model's run: a script is never read for it). |
+| `POST /__cad/recents` | `{action, path, png?}`: `open` (an existing CAD file on screen, counted for analytics; a model's id, whose record notes the time), `pin`, `unpin`, `remove` (a file's record, the file kept), `delete` (a model's document and record: the engine's `delete`), `thumbnail`; answers the library as it now is. |
 | `GET /__cad/thumbnail?name=...` | A library picture, by its content name. |
-| `POST /__cad/pick` | The desktop's own file chooser, held open while the person chooses: `{path}`, `{cancelled: true}`, a 400 naming the kinds CAD opens, a 500 with the chooser's own sentence (one already open among them). |
 | `POST /__cad/reveal` | `{path}`: show a file in the desktop's file manager. |
 | `POST /__cad/clipboard` | A PNG onto this machine's clipboard: the web page's picture copy, which asks the browser for no permission. |
 | `GET`/`POST /__cad/analytics` | Whether the person's usage stats are sent, and why; `{share}` is their answer (the app menu's toggle). Nothing asks. |
@@ -194,7 +193,7 @@ DNS-rebinding defense. The trust model is documented in
 `cadgen.viewer.http_app`; keep these gates intact.
 
 The service serves local bytes and JSON. It has no download/export route, and
-its host-native actions are the ones above (reveal, pick, clipboard). CLI
+its host-native actions are the ones above (reveal, clipboard). CLI
 generation/export remain outside this HTTP interface.
 
 Backend tests live in `tests/python/packages/cadgen/viewer` and are run by

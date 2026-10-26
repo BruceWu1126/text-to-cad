@@ -96,10 +96,14 @@ class Recent:
     """One entry of Recents: a file's (``path`` its canonical path) or a model's (``path`` its id)."""
 
     path: str
-    opened: float
+    # When a page last opened it (the record's ``opened``); None for a model no page has opened.
+    opened: float | None
+    # When it last changed: a file's mtime (the file itself; None once it is gone), a model's or a
+    # shape's run (the record's ``built``). A model's script is never read for it.
+    updated: float | None = None
     pinned: bool = False
     thumbnail: str | None = None
-    # When the picture was taken, in seconds: a file changed since has an old one.
+    # When the picture was taken, in seconds: a document updated since has an old one.
     pictured: float | None = None
     # ``file``, ``model`` or ``shape`` (the record's ``kind``).
     kind: str = "file"
@@ -108,43 +112,54 @@ class Recent:
     script: str | None = None
     rebuild: str | None = None
     # A shape handed over: its home is the script or the folder it was handed over from, nothing
-    # builds it again, and ``shown`` says so, from the program that handed it over; ``built`` is when.
+    # builds it again, and ``shown`` says so, from the program that handed it over.
     shown: str | None = None
-    built: float | None = None
+
+    @property
+    def activity(self) -> float:
+        """Its last activity, the library's order: the later of when it was opened and updated."""
+        return max(self.opened or 0, self.updated or 0)
 
     def public(self) -> dict[str, Any]:
-        on_disk = self.script if self.kind != "file" else self.path
-        try:
-            status = os.stat(on_disk) if on_disk else None
-        except OSError:
-            status = None
-        exists = status is not None and stat.S_ISREG(status.st_mode)
-        shape = self.kind == "shape"
-        if shape:
-            # Its document is the engine's, not its home's: a folder home (a REPL's) is where it came
-            # from, and nothing of it goes missing (``registry.detached``).
-            exists = True
-            status = status if status is not None and stat.S_ISREG(status.st_mode) else None
+        """The row a home reads: both times (``opened``, ``updated``). Of a model's script only whether
+        it is still there is asked (``missing``), never its contents or its times: the engine reads a
+        script in a run alone."""
+        if self.kind == "file":
+            present, folder = self.updated is not None, os.path.dirname(self.path)
+        else:
+            # A shape's document is the engine's, not its home's: a folder home (a REPL's) is where it
+            # came from, and nothing of it goes missing (``registry.detached``).
+            present = self.kind == "shape" or bool(self.script and os.path.isfile(self.script))
+            folder = self.script if self.script and self.kind == "shape" and os.path.isdir(self.script) \
+                else os.path.dirname(self.script or "")
         found = {
             "path": self.path,
             "name": self.name or os.path.basename(self.path),
-            "folder": os.path.dirname(on_disk or ""),
+            # Where it is, as the person reads it: a file's folder, a model's script's.
+            "folder": folder,
             "opened": self.opened,
-            # When the file (a model's script) last changed, in seconds, for "Edited 16h ago"; None once it is gone.
-            "modified": (status.st_mtime if status is not None else self.built) if shape else
-            status.st_mtime if exists else None,
+            "updated": self.updated,
             "pinned": self.pinned,
             # A file that is gone, or a model whose script is (``detached``): listed, and removable.
-            "missing": not exists,
+            "missing": not present,
             "thumbnail": self.thumbnail,
             "pictured": self.pictured,
         }
         found["kind"] = self.kind
         if self.kind != "file":
             found.update(id=self.path, script=self.script, rebuild=self.rebuild)
-        if shape:
+        if self.kind == "shape":
             found.update(shown=self.shown or "a shape handed over: no script to rerun")
         return found
+
+
+def _mtime(path: str) -> float | None:
+    """A CAD file's time on disk; None once it is gone (or is no file)."""
+    try:
+        status = os.stat(path)
+    except OSError:
+        return None
+    return status.st_mtime if stat.S_ISREG(status.st_mode) else None
 
 
 class RecentStore:
@@ -161,11 +176,15 @@ class RecentStore:
     # -- writes ----------------------------------------------------------------
 
     def opened(self, path: str) -> None:
-        """A CAD file opened on a page: its record, opened now."""
-        from cadgen.engine.ids import canonical, file_id
+        """A CAD file opened on a page: its record, opened now. A model's id: its record (the
+        engine's, written by its run) says when a page opened it, and nothing else of it changes."""
+        from cadgen.engine.ids import canonical, file_id, is_id
 
-        found = canonical(path)
         now = time.time()
+        if is_id(path):
+            self._change(path, lambda record: {**record, "opened": now})
+            return
+        found = canonical(path)
 
         def change(record):
             record = dict(record or {"id": file_id(found), "kind": "file"})
@@ -207,7 +226,7 @@ class RecentStore:
     # -- reads -----------------------------------------------------------------
 
     def list(self) -> list[Recent]:
-        """Pinned first, then most recently opened or built; at most ``LIMIT``."""
+        """Pinned first, then by last activity (``Recent.activity``), newest first; at most ``LIMIT``."""
         from cadgen.engine import registry as registering
         from cadgen.engine.models import Models
 
@@ -217,17 +236,17 @@ class RecentStore:
             common = {"pinned": bool(record.get("pinned")), "thumbnail": preview.get("thumbnail"),
                       "pictured": preview.get("pictured")}
             if record.get("kind") == "file" and record.get("opened"):
-                entries.append(Recent(path=str(registering.home(self.registry, record)), opened=float(record["opened"]),
-                                      **common))
+                path = str(registering.home(self.registry, record))
+                entries.append(Recent(path=path, opened=float(record["opened"]), updated=_mtime(path), **common))
             elif record.get("kind") in ("model", "shape"):
                 program = registering.program(self.registry, record)
                 entries.append(Recent(path=record["id"], kind=record["kind"], name=record.get("entry"),
                                       script=str(registering.home(self.registry, record)),
                                       rebuild=registering.command(self.registry, record),
                                       shown=Models.shown(str(program) if program else None)
-                                      if record["kind"] == "shape" else None, built=record.get("built"),
-                                      opened=float(max(record.get("opened") or 0, record.get("built") or 0)), **common))
-        ordered = sorted(entries, key=lambda entry: (not entry.pinned, -entry.opened))
+                                      if record["kind"] == "shape" else None, updated=record.get("built"),
+                                      opened=record.get("opened"), **common))
+        ordered = sorted(entries, key=lambda entry: (not entry.pinned, -entry.activity))
         return ordered[:LIMIT]
 
     def _sweep_thumbnails(self) -> None:

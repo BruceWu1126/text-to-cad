@@ -18,7 +18,6 @@ from pathlib import Path
 from unittest import mock
 from urllib.parse import quote
 
-from cadgen._internal.picker import FilePicker
 from cadgen.mcp.shim import initialize_params
 from cadgen.mcp.protocol import RequestContext, RpcError
 from cadgen.viewer.recents import RecentStore
@@ -190,7 +189,7 @@ class TabServerTest(_Session):
         def request(url, headers=None, body=None, method="GET"):
             return self.call("cad_http", {"method": method, "url": url, "headers": headers or {},
                                          "body": base64.b64encode(json.dumps(body).encode()).decode() if body is not None else ""})
-        for url in ("/__cad/server", "/__cad/pick", "/__cad/recents", "/__cad/asset?file=x",
+        for url in ("/__cad/server", "/__cad/recents", "/__cad/asset?file=x",
                     "/__cad/analytics/activity", "/__cad/analytics?share=true"):
             with self.subTest(url=url):
                 blocked = request(url, {"x-cadgen-viewer": "1", "range": "bytes=0-20", "if-range": "guessed"})
@@ -261,8 +260,7 @@ class TabServerTest(_Session):
         self.assertEqual({key: opened[key] for key in ("protocol", "page", "model", "surface")},
                          {"protocol": 9, "page": "viewer", "model": self.bracket, "surface": "agent"})
         # No tolerance: the page reads each part's one display mesh by its key.
-        self.assertEqual(sorted(opened), ["model", "notice", "page", "pick", "platform", "protocol", "surface",
-                                          "version"])
+        self.assertEqual(sorted(opened), ["model", "notice", "page", "platform", "protocol", "surface", "version"])
         # The thread's tab reopens on what the thread last opened.
         self.assertEqual(self.launch("cad_tab")["model"], self.bracket)
         refused = self.call("cad_open", {"source": "parts/bracket.stl"})
@@ -361,9 +359,7 @@ class TabServerTest(_Session):
         png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + bytes(64)).decode("ascii")
         [entry] = self.http("POST", "/__cad/recents", {"action": "thumbnail", "path": self.bracket, "png": png})[1]["recents"]
         self.assertEqual(self.http("GET", f"/__cad/thumbnail?name={entry['thumbnail']}"), (200, base64.b64decode(png)))
-        # The home's Open, and the person's answer on the app menu's Share anonymous usage data: the CAD app's own.
-        with mock.patch.object(FilePicker, "choose", return_value=self.loose):
-            self.assertEqual(self.http("POST", "/__cad/pick", {}), (200, {"path": self.loose.replace(os.sep, "/")}))
+        # The person's answer on the app menu's Share anonymous usage data: the CAD app's own.
         with mock.patch.object(self.server.analytics, "choose", return_value={}) as answered:
             self.assertEqual(self.http("POST", "/__cad/analytics", {"share": False})[0], 200)
         answered.assert_called_once_with(False, by="app")
