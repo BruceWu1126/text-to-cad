@@ -608,7 +608,7 @@ class Server:
     def _reach(self, launch: dict[str, Any]) -> None:
         """Stamp a launch a tool hands the page with the ways to the engine that need no tool call:
         ``browser``, the web viewer's page of what it shows (the home's with no model), the same day
-        link ``_browser_page`` gives the card and a text client's ``cad_show`` gives the agent; and
+        link a text client's ``cad_show`` gives the agent (``_browser_url``); and
         ``engine``, that page's origin (loopback: the engine binds nowhere else). A card whose host
         carries no ``tools/call`` back (the Claude app's Code tab) links the page, and first tries the
         engine directly with the link's token. A tab host's launches go without them: its card always
