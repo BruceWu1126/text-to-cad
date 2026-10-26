@@ -5,7 +5,9 @@ in the engine. Host capability corrections are made at this boundary: what the p
 said (``CADGEN_MCP_PRESENTATION``), and which host launched this process, read from its
 parent processes (``host.launcher``), which only this process can see. So is the one act a
 text host's ``cad_show`` asks of the person's machine, opening their browser: made here, in the
-environment the host gave this process, never in the engine's (``browser.deliver``).
+environment the host gave this process, never in the engine's (``browser.deliver``), and its
+outcome told to the engine before the host has the answer (``browser.OPENED``). Nothing of it
+outlives the request it serves.
 """
 from __future__ import annotations
 
@@ -19,7 +21,7 @@ import sys
 import threading
 
 from cadgen.viewer.engine_client import EngineClient
-from .browser import deliver, transport_browser
+from .browser import OPENED, deliver, transport_browser
 from .host import MIME, TABS_EXTENSION, UI_EXTENSION
 from .protocol import Connection, RequestContext, RpcError, claim_stdin, claim_stdout
 
@@ -196,8 +198,18 @@ class Proxy:
                 self.initialize = params
             return result
         result = self._post({'jsonrpc': '2.0', 'id': context.request_id, 'method': method, 'params': params})
-        # A text host's cad_show: the page the engine names is opened here, never by the engine.
-        return deliver(result, self.opener) if method == 'tools/call' else result
+        # A text host's cad_show: the page the engine names is opened here, never by the engine, and
+        # the engine told whether it opened before the host is answered.
+        return deliver(result, self.opener, self._tell) if method == 'tools/call' else result
+
+    def _tell(self, url, opened):
+        """The engine told, on this session, whether the page it asked this process to open opened
+        (``browser.OPENED``): it counts the page as open in the person's browser only once told it
+        did. A page that opened stays opened, and the host is told so, whatever the engine heard."""
+        try:
+            self._post({'jsonrpc': '2.0', 'method': OPENED, 'params': {'url': url, 'opened': opened}})
+        except Exception as error:  # noqa: BLE001 - the engine's next show of the page opens it again
+            LOG.info('could not tell the engine whether the page opened: %s', error)
 
     def notify(self, method, params):
         if method == 'notifications/initialized':

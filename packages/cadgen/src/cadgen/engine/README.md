@@ -464,7 +464,14 @@ environment can (`_meta["dev.texttocad/transport"].browser`, `{"refusal": null |
 the engine's `cad_show` answer then carries the page in `_meta["dev.texttocad/open"]`
 (`{"url", "said", "failed"}`), which the stdio process opens through an owner-only redirect file
 with `webbrowser` (its own `BROWSER`) and strips, saying why not in place of `said` where no
-browser opens. A client that declared no such peer is given the URL in words, and nothing opens.
+browser opens. Before it answers the host, it tells the engine on its session whether the page
+opened: the notification `notifications/dev.texttocad/opened`, `{"url", "opened"}`, which the
+transport hands the session's tool server (`cadgen.mcp.server.Server.notify`). The engine records
+nothing as it asks; the page counts as open in the person's browser (`serve.Server.in_page`'s 30
+seconds) only from the peer's word that it opened. The first word on a page that session's peer
+was asked to open settles the ask, so a failed open records nothing and the next `cad_show` opens
+the page again, and a word on any other page, from any client, is ignored. A client that declared
+no such peer is given the URL in words, and nothing opens.
 Active HTTP calls keep the daemon alive; quiet MCP sessions expire after an hour. The host's
 stdio process holds the engine from its start while the host runs (**The door**), under a name it
 opens its sessions with: it ends them itself at its input's end and on SIGTERM, and when its hold's

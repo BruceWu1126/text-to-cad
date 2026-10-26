@@ -34,7 +34,9 @@ Hosts present views in one of three ways, told apart at initialize (``host.py``)
   (``browser.py``), the one this machine runs, started if none is, in the person's
   browser -- unless a browser page reads that document already -- and answers with its URL.
   The engine never opens it: the host's stdio peer does, in the agent's own environment, from
-  the request the answer carries (``browser.OPEN``); a client with no peer gets the URL alone.
+  the request the answer carries (``browser.OPEN``), and says whether it opened
+  (``browser.OPENED``), which alone counts the page as open there; a client with no peer gets
+  the URL alone.
 
 Codex declares nothing at initialize, headless or not: ``codex exec`` and its terminal UI greet the
 server as the Codex app does (``codex-mcp-client``) and render no app. So whether a tab opened is
@@ -61,6 +63,7 @@ import os
 import secrets
 import sys
 import itertools
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -98,6 +101,10 @@ OPENING_SECONDS = 15.0
 # inline views not yet seen are remembered.
 _OPENED_WITHIN = 60.0
 _MOUNTING_KEPT = 64
+# How many pages a session asked its stdio peer to open are kept until the peer's word on each
+# (``Server.notify``): it answers before its host has the result, so only an ask whose word never
+# came (its process gone mid-open) is ever let go, oldest first.
+_ASKED_KEPT = 16
 
 INSTRUCTIONS = (
     f"CAD shows local CAD models ({FORMATS}) in a viewer tab beside the chat. "
@@ -286,12 +293,17 @@ class Server:
         self._viewer_url = viewer_url
         self._browser_opener = browser_opener  # what opens a page's redirect file: ``webbrowser.open``
         # Whether a browser page reads a document now (the engine's ``Server.in_page``), and telling
-        # the engine one is opening (``Server.page_opening``): a host with no app opens each once.
+        # the engine a browser opened on one (``Server.page_opening``): a host with no app opens each once.
         self._in_browser = in_browser
         self._browser_opened = browser_opened
         # The stdio peer's browser (``browser.transport_browser``): it opens the page a text host's
         # cad_show names, and says whether it can; None for a client with no such peer.
         self._peer_browser: dict[str, Any] | None = None
+        # The pages this session asked its peer to open (``browser.OPEN``), each model by its page's
+        # URL until the peer says whether it opened (``notify``): only a page it says opened counts as
+        # open in the person's browser, so a show after a failed open opens it again.
+        self._asked: dict[str, str] = {}
+        self._asked_lock = threading.Lock()
         self._order = itertools.count(1)
         self._analytics = analytics
         self._app_token = secrets.token_urlsafe(32)
@@ -360,6 +372,23 @@ class Server:
             if not (calling and params.get("name") == "cad_http"):
                 self.analytics.crashed(error, "tool" if calling else "request", tool=params.get("name") if calling else None)
             raise
+
+    def notify(self, method: str, params: Any) -> None:
+        """A notification from this session's client, which answers nothing. The one read is the stdio
+        peer's word on a page this session asked it to open (``browser.OPENED``, ``{"url",
+        "opened"}``): the first word on a page settles its ask, and only an open counts, from then, as
+        the page open in the person's browser (``browser_opened``). A word on any page this session
+        has no ask for -- never asked, another session's, or settled already -- is ignored, so no
+        client can have a page counted as open that its peer was not asked to open."""
+        from .browser import OPENED
+
+        url = params.get("url") if method == OPENED and isinstance(params, dict) else None
+        if not isinstance(url, str):
+            return
+        with self._asked_lock:
+            model = self._asked.pop(url, None)
+        if model is not None and params.get("opened") is True:
+            self._browser_opened(model)
 
     def _dispatch(self, method: str, params: dict[str, Any], context: RequestContext) -> Any:
         if method == "initialize":
@@ -867,7 +896,8 @@ class Server:
         the answer says which, with the page's URL for the agent to give the person. This process
         opens nothing: it runs in the environment of whatever started the engine, not the agent's.
         The host's stdio peer opens the page, from the request the answer carries (``browser.OPEN``,
-        ``browser.deliver``); a client with no peer is given the URL in words."""
+        ``browser.deliver``), and nothing counts it as open until the peer says it opened
+        (``notify``); a client with no peer is given the URL in words."""
         from .browser import OPEN, ViewerUnavailable
 
         self._model = model
@@ -891,7 +921,10 @@ class Server:
         else:
             said = f"{name} opened in your browser at {link}."
             asked = {"url": link, "said": said, "failed": cannot}
-            self._browser_opened(model)
+            with self._asked_lock:
+                self._asked[link] = model
+                while len(self._asked) > _ASKED_KEPT:
+                    del self._asked[next(iter(self._asked))]
         # Text alone: an app that shows a result's structured content shows it in place of the text
         # (Claude Code does), and the agent would get neither this guidance nor the update line.
         result = self._told(_text(f"{said}\nThis app shows no CAD view itself: give the user this URL. {FOLLOWS}"))

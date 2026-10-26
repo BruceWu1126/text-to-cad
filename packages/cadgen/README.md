@@ -222,10 +222,12 @@ Laws 1 to 13 and 19 to 23 are the engine's; 14 to 18 hold for the whole package.
     MCP session owns its views and resource. The
     stdio shim owns only connection metadata, and the one act a text host's `cad_show` asks of
     the person's machine: it opens their browser, in the environment its host gave it, and the
-    engine, which runs in whatever environment started it, never does. Sidebar sharing stays in memory, and host
-    quirks stay in the shim and page. MCP's shared `cad_http` exposes only telemetry
-    status and opt-out to agents; other viewer routes require the session capability
-    delivered in UI-only launch metadata. Only the person can opt in through a page
+    engine, which runs in whatever environment started it, never does. The shim tells the engine,
+    on its session, whether the page opened before its host has the answer, and keeps nothing of
+    it after; the engine counts a page as open in a browser only once told it opened. Sidebar
+    sharing stays in memory, and host quirks stay in the shim and page. MCP's shared `cad_http`
+    exposes only telemetry status and opt-out to agents; other viewer routes require the session
+    capability delivered in UI-only launch metadata. Only the person can opt in through a page
     or the telemetry CLI. See the engine's **Architecture**.
 
 21. **Operations on documents are Python functions the CLI exposes; process control is the

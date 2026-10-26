@@ -171,6 +171,9 @@ class Sessions:
             if not session:
                 return response.send_json(400, {'error': 'Mcp-Session-Id required'})
             if 'id' not in message:
+                # A notification, answered with nothing: the session's server reads the one it heeds,
+                # its stdio peer's word on a page it asked it to open (``Server.notify``).
+                session.server.notify(method, params)
                 return response.send_empty(202)
             try:
                 meta = params.get('_meta') if isinstance(params.get('_meta'), dict) else {}

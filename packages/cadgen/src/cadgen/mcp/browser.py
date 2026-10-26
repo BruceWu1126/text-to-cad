@@ -7,7 +7,10 @@ the host started (``shim.py``), which runs in the agent's own environment, opens
 says at initialize that it opens a browser for its host, and whether it can
 (``transport_browser``); the engine's answer then carries the page to open in its result's
 ``_meta`` (``OPEN``), which the peer opens and strips before the host sees the result
-(``deliver``). A client with no such peer is given the URL in words and nothing opens.
+(``deliver``), and before that tells the engine on its session whether the page opened
+(``OPENED``): the engine counts a page as open in the person's browser only once told it opened,
+so after a failed open the next ``cad_show`` opens it again. A client with no such peer is given
+the URL in words and nothing opens.
 """
 from __future__ import annotations
 
@@ -20,6 +23,10 @@ from cadgen.engine.client import request
 # sentence of the result that says it opened, and the one it says in its place where the open
 # fails (``{reason}`` the failure). Only the peer that declared ``transport_browser`` is sent it.
 OPEN = 'dev.texttocad/open'
+# The peer's word on that page, the notification it sends on its session once its open returned and
+# before its host has the answer: ``{"url", "opened"}``, the page asked and whether it opened. The
+# engine reads only the first word on a page it asked that session's peer for (``Server.notify``).
+OPENED = 'notifications/dev.texttocad/opened'
 
 
 class ViewerUnavailable(Exception):
@@ -47,11 +54,13 @@ def transport_browser() -> dict[str, Any]:
     return {'refusal': display_refusal()}
 
 
-def deliver(result: Any, opener: Callable[[str], bool] | None = None) -> Any:
+def deliver(result: Any, opener: Callable[[str], bool] | None = None,
+            tell: Callable[[str, bool], None] = lambda url, opened: None) -> Any:
     """``result`` as the host is given it: a page the engine asked this process to open (``OPEN``)
     opened here, through an owner-only redirect file (``browser_open``) by ``opener``
     (``webbrowser.open``, which reads this process's ``BROWSER``), and the request removed; where
-    no browser opens, the sentence that said it did replaced by the one that says why not."""
+    no browser opens, the sentence that said it did replaced by the one that says why not. Whether
+    it opened is told, ``tell(url, opened)`` (the engine, ``OPENED``), before the result is returned."""
     meta = result.get('_meta') if isinstance(result, dict) else None
     if not isinstance(meta, dict) or OPEN not in meta:
         return result
@@ -69,9 +78,12 @@ def deliver(result: Any, opener: Callable[[str], bool] | None = None) -> Any:
     try:
         open_page(url, opener=opener or webbrowser.open)
     except CannotOpen as failure:
+        tell(url, False)
         if isinstance(said, str) and isinstance(failed, str):
             instead = failed.replace('{reason}', str(failure))
             for item in result.get('content') or []:
                 if isinstance(item, dict) and isinstance(item.get('text'), str):
                     item['text'] = item['text'].replace(said, instead, 1)
+    else:
+        tell(url, True)
     return result
