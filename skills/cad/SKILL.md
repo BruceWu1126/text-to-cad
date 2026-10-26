@@ -55,8 +55,8 @@ outside the sandbox once.
 this skill pins, whether the CAD kernel loads, and whether the engine is running, starting
 it when none is. Each
 command's `--help` lists its flags. The first launch downloads cadgen and may outlast a
-host's server start timeout (Claude Code: 30 s unless `MCP_TIMEOUT` is raised; Codex: the
-plugin asks for 300 s); a restart resumes the download.
+host's server start timeout (Claude Code: 30 s by default, raised by setting `MCP_TIMEOUT` in
+milliseconds; Codex: the plugin asks for 300 s); a restart resumes the download.
 
 One engine serves the installation: the first run starts it, every run and every
 command goes through it, and it serves the viewer. `cadgen status` lists its workers
