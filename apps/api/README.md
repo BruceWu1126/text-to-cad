@@ -55,7 +55,7 @@ Each event of a batch becomes one PostHog event (`src/posthog.mjs`): `tool_used`
 `view_used`, `files_shown`, `models_built`, `build_failed`, `snapshots_rendered`, `snapshot_failed`,
 `feature_used`, `control_used`, `daemon_health` or, for a crash, `$exception`, which PostHog's error tracking groups into
 issues (`$exception_list`: the type, a value that is only ever a dead worker's exit
-status, `mechanism.handled`, and raw frames, only cadgen's own or the page's `in_app`),
+status, `mechanism.handled`, and raw frames, only cadgen's own or the page's own -- never a `vendor-` chunk's -- `in_app`),
 with the install id as its distinct id, the batch's context (`session`,
 `process`, `version`, `channel`, `source`, `platform`, `arch`, `client`, `client_version`,
 `presentation`) and the event's own counts as properties, and `country`: the ISO code

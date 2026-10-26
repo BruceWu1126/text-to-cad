@@ -26,6 +26,10 @@ export const EVENTS = {
 };
 // Frames that name no file of ours: never in the app, whatever the code around them.
 const NOT_OURS = new Set(['<user>', '<?>', '<frozen>']);
+// A page's chunk of a third-party package, as the CAD Viewer's build names them (apps/web/vite.config.mjs puts
+// three, react, radix and lucide in chunks named `vendor-<package>`, each `vendor-<package>-<hash>.js`, named by
+// the file alone in a frame, or under `assets/`): a frame there is a library's, never the page's own.
+const VENDOR = /(?:^|\/)vendor-[^/]*$/;
 // What a row says beside its own fields, from the batch it came in.
 const CONTEXT = ['process', 'version', 'channel', 'source', 'platform', 'arch', 'client', 'client_version', 'presentation'];
 export const SETTINGS = ['POSTHOG_REGION', 'POSTHOG_PROJECT_KEY', 'POSTHOG_PERSONAL_KEY', 'POSTHOG_PROJECT_ID'];
@@ -56,7 +60,8 @@ const statusOf = status => (status >= 0xC0000000 ? `0x${status.toString(16).toUp
 /**
  * A crash as PostHog's error tracking reads one (`$exception_list`): its type, a value that is only ever
  * a dead worker's exit status, whether the process went on, and its frames, oldest first -- Python's,
- * or a page's JavaScript -- with only cadgen's own (or the page's) in the app.
+ * or a page's JavaScript -- with only cadgen's own (or the page's own, never a vendor chunk's) in the app:
+ * PostHog blames an issue on its innermost in-app frame, which a react or radix frame must not be.
  */
 export function exceptionOf(row) {
   const page = row.where === 'page';
@@ -65,7 +70,7 @@ export function exceptionOf(row) {
     ...(frame.line ? { lineno: frame.line } : {}), ...(frame.column ? { colno: frame.column } : {}),
     // PostHog resolves a page's frame through the source map the release uploaded under this id.
     ...(page && frame.chunk_id ? { chunk_id: frame.chunk_id } : {}),
-    in_app: page ? !NOT_OURS.has(frame.file) : frame.file.startsWith('cadgen/'),
+    in_app: page ? !NOT_OURS.has(frame.file) && !VENDOR.test(frame.file) : frame.file.startsWith('cadgen/'),
   }));
   return [{
     type: row.type, value: row.status === undefined ? '' : `exit status ${statusOf(row.status)}`,
