@@ -626,16 +626,16 @@ motion until Reset) Position shows its frame read-only and Select draws no knobs
 of the document's motions with Explode and the pose (below): taking it up puts both at rest,
 and Explode used puts it at rest, nothing set aside.
 
-What an `.xbf`'s selection copies -- a chip, Copy Reference, Copy Prompt -- is the
-engine's canonical ref of each thing, the file's path first, the ref `cadgen inspect` answers and
+What an engine document's selection copies -- an `.xbf`'s, a STEP's alike; a chip, Copy Reference,
+Copy Prompt -- is the engine's canonical ref of each thing, the file's path first, the ref `cadgen inspect` answers and
 `select` labels its shapes with (`cadgen.engine.refs`): a part or subassembly by its label where that
 names it alone in the document, else by its occurrence path, each segment its label numbered among the
 siblings sharing it (`/work/XBF/kit.xbf#kit/hand/finger.2`); an element by its name, else its kind and
 number, under it (`…#palm/f:palm.body.3`, `…#kit/hand/finger.2/face 7`); a label a plain segment
 would misread JSON-quoted (`…#"M3/M4 screw"`). `xbfTree.js` spells them (`refOf`, `elementRefOf`)
 with core's `cadRefs.js`, whose parser and speller are held to the engine's by one fixture, and a
-pasted line is parsed back in the same grammar, to the end of the line. A STEP the renderer draws keeps
-its own grammar's references.
+pasted line is parsed back in the same grammar, to the end of the line. A STEP's are spelled the same way:
+its part's label whole, spaces and all (`…/bracket.step#L bracket 80 x 60 x 6 mm/face 3`).
 
 ## Tools on a scene of triangles
 
@@ -797,8 +797,8 @@ a box at the top-right, there only while it has something to carry, which
 (a picture, `compact`, gets none; a drawing has no Quick Edit). Its box, header and buttons are the design system's
 ([Quick Edit](settings-ui.md#quick-edit)); what it can do follows the host
 ([prompt handoff](viewer-host.md#prompt-handoff)), never an app. The renderer hands
-the shell what is selected as `references`, in the prompt grammar (an `.xbf`'s in the engine's,
-`kit.xbf#kit/hand/finger.2`, a STEP's in its own; a robot's links, `robot.urdf#upper_arm`; a GLB's nodes,
+the shell what is selected as `references`, in the prompt grammar (an `.xbf`'s and a STEP's in the engine's,
+`kit.xbf#kit/hand/finger.2`, `bracket.step#bracket/face 3`; a robot's links, `robot.urdf#upper_arm`; a GLB's nodes,
 `model.glb#n12`, the file's `nodes[12]`; a 3MF's objects, `model.3mf#o2.1`, its build's second
 item's first component; none for an STL, whose note names the file; the file itself always
 goes), and the
