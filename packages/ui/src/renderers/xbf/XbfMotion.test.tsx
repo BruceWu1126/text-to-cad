@@ -91,7 +91,7 @@ it('a document with no motions has no Motion section', () => {
 });
 
 it("the Motion section lists the document's motions with their durations, and plays, pauses, scrubs, loops and speeds them", async () => {
-  const user = userEvent.setup({ pointerEventsCheck: 0 });
+  const user = userEvent.setup({ pointerEventsCheck: 0, skipHover: true });
   const scene = { setPose: vi.fn() };
   render(<Harness scene={scene} />);
   expect(tiles()).toEqual(['Position', 'Motion']);
@@ -147,7 +147,7 @@ it("the Motion section lists the document's motions with their durations, and pl
 });
 
 it("a motion replaces Position's pose, shown read-only while it owns it, and Reset leaves the model as built, nothing set aside", async () => {
-  const user = userEvent.setup({ pointerEventsCheck: 0 });
+  const user = userEvent.setup({ pointerEventsCheck: 0, skipHover: true });
   const scene = { setPose: vi.fn() };
   render(<Harness scene={scene} />);
   // Position first: the `open` configuration.
