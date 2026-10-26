@@ -414,8 +414,7 @@ jobs:
           # shellcheck disable=SC2086
           scripts/test/test-python.sh --select skills --print-weights $TESTS
 
-  # The docs site: its static asset contract, lint, the Next build and icon verification, and
-  # the animated brand marks.
+  # The docs site: lint, the Next build and icon verification, and the animated brand marks.
   docs:
     name: docs
     needs: changes

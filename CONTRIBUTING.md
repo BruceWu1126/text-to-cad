@@ -334,7 +334,7 @@ diff content: a comment in a module selects what the module's code would.
 | mcp | `apps/mcp`, `packages/ui`, `test-js.sh` | the CAD app's host-adapter units (jsdom) and its one-file build |
 | skills | every change | first, with only Python and Node: the light contracts (every policy test that reads the repository's text, and the gcode, sendcutsend and step-parts suites); then, after the full install, the policy tests that load cadgen or its runtime (`packages/cadgen`, `scripts/bundle`), dfm and dfam-check (their skills) |
 | api | `apps/api`, `test-api.sh` | `npm --prefix apps/api test`: the version feed's and the telemetry receiver's tests (no install) |
-| docs | `apps/docs`, `scripts/brand`, `test-docs.sh`, and the hero's inputs: the planetary gear assembly model, `cadgen.ap242`/`cadgen.gltf` and the engine's animation, mechanism, document, colour, material and export code | `npm --prefix apps/docs run check` (static asset contract, lint, Next build, icon verification) and the animated brand marks |
+| docs | `apps/docs`, `scripts/brand`, `test-docs.sh` | `npm --prefix apps/docs run check` (lint, Next build, icon verification) and the animated brand marks |
 | packaging | `packages/cadgen`, `packages/ui`, `apps/web`, `apps/mcp`, `scripts/bundle`, the wheel and install scripts, `tests/browser`, the viewer scripts | clean bundle, layout, wheel contents, installed CLI behavior; then, for anything the served client or the backend reads, the launch smoke test and the format/camera gates on that bundle through the real backend |
 
 Everything runs for `VERSION`, `package.json`, `package-lock.json`,

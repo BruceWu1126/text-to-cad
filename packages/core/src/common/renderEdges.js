@@ -390,43 +390,6 @@ export function createBasicLineStrip(context = {}, positions, {
   return line;
 }
 
-export function createBasicLineSegments(context = {}, positions, {
-  color,
-  opacity = 1,
-  renderOrder = 3,
-  depthTest = true,
-  depthWrite = false,
-  depthBias = DEFAULT_LINE_DEPTH_BIAS
-} = {}) {
-  const THREE = context.THREE;
-  if (
-    !THREE ||
-    !(Array.isArray(positions) || ArrayBuffer.isView(positions)) ||
-    positions.length < 6
-  ) {
-    return null;
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  const positionArray = positions instanceof Float32Array ? positions : new Float32Array(positions);
-  geometry.setAttribute("position", new THREE.BufferAttribute(positionArray, 3));
-  const material = new THREE.LineBasicMaterial({
-    color,
-    transparent: Number(opacity) < 0.999,
-    opacity: clamp(Number(opacity) || 0, 0, 1),
-    depthTest,
-    depthWrite,
-    toneMapped: false
-  });
-  applyLineDepthBias(material, depthBias);
-  const line = new THREE.LineSegments(geometry, material);
-  line.renderOrder = renderOrder;
-  line.frustumCulled = false;
-  line.userData.disposeGeometry = true;
-  line.userData.disposeMaterial = true;
-  return line;
-}
-
 // One GL_LINES object per record over a shared per-component geometry whose
 // `color` attribute carries each edge class's linear RGBA. The material
 // multiplies that by white at

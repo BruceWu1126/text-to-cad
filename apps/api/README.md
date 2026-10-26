@@ -20,7 +20,6 @@ the build daemon reach it over HTTPS.
 api/v1.js       # the one Vercel Function: web-standard GET and POST, every /v1 path
 src/            # the handler, the receiver (events.mjs), the drop list (noise.mjs), PostHog's store, the feed; their tests
 public/         # what Vercel serves besides the function: robots.txt alone
-scripts/        # the one-off Neon-to-PostHog migration
 vercel.json     # /v1/(.*) -> /api/v1; no framework, no build, no deploy on push
 ```
 

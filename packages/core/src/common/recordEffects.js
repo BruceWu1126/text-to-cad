@@ -1,12 +1,10 @@
 // The effect records: where a pose and a playing clip meet.
 //
 // Every display record carries one effect — a world matrix that premultiplies its rest
-// placement, a style, a visibility, a highlight, a tube skin — written by one pass per
+// placement, a style, a visibility and a highlight — written by one pass per
 // frame (applySceneState.js): the articulation player writes the pose, the animation
 // runtime plays the clip's keys on top. This module holds the record side: building a
 // placement matrix from a part's transform, and writing or clearing a pass's effects.
-
-import { applyRecordTubeSkin } from "./tubeSkin.js";
 
 export function buildPartTransformMatrix(THREE, transform, matrix = new THREE.Matrix4()) {
   if (!Array.isArray(transform) || transform.length !== 16) {
@@ -45,9 +43,8 @@ export function displayTransformForPart(meshData, part) {
   return null;
 }
 
-export function resetRecordEffects(records, THREE = null) {
+export function resetRecordEffects(records) {
   for (const record of Array.isArray(records) ? records : []) {
-    if (THREE) applyRecordTubeSkin(THREE, record, null);
     record.effectMatrix = null;
     record.effectStyle = null;
     record.effectVisible = null;
@@ -74,7 +71,6 @@ export function applyEffectsToRecords(THREE, records, effectsByPartId) {
   let appearanceChanged = false;
   for (const record of Array.isArray(records) ? records : []) {
     const effect = effectsByPartId.get(String(record?.partId || "").trim());
-    applyRecordTubeSkin(THREE, record, effect?.deformation || null);
     const style = effect?.style && typeof effect.style === "object" ? { ...effect.style } : null;
     const visible = effect ? effect.visible : null;
     const highlighted = effect?.highlighted === true;

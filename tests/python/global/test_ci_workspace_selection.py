@@ -289,26 +289,18 @@ class ChangesRunWhatCanBreak(unittest.TestCase):
             with self.subTest(target=target):
                 self.assertEqual(route(target)["web_client"], "true")
 
-    def test_the_docs_hero_runs_on_what_makes_its_glb(self):
-        # The docs job's hero check holds the committed GLB to the planetary model's declared
-        # motion; a rename in the names the model calls once broke it with docs never selected.
+    def test_the_docs_job_reads_no_model(self):
+        # The docs site ships its committed hero GLB and nothing in its build or check reads
+        # models/: the planetary model and the engine code that exports it select no docs job.
+        # Its hand sync (sync-hero-glb.mjs) and the GLB are docs files like any other.
         for path in ("models/assemblies/src/planetary_gear_assembly/planetary_gear_assembly.py",
-                     "packages/cadgen/src/cadgen/ap242.py", "packages/cadgen/src/cadgen/gltf.py",
-                     "packages/cadgen/src/cadgen/engine/animations.py",
-                     "packages/cadgen/src/cadgen/engine/mechanism.py",
-                     "packages/cadgen/src/cadgen/engine/document.py",
-                     "apps/docs/scripts/check-hero-glb.mjs", "apps/docs/scripts/sync-hero-glb.mjs",
-                     "apps/docs/public/hero/planetary.glb"):
-            with self.subTest(path=path):
-                self.assertEqual(route(path)["docs"], "true")
-        export = next(path for path in TRACKED if path.startswith("packages/cadgen/src/cadgen/engine/export/"))
-        self.assertEqual(route(export)["docs"], "true")
-        # An engine change still reaches everything cadgen reaches.
-        self.assertEqual(tests_for("packages/cadgen/src/cadgen/engine/animations.py")["cadgen_tests"], [CADGEN])
-        # The rest of the engine changes no clip, and no other model is the hero.
-        for path in ("packages/cadgen/src/cadgen/engine/build.py", "models/assemblies/src/planetary_gear_stage/planetary_gear_stage.py"):
+                     "packages/cadgen/src/cadgen/gltf.py",
+                     "packages/cadgen/src/cadgen/engine/animations.py"):
             with self.subTest(path=path):
                 self.assertEqual(route(path)["docs"], "false")
+        for path in ("apps/docs/scripts/sync-hero-glb.mjs", "apps/docs/public/hero/planetary.glb"):
+            with self.subTest(path=path):
+                self.assertEqual(route(path)["docs"], "true")
 
     def test_scripts_run_what_runs_them(self):
         cases = {

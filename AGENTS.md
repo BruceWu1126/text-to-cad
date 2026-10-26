@@ -123,8 +123,7 @@ path, the rehearsal, and local/manual fallbacks.
   link — not the tree. What exists:
   - `packages/cadgen/src/cadgen/engine/`: `README.md` (the engine's mechanisms:
     models, the daemon, exports, the mesh, references, the build closure).
-  - `packages/core/docs/`: `render-pipeline.md`, `resource-ownership.md`,
-    `tube-skins.md`.
+  - `packages/core/docs/`: `render-pipeline.md`, `resource-ownership.md`.
   - `packages/ui/docs/`: `settings-ui.md` (BINDING for any settings control),
     `render-types.md`, `render-mode.md`, `loading.md`, `viewer-host.md`.
 - Ships-alone law: `packages/cadgen` (the built PyPI wheel) works in isolation
