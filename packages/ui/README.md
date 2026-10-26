@@ -18,7 +18,7 @@ remain its own.
 ## Ownership and dependencies
 
 UI may import `@text-to-cad/core` and browser-safe React dependencies. It must not
-import an application, Electron, Node services, desktop IPC schemas, app stores,
+import an application, Node services, desktop IPC schemas, app stores,
 or `window.textToCad`. Hosts inject file access, capabilities, navigation,
 persistence, appearance and CAD services. Importing a package starts no polling,
 workers or host storage writes and changes neither document title nor theme.
