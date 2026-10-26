@@ -2,7 +2,7 @@
 
 The GLBs the core and UI suites open, kept as bytes.
 
-`pair.glb` and `pair.slide.glb` are cadgen 0.8.0's exports of `pair`: two boxes, in
+`pair.glb` and `pair.slide.glb` are the retired 0.7 pipeline's exports of `pair`: two boxes, in
 millimetres, Z up. `base` is a 20 mm cube from the origin to (20, -20, 20), red (#D02020)
 in a polished finish (roughness 0.05, metalness 1); `rider` is a 10 mm cube from
 (30, -10, 0) to (40, 0, 10), blue (#2040D0). `pair.glb` is the static export

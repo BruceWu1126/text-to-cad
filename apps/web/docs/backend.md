@@ -3,8 +3,9 @@
 The browser host talks to `cadgen.viewer`, the HTTP application hosted by the engine in the
 `cadgen` Python distribution. Its source lives in
 `packages/cadgen/src/cadgen/viewer/`; this app owns the React host and its build.
-The wheel includes that build at `cadgen/_runtime/viewer`, alongside the browser
-runtime the CLI renders snapshots with. Skills invoke the installed distribution.
+The wheel includes that build at `cadgen/_runtime/viewer`, beside the CAD app's one-file
+page (`cadgen/_runtime/mcp`); cadgen's snapshots are OCCT's and need no browser. Skills
+invoke the installed distribution.
 
 The HTTP layer uses Python's standard library and the distribution's Python floor.
 It never imports the CAD kernel at module scope. Viewing renders existing files;
@@ -15,8 +16,9 @@ reads, meshes and measures it in processes of its own.
 
 ## Launching
 
-The engine serves every CAD file by absolute path on an OS-assigned port, or
-the port `--port N` pins for this installation. Run the installed CLI from anywhere:
+The engine serves every CAD file by absolute path on port 3245, or the port this
+installation rolled to when another program held it (`cadgen status` says which and why),
+or the one `--port N` or `CADGEN_ENGINE_PORT` names. Run the installed CLI from anywhere:
 
 ```bash
 cadgen viewer --host 127.0.0.1 --json
@@ -76,7 +78,8 @@ hands to the page). The app needs no production build in this mode, but shared p
 imports still resolve to their compiled `dist/` exports.
 
 Vite defaults to port 5173 and refuses to roll to another port; pass `--port`
-when needed. The API-only launch does not serve a SPA; its engine is shared. See the [app README](../README.md) for the
+when needed. The API-only launch needs no built client; the engine is shared, and its page
+serves whatever client it has. See the [app README](../README.md) for the
 complete development and launcher contract.
 
 ## Files by absolute path
@@ -157,7 +160,7 @@ The web page uses bounded version waits; the MCP page asks with `wait=0` so a
 version check occupies no host call slot while waiting for an edit. The same
 router handles reads tunneled through `cad_http`, in process. Document buffers
 and routes retain the raw-file response headers and engine authentication.
-The wire format is documented in the engine README.
+The wire format is the engine README's **Wire format** section.
 
 The browser host constructs a `CadClient` from `@text-to-cad/core/client` and
 injects it into the viewer renderers. Catalog subscriptions share the client's
@@ -169,37 +172,45 @@ fetch every read of it is made with (the CAD app's goes over its tunnel).
 
 | Route | Purpose |
 |---|---|
-| `GET /__cad/server` | Server identity: `identityToken`, `platform` (which file manager Reveal opens), `user`, `start` (the folder of the most recent launch, which its relative files are read from), `port`, `pid`. |
+| `GET /__cad/server` | Server identity: `app` (`cad-viewer`), `identityToken`, `platform` (which file manager Reveal opens), `user`, `home` (the person's home folder: where a model's Files starts with nowhere else to start), `start` (the folder of the most recent launch, which its relative files are read from), `pick` (whether the home offers Open: the machine has a file chooser), `port`, `pid`. |
 | `GET /__cad/catalog?file=...` | One file's catalog row, with its document `id`, and its `revision`. |
-| `GET /__cad/catalog?id=...` | The row of the document of that id, or none and `missing`. |
+| `GET /__cad/catalog?id=...` | The row of the document of that id, or none and `missing`, with `missingState` (`unsaved`, `detached`) for the page's title. |
 | `GET /__cad/folder?path=...` | One folder's subfolders and CAD files. |
 | `GET /__cad/search?path=...&q=...` | The CAD files under a folder whose path holds `q`, bounded. |
 | `GET /__cad/asset?file=...` | A CAD file's bytes. |
 | `GET /__cad/xbf?file=...` | A STEP, an `.xbf` or a document id, served by the cadgen engine: `{doc, url}`, `202 {state: "reading", retryMs}` while the engine reads it, or the engine's refusal (400). `&held=1`: `{held}`, without starting a read. |
 | `GET /__cad/api/...` | Direct engine routes: document structure, part buffers, element facts, groups, volume, look, image and version wait. |
 | `GET /__cad/drawing?file=...` | A `.dxf` flattened to 2D render primitives; the DXF pane's only source. |
+| `GET /__cad/robot?file=...&mesh=...` | A robot description's payload (`cadgen.robot_payload`: its articulation, its visuals at rest), and with `mesh=<hash>` a primitive cadgen meshed, by its digest. |
 | `GET /__cad/recents` | The model library every CAD view shares: pinned first, then by last activity; each row with `opened` (when a page last opened it) and `updated` (a file's time on disk, a model's run: a script is never read for it). |
 | `POST /__cad/recents` | `{action, path, png?}`: `open` (an existing CAD file on screen, counted for analytics; a model's id, whose record notes the time), `pin`, `unpin`, `remove` (a file's record, the file kept), `delete` (a model's document and record: the engine's `delete`), `thumbnail`; answers the library as it now is. |
 | `GET /__cad/thumbnail?name=...` | A library picture, by its content name. |
 | `POST /__cad/reveal` | `{path}`: show a file in the desktop's file manager. |
+| `POST /__cad/pick` | Open the machine's own file chooser (`cadgen._internal.picker`) and answer the file picked; the home offers it where the server's `pick` says there is one. |
 | `POST /__cad/clipboard` | A PNG onto this machine's clipboard: the web page's picture copy, which asks the browser for no permission. |
 | `GET`/`POST /__cad/analytics` | Whether the person's usage stats are sent, and why; `{share}` is their answer (the app menu's toggle). Nothing asks. |
-| `POST /__cad/analytics/activity` | What the page did, for telemetry: `{touched: true}`, a person touched it; `{quickEdit: true}`, a Quick Edit went; `{crash}`, the page crashed (core's `crashOf`: its type and frames, checked again by the server, never a message). |
+| `POST /__cad/analytics/activity` | What the page did, for telemetry: `{touched: true}`, a person touched it; `{quickEdit: true}`, a Quick Edit went; `{controls: [{control, count, seconds}]}`, the view controls used (names from `cadgen.analytics.CONTROLS`); `{crash}`, the page crashed (core's `crashOf`: its type and frames, checked again by the server, never a message). Its body may run to 16 KiB. |
+| `GET`/`POST /__cad/language` | The person's language for the CAD views (`cadgen/language.py`): `{locale, inferred, choice}`; `{choice}` sets it (null is Automatic). |
 | `GET /__cad/version` | Whether a newer text-to-cad is out: the update button's `notice`, or null. |
-| `POST /__cad/prompt-files` | `{name, input, views: [{label, camera, display?, kinematics?, jointValues?, selection?, width?, height?}], annotation}`: write a Quick Edit prompt's files (its views as a snapshot job file, its annotation) and render the views off the request; answers `202 {id, retryMs}` at once, or a 400. Carries `x-cadgen-viewer`, as both GETs below do. |
-| `GET /__cad/prompt-files?id=...` | That render: `202 {id, retryMs}` while it runs, then `200 {job, annotation, images: [{label, path}]}` (absolute paths), a 500 when it failed, a 404 for an id this process no longer keeps. |
-| `GET /__cad/prompt-files/<name>` | One of those files (a PNG or JSON), from the prompt-files directory only. |
+| `POST /__cad/prompt-files` | `{name, input, views: [{label, camera, display?, kinematics?, jointValues?, animation?, selection?, width?, height?}], annotation?, measurements?, acceptInline?}` (at most 16 views): validate a Quick Edit's packet in memory and answer `200 {ok, inline}` (compact JSON up to 1024 bytes, only with `acceptInline: true`), else `200 {ok, snapshot}` (the absolute path of the `.snapshot.json` written), or a 400. Nothing renders and no PNG is written: `cadgen snapshot --job` draws the packet later. Carries `x-cadgen-viewer`, as the GET below does. |
+| `GET /__cad/prompt-files/<name>` | One of those JSON files, from this process's prompt-files directory only. |
 
 Every POST must send `x-cadgen-viewer: 1`. The custom header forces a browser
-preflight for cross-origin POSTs, and the server answers it only for a request
-that carries a day link as its Bearer credential (above). When
+preflight for cross-origin POSTs, and the engine answers that preflight only when it asks for
+`authorization` among the card's headers; the request it clears must then carry a day link as
+its Bearer credential (above). When
 bound to loopback, Host validation also refuses non-local names as a
 DNS-rebinding defense. The trust model is documented in
 `cadgen.viewer.http_app`; keep these gates intact.
 
-The service serves local bytes and JSON. It has no download/export route, and
-its host-native actions are the ones above (reveal, clipboard). CLI
-generation/export remain outside this HTTP interface.
+The service serves local bytes and JSON; its host-native actions are the ones above (reveal,
+clipboard, pick), and its one write to the person's machine is a browser download:
+`POST /__cad/exports` `{requestId, epoch, source: {doc, revision}, format}` queues an export
+(202) of the displayed document as its code built it
+([the app README](../README.md#export-and-job-status)); `GET /__cad/exports` is the session's
+epoch, `GET /__cad/exports/<id>` a job's state (`?after=&wait=`), `GET /__cad/exports/<id>/file`
+the download, and `POST /__cad/exports/<id>/cancel` and `/release` end it. CLI exports remain
+outside this HTTP interface.
 
 Backend tests live in `tests/python/packages/cadgen/viewer` and are run by
 `scripts/test/test-python.sh`. The web app's `npm run test` covers its JavaScript
@@ -212,11 +223,9 @@ drawing add-on over the `.dxf`'s modelspace and returns what every entity
 flattens to — text placed, dimensions exploded, hatches filled or patterned,
 block inserts placed — so the client draws primitives and never parses DXF.
 
-`cadgen dxf snapshot` draws the SAME payload: its resolver calls
-`cadgen.drawing_payload` too, writes the bytes where the headless page can fetch
-them, and the page paints them with `@text-to-cad/core/lib/drawing2d` — the module
-the DXF pane paints with. One flattening, one renderer, so the CLI cannot
-produce a picture this route could not.
+`cadgen dxf snapshot` draws a drawing by OCCT in the engine (`engine/render/drawing.py`),
+from the engine's own reading of the file, as this pane draws it: from above, fitted,
+hairlines in their pens, on the light or dark paper. This route is the pane's alone.
 
 `?file=` names the drawing by its absolute path, as every route does: a
 relative ref, or anything that is not a `.dxf`, is 400, and a missing file 404. An unreadable drawing is 400 with the
@@ -227,7 +236,7 @@ not add one).
 
 ```jsonc
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "units": { "insunits": 4, "name": "Millimeters", "toMillimetres": 1.0 },
   "bounds": [minX, minY, maxX, maxY],        // null when nothing was drawn
   "layers": [{ "name": "CUT", "color": "#ff0000", "count": 12 }],

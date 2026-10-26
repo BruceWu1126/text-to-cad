@@ -3,7 +3,8 @@
 This is a hand-migration playbook. Work through it top to bottom with a 0.7 project open
 and you will end with a working 0.8 project. An agent with the CAD skill installed is
 pointed here by the skill's short `references/migrations.md` and can do most of this for
-you: ask it to follow this guide.
+you: ask it to follow this guide. A project still on 0.4 first follows
+[Migrating 0.4 to 0.5](migrating-0.4-to-0.5.md), which ends here.
 
 ## Read this first: there is no compatibility layer
 

@@ -63,9 +63,10 @@ opens with that answer where the app shows CAD tabs, and gives the page's URL fo
 otherwise. A `cad_show` after a `cad_open` waits for that tab (`OPENING_SECONDS`) and shows the
 model in it, says it is still opening (and shows the model once it opens), or, where nothing
 said the host shows tabs, takes a tab that never came as evidence that it shows none and opens
-the browser page. A host that renders apps never has a browser opened by a tool. `CADGEN_MCP_PRESENTATION=inline`
-tells the shim that a client renders apps without advertising them, as the
-reference host `basic-host` does.
+the browser page. A host that renders apps never has a browser opened by a tool. `CADGEN_MCP_PRESENTATION=inline|text`
+settles how a client that does not say so presents CAD: `inline`, a client that renders apps
+without advertising them, as the reference host `basic-host` does; `text`, one that renders
+nothing.
 
 The agent also has `cad_export`, `cad_snapshot` and `cad_inspect` in
 all presentations, including text-only hosts. They use the Python operations,
@@ -167,8 +168,8 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   blob URL that replaces it, and the chunk's debug
   id is the one its edited text and map decide (`@text-to-cad/core/chunk-ids`), never the
   id of the unedited chunk the CAD Viewer may ship. It is on by default once
-  a `cadgen` command has said so, once, and nothing asks. The app menu's **Share usage
-  stats** (`appSettings`, through `/__cad/analytics`) changes the answer, one answer for
+  a `cadgen` command has said so, once, and nothing asks. The app menu's **Telemetry**
+  switch (`appSettings`, through `/__cad/analytics`) changes the answer, one answer for
   this app and the browser viewer. The channel is reported with the
   counts; it decides nothing there. The agent's `cad_http` reads the setting with
   `GET /__cad/analytics` and turns it off with `POST /__cad/analytics`, body
@@ -282,7 +283,8 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
     CAD plugin could not be reached.").
 - **No channel, then the engine directly.** Every launch a tool hands an inline card carries,
   where the engine gives a page, `browser` (the CAD Viewer's page of what it shows, the same
-  day link a text client's `cad_show` gives, loopback only) and `engine`
+  day link — a page URL's `?token=`, good for 24 hours ([the web README](../web/README.md#launching))
+  — a text client's `cad_show` gives, loopback only) and `engine`
   (its origin), so the card needs no call to read them (`cadgen/mcp/server.py`, `_reach`); a
   tab host's launches, and the shows its sync carries, carry `browser` alone (for Open in
   browser), its card always having its channel; the file handler's carry neither.
@@ -342,6 +344,7 @@ values have no reader and cannot hide it. Settings files need no conversion.
 | `channel.ts` | whether the host carries the page's calls to its server: what it declared (`serverTools`, `openLinks`), then what its calls showed (`Connection.tsx` routes the card by it) |
 | `direct.ts` | the engine reached over HTTP where the host carries no call: the launch's `engine` and day link, the probe, and the `fetch` that swaps for the tunnel's |
 | `server.ts` | typed calls to the page's three tools: its sync, its answer to a capture, and `cad_http` |
+| `capture.ts` | a capture once the view shows the model asked about, loaded and drawn (`captureSettled`, within `CAPTURE_SETTLE_MS`), and the PNG shrunk to fit one reply (`fitCapture`) |
 | `tunnel.ts` | the `fetch` over `cad_http`, a long body a range at a time, and the CAD client over it (`App.tsx` makes one per view): the library, Open, Reveal and the person's settings among its requests |
 | `prompt.ts` | Quick Edit's chat: `chatReach`, what the host's chat takes, and the prompt port over it — Queue through `ui/update-model-context` (a text block titled `Quick edit · <file>` naming the snapshot path, kept until the host clears its model context), Send through `ui/message` — with references as absolute paths (Copy Prompt spells them as copied references are) |
 | `live.ts`, `sync.ts` | the mounted view's live controller (`@text-to-cad/ui/host`'s registry), and its sync (`cad_sync`), every second: its state for the agent, the agent's requests (`show`, `capture`) and the catalog's revision |
@@ -383,14 +386,16 @@ inline hosts (including full-size cards) retain the default bottom-right placeme
 
 ## Engine transport
 
-The engine exposes authenticated Streamable HTTP at `/mcp`. Its private installation
-socket supplies the endpoint and token; the shim sends Bearer authentication.
+The engine exposes authenticated Streamable HTTP at `/mcp`. Its door (`cadgen.engine.door`: a
+named pipe on POSIX, a localhost port and token file on Windows) supplies the endpoint and
+token; the shim sends Bearer authentication.
 Initialize creates an opaque `Mcp-Session-Id`, which accompanies subsequent POSTs
 and DELETE. Requests negotiate a supported MCP protocol revision. JSON replies need
 no SSE stream, so GET returns 405. Missing sessions return 400; expired sessions 404.
 When the engine restarts or a session's idle hour passes, the shim opens a new session
 with the host's own initialize and sends again only the request the engine refused
-unseen (404, or a refused connection); the host never reconnects. Views, operations
+unseen (404, a 403 from an engine whose token is not this shim's, or a refused connection);
+the host never reconnects. Views, operations
 and the app capability start over with the new session, and mutations are never replayed.
 Host-specific capability corrections live in `mcp/shim.py`. Version polls use `wait=0`
 in the page’s tunnel so they never occupy a host call slot. The engine has no such

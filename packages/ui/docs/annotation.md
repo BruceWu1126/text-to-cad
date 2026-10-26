@@ -8,7 +8,7 @@ were drawn from every angle, lying on the surface they were drawn on. The engine
 ## Pieces
 
 - `annotation/session.js` — `useAnnotationSession`: the annotation's ink, what the tools
-  put down next (the tool of the strip tool in hand, `pencil` — the pen, the highlighter or the eraser — and `shape` — the line first, the arrow, rectangle, ellipse or text — each kept while the other is up; `style`, the colour, stroke width and
+  put down next (the tool of the strip tool in hand, `pencil` — the pen, the highlighter or the eraser — and `shape` — the rectangle first, the line, arrow, ellipse or text — each kept while the other is up; `style`, the colour, stroke width and
   placement — `surface`, the default, or `plane` — of the tool in hand, kept per drawing kind in `styles`: `pen`, `highlighter` (yellow
   `#ffe600`; the others neon red) and `shapes`, which all five shapes share; the eraser has none) and the selection. Each add, erase, restyle of the selection
   (`restyle`) or fill of a closed shape (`fill`, joining its group) is one step
@@ -47,7 +47,7 @@ were drawn from every angle, lying on the surface they were drawn on. The engine
   - The highlighter (`highlighterMark`) is the pen's smoothed line at one broad width — five times the stroke width
     (`HIGHLIGHTER_WIDTH_FACTOR`) — 35% opaque (`HIGHLIGHTER_OPACITY`), round-ended, with no `widths`: an ordinary
     stroke mark (`width`, `opacity`) that no new field or kind describes. `strokeWidthAt` and `strokeSettingOf` convert
-    between a stroke's width and the setting (1, 2, 4) for restyling. Translucent strokes are drawn once-only
+    between a stroke's width and the setting (1, 2, 4 or 6) for restyling. Translucent strokes are drawn once-only
     in the model (`core/common/annotation.js`: a stencil reference per stroke), so its overlapping segments do not darken.
   - The pen is smoothed as it is drawn, and each point's width comes from its
     pressure (a stylus's own, or simulated from speed with a mouse), using
@@ -116,7 +116,7 @@ were drawn from every angle, lying on the surface they were drawn on. The engine
   - **Grazing guard:** a level whose plane is nearly edge-on to the view (|normal · view
     direction| below 0.08) is replaced by the plane facing the view through the same point, else rays
     would stretch the mark along the plane.
-  - `projectAnnotations(runtime, marks, size, { placement, topologyAt, level })` projects marks,
+  - `projectAnnotations(runtime, marks, size, { placement, level, touchesAt, cpuBudget })` projects marks,
     finding each one's level inside; `level` ({ point, normal }) gives all of them one instead (a fill
     of a flat shape lies on the shape's plane).
   - What the model hides of the ink is drawn faint through it (core's `ANNOTATION_HIDDEN_OPACITY`,

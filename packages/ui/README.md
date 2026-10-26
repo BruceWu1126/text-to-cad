@@ -12,8 +12,8 @@ exports; a host's own project, session and window layout remains application cod
 
 The viewer's tools, file sidebar, settings, tooltips and keyboard follow one
 binding [design system](docs/settings-ui.md), the same in both apps. A change to
-that chrome changes the design system first. Desktop's surrounding app controls
-remain local where their appearance differs.
+that chrome changes the design system first. The CAD app's surrounding host controls
+remain its own.
 
 ## Ownership and dependencies
 
@@ -23,7 +23,7 @@ or `window.textToCad`. Hosts inject file access, capabilities, navigation,
 persistence, appearance and CAD services. Importing a package starts no polling,
 workers or host storage writes and changes neither document title nor theme.
 
-Shared UI is platform-agnostic: components must not detect web versus desktop
+Shared UI is platform-agnostic: components must not detect web versus the CAD app
 to choose their behavior. Express environmental differences through injected
 capabilities and app-supplied named slots. React, DOM, canvas and responsive
 layout remain shared; operating-system details and app workflows belong to the
@@ -41,7 +41,7 @@ and code retain their content styles.
 Dropdown, select-popup and context-menu primitives default to the same 11px
 compact text (`text-tiny`, 16px line height), including checkbox/radio items
 and submenus. These defaults belong to the
-primitives, including desktop's app-level equivalents; consumers do not add
+primitives, including the CAD app's host-level equivalents; consumers do not add
 per-menu font-size overrides. Portals set their own compact text size rather
 than inheriting the trigger or host body's size.
 Viewer hover hints use `TooltipHint` from the shared tooltip primitive, with
@@ -49,7 +49,7 @@ Viewer hover hints use `TooltipHint` from the shared tooltip primitive, with
 obvious or already labeled controls, and show full tree/field names only when
 clipped. Native HTML `title` attributes are not used for interface tooltips.
 
-The token uses rems so desktop UI scaling still works without changing the
+The token uses rems so a host's UI scaling still works without changing the
 normal 16px root or shrinking layout spacing.
 
 File-tab chrome uses normal-weight type. The navbar's file name, the explorer's and
@@ -58,7 +58,7 @@ never bold weight. The explorer's rows are compact 24px lines in 12px text, the 
 the section titles and the filter above them, a folder opening inline under itself; the
 file sidebar's trees (Model tree, Links) are 24px lines in its smaller 11px text
 ([the file sidebar](docs/settings-ui.md#the-file-sidebar-and-the-tool-stack)). Both inset
-row backgrounds 4px from their horizontal edges, including selected, hovered and
+row backgrounds 5px from their horizontal edges, including selected, hovered and
 filtered rows; nesting adds indentation inside that gutter.
 The name menu is a popover under the navbar's file name: Models and Files as stock Tabs over
 the explorer's rows (`ModelList.jsx`, `FolderExplorer.jsx`),
@@ -71,7 +71,7 @@ breakpoint. The sidebar never scrolls sideways: Position's labels truncate to pr
 sliders and inputs.
 
 React, ReactDOM, Three.js and Lucide are host-supplied peers. React 18 and 19
-are supported: web and desktop use React 19.3.0. Each
+are supported: the web viewer and the CAD app use React 19.3.1. Each
 host must resolve one copy of each peer in its browser bundle. Web uses Vite
 deduplication so shared imports use its host React and Lucide versions;
 these peers are not bundled into UI.
@@ -99,6 +99,10 @@ src/
   assets/           lightweight UI assets
 dist/               generated ESM, declarations, CSS, assets and worker modules
 ```
+
+The loading icon's and the wordmarks' provenance is [src/assets/README.md](src/assets/README.md);
+the DXF and robot renderers' fixtures are described beside them
+([dxf](src/renderers/dxf/__fixtures__/README.md), [robot](src/renderers/robot/__fixtures__/README.md)).
 
 `FileViewer` has no concrete renderer imports. A registration describes matching,
 priority, asynchronous preparation, lazy component loading and disposal.
@@ -135,7 +139,7 @@ const renderers = [createDxfRenderer({ client, preferences }), createGlbRenderer
 
 Public entry points include `/host`, `/file-viewer`, `/tab-store`, `/navigation`,
 `/renderers/dxf`, `/renderers/glb`, `/renderers/mesh`, `/renderers/robot`, `/renderers/xbf`, `/renderers/workspace`, `/file-viewer/presentation`, `/file-viewer/empty`,
-`/cad-viewer`, `/catalog`, `/links`, `/library`, `/consent` (the app menu's Telemetry row and its state), `/loading-icon`, `/utils`, `/primitives/*`,
+`/cad-viewer`, `/catalog`, `/links`, `/library`, `/consent` (the app menu's Telemetry row and its state), `/update` (the update button), `/i18n` (the locales and the translation hook), `/build-id` (what a Vite config names the build with), `/loading-icon`, `/utils`, `/primitives/*`,
 `/tokens.css`, and `/styles.css`. `/catalog` (a CAD client as a `FileSource`, the file menu's
 Copy path and Reveal, and the one spelling of an absolute path: `normalizePath`, `baseName`,
 `joinPath`) and `/links` (the navbar's link defaults) are pure modules, with no React, for a
@@ -187,8 +191,8 @@ another viewer's cache provider or camera state.
 
 The host owns where state lives; the package owns what it is. Everything the
 viewer keeps is one tab record (`@text-to-cad/ui/tab-store`: the tab's settings and
-the view of the file on screen — its camera, Display settings and the renderer's own
-slices), thrown out with the tab and kept across a reload. Leaving a file, for
+the view of the file on screen — its camera, Display settings, Preview's Render settings,
+its playback settings and the renderer's own slices), thrown out with the tab and kept across a reload. Leaving a file, for
 another or for the home, drops its view (`CadViewer`), and an update of it keeps what
 still fits the new revision. The web keeps it in `sessionStorage`, the CAD app in
 memory, one record per view; both hand `createTabStore` one
@@ -245,7 +249,8 @@ Select (its nodes), Pencil, Shapes, Measure, Explode (several parts) and Clip; a
 objects), Pencil, Shapes, Measure and Clip; an STL's Pencil, Shapes and Clip — then, with no rule between, a
 3D view's Display (its settings, a popover that opens down) and Preview. The tool in hand's
 controls are one row under the strip, its sub-toolbar (`kit/tools/SubToolbar.jsx`):
-the drawing tools' colour, stroke width, placement and history; Explode's and Clip's slider rows.
+the drawing tools' colour, stroke width, placement and history; Measure's chips. Explode's and
+Clip's slider rows open in a popover from their tiles, taking up no tool.
 What there is to read of the file is the file sidebar at the top-left, whatever the tool
 (`kit/tools/FileSidebar.jsx`): an assembly's Model tree, a robot's Links, Position, an SDF's
 metadata, and Animation for a file with routines, a tile each at the top-left, a tile opening its
@@ -262,9 +267,9 @@ mode) is the shell's own, the one place Render is drawn — whatever the file's 
 which has no Render — and takes the whole page, the navbar and the strip with it, in every
 host; in the navbar's place its own bar, on no surface, names the file and holds Preview settings
 (Orbit, off at every entry, and its speed, then Render's settings, sliding in from the right
-edge) and Exit preview, fading with the playbar while the pointer rests; nothing sits under the
-model. Routines play from
-the sidebar's Animation section, in either view. Preview and the tools view are two views,
+edge) and Exit preview, fading with the playbar while the pointer rests; for a file with
+routines, Preview's own playbar sits under the model. Routines play from the sidebar's
+Animation section in the tools view and from that playbar in Preview. Preview and the tools view are two views,
 each with its own viewport, scene, camera, pose and routine over the page's one GPU device:
 Preview starts from the model as authored and leaves the tools view's state untouched, and
 leaving it throws Preview's away and gives the tools view back exactly as it was
@@ -273,7 +278,9 @@ leaving it throws Preview's away and gives the tools view back exactly as it was
 effects in the [host contract](docs/viewer-host.md), not in renderer components.
 
 One per-file settings store serves controls, live commands and persistence.
-Presets use the canonical grouped schema; see [View presets](docs/render-mode.md).
+Presets use the canonical grouped schema; see [Display modes](docs/render-mode.md), and
+[render types](docs/render-types.md) for the rule that viewer code asks what a format can do,
+never what it is.
 Expensive changes use [staged viewport updates](docs/view-updates.md): controls
 remain authoritative, preparation is replaceable, and captures await presentation.
 The camera is part of the file's view: a refresh restores the one the file on screen
@@ -285,7 +292,7 @@ is no Materials editor or persisted material override. See [View styles](docs/re
 
 The navbar leads with the logo (the TEXTTOCAD wordmark over the home, the C over a document,
 morphing between them), which opens the app's menu: Back to home where the host
-has a home, the person's settings (Telemetry), Send feedback
+has a home, the person's settings (Language, Telemetry, Theme), Send feedback
 (a new issue titled "Feedback: " where the host has a tracker), GitHub, Discord and, in
 gray, the version and who made it. Where the host keeps the view's own history (the CAD
 app's views), Back and Forward follow, disabled where they have nowhere to go. It names the

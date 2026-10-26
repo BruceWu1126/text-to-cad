@@ -9,9 +9,9 @@ shared. Missing optional methods mean an operation is unsupported.
 A view shows a file by its absolute path, or a document the engine holds by its id alone (a
 model's: a lower-case UUID, `cadgen.engine.ids`). A file's metadata may carry `navigationPath`,
 the on-disk file to browse from and act on; null says the document has no file of its own (a
-model's): its view has no file menu, its navbar and Preview's bar name it by its `name`, the navbar after the model glyph, and
-its metadata's `folder` is the folder its record registered (its script's), where its Files
-starts. A file's Files (the explorer its name menu holds) is rooted at that file's folder. Python scripts are never documents: no view opens one,
+model's): its view has no file menu, its navbar and Preview's bar name it by its `name`, with no glyph, and
+its Files starts where the explorer was last in this tab, else the person's home folder, never
+the folder of the script that built it. A file's Files (the explorer its name menu holds) is rooted at that file's folder. Python scripts are never documents: no view opens one,
 and no folder lists one.
 
 The host contains `files`, optional native `fileActions`, `clipboard`,
@@ -141,8 +141,9 @@ away and gives the tools view back exactly as it was, its routine included, in t
 mode. Preview is a view of its own, mounted over the tools view's while it is open
 (`kit/shell/PreviewView.jsx`), with its own scene, camera, pose and routine, sharing only the
 page's GPU device; the tools view's viewport stays mounted under it and nothing of it changes.
-Nothing of Preview is persisted. Routines play from the file sidebar's Animation section in either
-view. Preview opens still: Orbit is off every time it opens, and its settings panel turns it
+Nothing of Preview's state — its camera, pose, routine, whether it orbits — is persisted; its
+Render settings are the file's view's (`preview`). Routines play from the file sidebar's
+Animation section in the tools view and from Preview's playbar in Preview. Preview opens still: Orbit is off every time it opens, and its settings panel turns it
 on. The file's view's `playback` — Orbit's speed, Autoplay, and the chosen speed and loop —
 is kept between visits to Preview and across a reload, and a file's routine plays on entry
 only when its Autoplay is on. The rules are in
@@ -343,15 +344,15 @@ reaches the server through its tunnel.
 
 The optional CAD `live` binding receives a `LiveViewController` only while its
 viewport is mounted. `readState()` returns a detached serializable snapshot of
-the actual resource/revision, current selections, camera, display and render
-mode. It reads the viewport camera directly, with its last camera snapshot as
+the actual resource/revision, current selections, camera and display. It reads the viewport camera directly, with its last camera snapshot as
 an unmount fallback. During a rebuild that retains a predecessor mesh, its
 displayed document revision remains in the snapshot until replacement. Apps
 own the binding registry and any IPC/tool transport;
 shared UI does not infer view state from a backend catalog or stored tab state.
 
-The controller selects available selectors, clears selection, applies a camera,
-resets framing, applies grouped View settings, selects presets and captures a PNG.
+The controller reads the view, applies a camera, resets framing, applies grouped Display
+settings, captures a PNG and draws a library picture; `clearSelection` is each renderer's own
+command, and every renderer declines `select` in words.
 `thumbnail({ width, height })` is a library card's picture: it waits for the view
 to settle — the renderer's own live state saying the whole file is loaded and
 drawn, never a timer — then draws the model framed whole from the default
@@ -365,7 +366,7 @@ open is pictured again once its new revision is drawn), and only for the file th
 view still shows. A model's document is pictured as a file is, by its id: its catalog
 row's revision is the build the engine holds, so a rebuild is a new revision.
 On the home, a card on screen with no picture, or one taken before its file last
-changed (`pictured` against `modified`), is pictured out of sight wherever the host
+changed (`pictured` against `updated`), is pictured out of sight wherever the host
 keeps pictures (`onThumbnail`): `CadViewer` mounts a viewer of its own for it, over
 its own client — its own renderers and live binding, compact, behind the page at the
 picture's size — one model at a time, each once per visit, and a STEP or a model's
@@ -431,9 +432,9 @@ lists them all (`all()`) and merges a view's changes (`merge`). A reload of the 
 the same file, so it brings that view back; a file opened again after leaving it starts
 at the defaults. In the CAD app there is one record per view: a view the host
 creates again (its frame re-created) starts afresh, since nothing names a view across its
-frames. A view is `{ camera, display, playback, renderer }` (`kit/shell/fileView.js`):
+frames. A view is `{ camera, display, preview, playback, renderer }` (`kit/shell/fileView.js`):
 the camera is restored in place of the open-time fit, the display settings with their
-Clip and Explode, the playback settings (Orbit's speed, Autoplay, and the chosen speed and
+Clip and Explode, Preview's Render settings, the playback settings (Orbit's speed, Autoplay, and the chosen speed and
 loop), and the renderer's own slices each behind the
 signature it was written against — a slice that no longer fits the file on screen is
 dropped, the camera, the display and the playback never. Not in it, and started afresh
@@ -499,14 +500,15 @@ browser). The navbar holds no settings and none of the view's controls.
 The app menu is FileViewer's, built from the host's `navigation.home`, `links` and
 `environment.platform` and the person's `FileViewerProps.appSettings` (which `CadViewer`
 passes on), the same over a file and over the home. It is a dropdown on the floating surface.
-First **Back to home**, where the host has a home; then
-the host's on/off settings (`appSettings`, below) as checkbox items, checked at the right,
-which a press turns without closing the menu; then, where the host has a tracker
+First **Back to home**, where the host has a home; then the person's settings, a press keeping
+the menu open: **Language** (`language`, below), the host's on/off settings (`appSettings`,
+below) as checkbox items, checked at the right, and **Theme** (`colorScheme`, below); then,
+where the host has a tracker
 (`links.issues`), **Send feedback**, a link to a new issue titled "Feedback: "
 (`feedbackUrl`, `NavbarLinks.jsx`), for the person to finish, naming the version and
 `environment.platform` — it has no label: the project has none for feedback, and what is
 said may be a bug, a request or a question — then **GitHub** and **Discord**; and last, in
-gray, "v<version> · Made by @<handle>": the version links its release notes
+gray, two rows: "v<version>" and under it "Made by @<handle>": the version links its release notes
 (`links.release`) and `MadeBy` the host's X account. The version is the release's own build's
 as it is (`v0.7.15`), and any other build's with its id (`v0.7.15-dev.b80844940`, the commit
 it was built from, `-dirty` with uncommitted changes): `viewerLinks({ version, build })`,
@@ -528,13 +530,13 @@ prop), over a file and on the home alike; no host has a light/dark button of its
 Display holds no appearance control. `language` (`{ locale, inferred, choice, onChoiceChange }`, a `CadViewer` prop) is the person's
 language for the app menu's Language row: `choice` null is Automatic, `inferred` what Automatic
 means; both apps keep the choice in the person's settings (`/__cad/language`, the `language`
-section of `settings.json`), so it holds for every CAD view. `appSettings` (`{ id, section, label, checked, disabled?, onCheckedChange }[]`,
-a `CadViewer` prop) are the host's own on/off settings: checkbox items of the app menu, in the
+section of `settings.json`), so it holds for every CAD view. `appSettings` (`{ id, label, checked, info?, disabled?, onCheckedChange }[]`, `info` the
+hint of an info icon beside the name; a `CadViewer` prop) are the host's own on/off settings: checkbox items of the app menu, in the
 order they come (Telemetry, in both apps), the same in the
 logo's menu and the home's; nothing of them reaches a renderer, and Display holds none. The
 host owns what each one does and where it is kept.
 `@text-to-cad/ui/consent` is the usage stats toggle both apps share:
-`useAnalyticsConsent(consent)`, which turns the host's consent call into its `appSettings` row
+`useAnalyticsConsent(consent, locale)`, which turns the host's consent call into its `appSettings` row
 (Telemetry). Nothing asks: cadgen's telemetry is on by default once a `cadgen` command
 has said so. The host supplies the call and where the answer is kept.
 `@text-to-cad/ui/update` is the update button both apps share, from cadgen's version check:
@@ -565,11 +567,12 @@ and "Could
 not open that file" and the reason otherwise, each with a Go home button where the host has a home.
 
 The viewport's edges and corners are the shell's, never the host's: the tool strip at the
-top centre, ending in the view's own controls (Display and Preview, a 3D view's), the tool in
+top centre, ending in the view's own controls (Projection, Display and Preview, a 3D view's), the tool in
 hand's sub-toolbar under it, the file sidebar down the left edge, Quick Edit at the
 top-right, and the view cube at the bottom-right. A host's one notice goes through the shell too: `notice` is drawn at the top-right once the
 file is on screen, never while it loads or after it failed to, with Quick Edit stacked under
-it while it stands; the home never shows it. Neither app has one now.
+it while it stands; the home never shows it. The CAD app's file handler hands its corner (Full
+size, the update card) as its notice; the web viewer has none.
 Quick Edit has no host preference or persisted enable/disable state.
 What Quick Edit offers follows the subscribed destination capability and
 the ports, never an app name: Copy Prompt always, Queue for a composer
@@ -597,7 +600,7 @@ A copied reference names its file by its absolute path (`<path>#<selector>`), a 
 document id (`<id>#<selector>`), and so does a copied Quick Edit: every view spells a file the same way, so a reference pasted
 into a chat or a tool says exactly which file it means.
 
-Nothing of the viewer sits at the bottom centre. A host whose own control floats over
+Nothing of the tools view sits at the bottom centre (Preview's playbar does). A host whose own control floats over
 that edge (a chat's composer) sets `--cad-host-bottom-inset` on an ancestor to the height it
 covers: the model library scrolls its last rows clear of it. A host whose own control
 floats over the view's bottom-right corner sets `--cad-viewport-corner-bottom` to the room

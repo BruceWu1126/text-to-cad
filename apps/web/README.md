@@ -12,7 +12,8 @@ This app is the browser host of `@text-to-cad/ui/file-viewer`, not the owner of
 the shared CAD interface.
 
 **Owns:** URL selection (`/<id>`: `src/client/workbench/fileParam.js`), browser history, document title/appearance, browser
-persistence, the file menu's reveal route, and this app's release check.
+persistence, the file menu's reveal route, and the app menu's links (the update notice is
+cadgen's, read from `/__cad/version`).
 `src/App.tsx` composes an explicit `ViewerHost` and hands it to the shared
 `CadViewer` (`@text-to-cad/ui/cad-viewer`), which registers one renderer per file
 family and draws the navbar and the explorer. The catalog exposes CAD
@@ -21,7 +22,7 @@ Follow the [shared host contract](../../packages/ui/docs/viewer-host.md) when
 adding viewer features; browser effects belong in this app's adapters.
 The [shared Model tree](../../packages/ui/docs/cad-renderer.md#engine-document-panels)
 owns expansion-based picking and isolation.
-Web uses the same tree and file-row primitives as desktop; its HTTP adapter
+Web uses the same tree and file-row primitives as the CAD app; its HTTP adapter
 does not decide which model nodes are expanded or selectable.
 
 **May depend on:** compiled `@text-to-cad/ui` and `@text-to-cad/core` exports and app
@@ -32,7 +33,7 @@ this app. The Python wheel consumes only the production build.
 src/
   App.tsx               the CadViewer's browser host: URL, history, title, appearance, the file menu and the library
   main.tsx              host/client bootstrap and cleanup
-  host/                 browser clipboard, prompt delivery, the app menu's links and release check, reload under a new server
+  host/                 browser clipboard, prompt delivery, the app menu's links, the update notice, reload under a new server
   persistence/          the tab record in sessionStorage
   client/               appearance control and styling
   shared/               app build/runtime configuration helpers
@@ -142,7 +143,8 @@ language, over the page until a read answers again. One whose engine runs and re
 viewer` and open the link it prints; it keeps asking, never reloads for the refusal, and heals
 once that link, opened beside it, has left the new cookie.
 
-A page closing never stops the engine, and no timer does: it runs until `cadgen stop`.
+A page closing never stops the engine, and no timer does: it runs until `cadgen stop`, or
+until a newer installation's engine retires it while nothing uses it.
 Code changes in a checkout require
 restarting an engine you own, then rerunning the launcher. Vite handles client HMR.
 
@@ -152,15 +154,19 @@ restarting an engine you own, then rerunning the launcher. Vite handles client H
   catalog is the named file's row, computed when it is asked for; a file under
   a hidden folder opens like any other. The explorer reads one folder at a
   time, and its search skips hidden folders and `__cadgen__`, `__pycache__`,
-  `build`, `coverage`, `dist`, `node_modules` and `viewer` (exact case).
+  `build`, `coverage`, `dist`, `node_modules` and `viewer` (exact case) — except the folders
+  on the way to the engine's cache (`~/.cache/cadgen`, each model's
+  `documents/<id>/document.xbf`), which it lists.
   [docs/backend.md](docs/backend.md) has the rules.
 - **Verify a link by loading the page**, never by curling `/__cad/asset` —
-  that route serves raw files; generated entries render through a
-  different route, so probing it 404s whether or not anything is wrong.
+  that route serves raw files; an engine document is read through `/__cad/xbf` and
+  `/__cad/api/doc/<id>`, so probing it 404s whether or not anything is wrong.
 - **Warm work survives navigation.** The app retains one client across navigation, so the
   caches keyed to its resources stay valid across file switches. The cadgen engine holds
-  every document it served, a STEP's read held by its bytes, so reopening one reads and
-  meshes nothing again while its engine server lives.
+  every document it served and each part's mesh under one memory budget (a quarter of the
+  machine's memory by default, `CADGEN_ENGINE_MEMORY_MB`), and the last STEP reads by their
+  bytes: within it, reopening a document reads and meshes nothing again; past it the least
+  recently used leave memory first and are read again when asked.
   Inactive WebGL scenes are released, and a file's view (its camera, Display
   settings and pose) lasts only while it is the file on screen: a refresh brings it
   back, and leaving the file drops it.
@@ -172,8 +178,8 @@ restarting an engine you own, then rerunning the launcher. Vite handles client H
 
 ## Export and job status
 
-**Export** sits at the top-right of the navbar of a STEP, XBF, held model, GLB, STL or 3MF
-page: a dropdown of the formats that page's file writes, there at once, as nothing is
+**Export** sits at the top-right of the navbar of a STEP, XBF, held model (a model's document
+the engine holds), GLB, STL or 3MF page: a dropdown of the formats that page's file writes, there at once, as nothing is
 inspected first. For a model it captures the displayed revision and writes the document as its code built it: every
 part, as authored. The menu chooses a format alone; a posed or partial file is a function
 in the model's code. A STEP, XBF or held model offers STEP, STL, 3MF, GLB and XBF (an XBF's
@@ -220,14 +226,23 @@ registered renderers and explicit services. Viewer content is registered through
 for `.urdf`, `.srdf` and `.sdf` `@text-to-cad/ui/renderers/robot` (`CadViewer` registers all
 five with the same client and preferences, as it does for the MCP app); all loading,
 selection, panel and tool behavior is shared. Public declarations, styles and worker assets are built in that
-package. See `docs/shell.md` for the host boundary and `docs/storage.md` for
-browser persistence. CAD control guidance lives with the UI package.
+package: the root workspace builds UI's ESM, declarations, CSS and worker assets before building
+the app, with no source alias or JSX loader. Web supplies its file source (`createCadFileSource`
+from `@text-to-cad/ui/catalog`, over its CAD client), URL navigation (`onShow`, the `/<id>` path
+and history), browser persistence, the document title and appearance, the viewer's links
+(`ViewerHost.links`: its version, its build's GitHub and Discord, `src/host/viewerLinks.js`) and
+the tab's colour scheme (`colorScheme`); the navbar, the explorer, the tool strip, the file
+sidebar and Preview are the shared package's. Native file operations are host capabilities: the
+web offers Copy path and Reveal in the file manager of the machine the server runs on, and has
+no filesystem-writing or editing endpoint. The host boundary is
+[the shared host contract](../../packages/ui/docs/viewer-host.md); browser persistence is
+[docs/storage.md](docs/storage.md). CAD control guidance lives with the UI package.
 
 `vite.config.mjs` names the build, for the version the app menu shows (`__TEXT_TO_CAD_BUILD__`,
 from `@text-to-cad/ui/build-id`): none for the release's own build, whose
 environment names its version in `TEXT_TO_CAD_RELEASE` (the release workflow's bundle
-step), so it shows `v0.7.15`; for any other build, `vite dev` included, the commit of
-this checkout, with `-dirty` when it had uncommitted changes: `v0.7.15-dev.b80844940`.
+step), so it shows `v0.8.0`; for any other build, `vite dev` included, the commit of
+this checkout, with `-dirty` when it had uncommitted changes: `v0.8.0-dev.b80844940`.
 
 ## Testing
 
@@ -285,7 +300,8 @@ Preview, with the view cube at the bottom-right and Quick Edit at the top-right.
 The name menu is a popover under the file's name, two tabs over the explorer's own rows:
 **Models**, the library's eight latest models (no file), by last activity, each its glyph, its
 name and its age ("2h ago"), the one on screen marked, under "Filter models..."; and **Files**, the
-explorer: the file's folder (a model's, the folder its record registered), one folder at a
+explorer: the file's folder (a model's, the folder the explorer was last in this tab, else the
+person's home folder), one folder at a
 time, with "Filter files..." to find a file anywhere under it. It opens on Models over a model
 and on Files over a file. Below 600px of
 FileViewer width (a phone) the chrome is touch-sized and the file sidebar's tiles lead the tool strip. Preview is the shared shell's button after Display on the strip: it takes the whole page,
@@ -382,7 +398,8 @@ A file is opened by its path (the name menu, the home) and shown by its id: the 
 catalog for the file (`GET /__cad/catalog?file=<abs>`), whose row carries the document's `id`,
 and moves to `/<id>`. Rows join by that id (`client.entryOf`), so a symlinked or case-variant
 spelling of one file is one row. A model (a document with no file of its own) has no file menu;
-its Files lists the folder its record registered (the catalog row's `folder`), a file's its own folder.
+its Files lists the folder the explorer was last in this tab, else the person's home folder
+(`home` in the server's info); a file's its own folder.
 
 The home reads the library over `GET /__cad/recents`, each row with two times, `updated` (a
 file's time on disk, a model's run) and `opened` (when a page last opened it), ordered pinned
@@ -410,8 +427,10 @@ a debug id its text and that map decide (`vite.config.mjs`, `@text-to-cad/core/c
 into the shared packages' own source, not their compiled `dist`: their modules load with the maps their
 builds wrote (`@text-to-cad/core/source-maps`). The wheel
 leaves the maps out and a release uploads them to PostHog, and the page
-carries each chunk's id by file name (`__cadChunkIds`), and a frame names its chunk by it. The server holds all of it as counts in memory
--- a file once a day, by its format, never its name -- and sends them every few minutes.
+carries each chunk's id by file name (`__cadChunkIds`), and a frame names its chunk by it. The page
+also reports the view controls a person used and how long each tool was up (`controls`, names
+from `cadgen.analytics.CONTROLS`, telemetry schema 7). The server holds all of it as counts in memory
+-- a file once a day, by its format, never its name -- and sends them every five minutes.
 
 ### File storage and host actions
 
@@ -434,29 +453,31 @@ The host body uses the shared `text-ui` token (13px at the normal root scale).
 Menus, tabs and tree rows follow the same default from
 [`@text-to-cad/ui`](../../packages/ui/README.md); settings sheets preserve their
 compact 11px labels and values. The shared renderer owns reference
-layout, projected-bounds camera fitting and labeled orientation axes, so desktop
-and web stay consistent without host-specific copies of those controls.
+layout, projected-bounds camera fitting and labeled orientation axes, so the CAD app
+and the web stay consistent without host-specific copies of those controls.
 
 ### Navigation
 
 The Viewer has the one navbar every app shares (see
 [the host contract](../../packages/ui/docs/viewer-host.md#host-chrome-slots)): at the
 left the logo (the TEXTTOCAD wordmark on the home, the C over a file), which opens the app menu, then the open file's name (no glyph),
-which opens the name menu (Models and Files), with its ⋯; at the right only the blue update button, while a newer text-to-cad
-is out. The app menu holds Back to home (the home), the person's settings (Telemetry), Send feedback (a new issue titled "Feedback: "),
+which opens the name menu (Models and Files), with its ⋯; at the right the blue update button, while a newer text-to-cad
+is out, and Export over a file that writes formats. The app menu holds Back to home (the home), the
+person's settings (Language — Automatic or a named language —, Telemetry, Theme), Send feedback (a new issue titled "Feedback: "),
 GitHub, Discord and, in gray, the version (a link to its release notes) and "Made by @…"
 (X), as in the CAD app, over a file and on the home alike.
 Projection, Display and Preview are the view's, at the tool strip's end, never the navbar's;
 in Preview the navbar gives way to Preview's own bar. This host
 supplies the links (`src/host/viewerLinks.js`): its version (with its build's id,
-`v0.7.15-dev.b80844940`, for any build but the release's own), the GitHub (where new
+`v0.8.0-dev.b80844940`, for any build but the release's own), the GitHub (where new
 issues open) and Discord its build names (`VIEWER_GITHUB_URL`, `VIEWER_DISCORD_URL`);
 links open in a new tab. A newer text-to-cad is the blue update button's, at the navbar's right as in the CAD app: cadgen's
 daily version check, read from `/__cad/version` with the server's description as the page
 starts (`main.tsx`) and again whenever the person comes back to it, and its prompt copied for
 the person to paste into their agent's chat; its full install instructions open in a new tab.
-A Viewer the CAD server opens says what the server's channel allows (a store's copy hears nothing);
-one a skill opens names no channel, a skills-only install, which is told. The browser title is the open file's or model's name alone ("bracket.step", "juno"), and "text-to-cad" on the home.
+A Viewer the CAD app's server opens is told of a release only where its install channel allows
+it (a store's copy, which its store updates, hears nothing); one a skill opens names no channel
+— a skills-only install — and is told. The browser title is the open file's or model's name alone ("bracket.step", "juno"), and "text-to-cad" on the home.
 Appearance (System, Light, Dark) is the app menu's Theme row, the tab's choice (`colorScheme`,
 over a file and on the home); the page has no light/dark button of its own. The original animated mark remains the shared LoadingIcon
 for loading states. The C and CAD marks are the UI package's; the favicons are this

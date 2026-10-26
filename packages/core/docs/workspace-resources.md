@@ -13,7 +13,7 @@ the engine still reads the file, and the fetch every read of it is made with. Th
 HTTP implementation owns request encoding and cancellation. UI consumes the
 resulting tickets and never supplies a same-origin transport fallback.
 
-`service.resources` owns JSON, text, binary and size reads, dependency resolution
+`service.resources` owns JSON, byte and size reads, dependency resolution
 and worker tickets. Pass it as `{ resources }` to render loaders, peeks and robot
 loads. Relative references and URDF/SDF mesh references are resolved by the
 provider. Direct glTF buffers and textures are read through it

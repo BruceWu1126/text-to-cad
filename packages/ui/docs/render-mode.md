@@ -94,10 +94,10 @@ drawn as before. Authored materials are read-only. Color
 overrides are presentation settings, not edits to the model or its material
 assignments.
 
-| Lighting quality | Screen error | Shadow map | Environment | Capture scale | Samples at rest |
-| --- | --- | --- | --- | --- | --- |
-| Preview | 1 px | 2048 px | 256 px | 1× | 32 |
-| Final | 0.25 px | 4096 px | 512 px | 2× | 64 |
+| Lighting quality | Shadow map | Environment | Capture scale | Samples at rest |
+| --- | --- | --- | --- | --- |
+| Preview | 2048 px | 256 px | 1× | 32 |
+| Final | 4096 px | 512 px | 2× | 64 |
 
 Render is drawn through the studio's frame (core's `studioFrame.js`, see
 [the render pipeline](../../core/docs/render-pipeline.md#the-studios-frame)): ambient
@@ -109,8 +109,9 @@ samples are owed it asks for the next frame itself, and once the picture has con
 draws nothing more. A drag, a routine's frame or a setting starts the picture again; the
 damped tail of an orbit, moving the model less than a quarter of a pixel, does not. So
 orbiting pays one draw and a few small passes a frame (about 1.5 ms more at 3024 × 1964 on
-an M1 Max) and a still view converges in about half a second. A snapshot draws its still's
-32 samples at once (video frames one). Software WebGL has no frame: one draw, as before.
+an M1 Max) and a still view converges in about half a second. A snapshot is OCCT's, drawn in
+the engine (`engine/render/occt.py`), not through this frame. Software WebGL has no frame: one
+draw, as before.
 
 Each interactive viewport keeps its renderer (a view of the page's one GPU device:
 [the GPU device](cad-renderer.md#the-gpu-device)), canvas and camera controls
@@ -142,9 +143,10 @@ enabled cut stays live. Explicit neutral boundaries
 still avoid unnecessary caps. See [responsive View updates](view-updates.md)
 for scheduling, resource caching, loading presentation and capture readiness.
 
-Render's floor stands at the document's Z=0 plane (Model origin), at 60% opacity, its opacity
-letting geometry below that plane show; Lowest point is a choice away and is remembered in Render, as Glossy is. A snapshot's Render floor stands
-where the viewer's does: both resolve it from the same mode default (`RENDER_FLOOR_PLACEMENT`).
+Render's floor stands under the model's lowest point (`RENDER_FLOOR_PLACEMENT`, `lowest`), at 60%
+opacity, its opacity letting geometry below it show; Model origin (the document's Z=0 plane) is a
+choice away and is remembered in Render, as Glossy is. A snapshot's Preview floor stands where
+the viewer's does.
 Render's floor carries a studio's soft grounding shadow, as deep
 as the floor is opaque: darkest where the model touches it, the key light's cast
 shadow softening and fading away from the model. The viewer re-renders its

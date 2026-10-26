@@ -17,8 +17,7 @@ or consumer-owned declarations are required.
 Normal development, checks and deployment use existing static assets and do not
 start Python; regenerating an asset is an explicit operation. The hero reads one
 static GLB with core's GLB path, the CAD Viewer's, and plays its clip with core's
-GLB animation runtime. It needs no FileViewer host, Electron services or Python
-backend.
+GLB animation runtime. It needs no FileViewer host or Python backend.
 
 Install from the repository root with `npm ci` (or the docs-only workspace
 filter), then `npm run build:docs`. `apps/docs/vercel.json` runs the root

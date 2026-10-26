@@ -26,7 +26,7 @@ inspects a format's parts, joints or topology. No pick or tool opens or closes t
 
 | The host (web, desktop) supplies | The shared UI decides |
 | --- | --- |
-| Where the tab record lives (`TabRecordStorage`: the web's sessionStorage, the CAD app's memory) | The record: its settings (the file sidebar's and tool stack's layout, the appearance, the home's layout, the folder the explorer was last in) and the view of the file on screen (its camera, Display settings, its playback settings, and renderer slices), what is written when, and what is never stored (`@text-to-cad/ui/tab-store`, `kit/shell/fileView.js`) |
+| Where the tab record lives (`TabRecordStorage`: the web's sessionStorage, the CAD app's memory) | The record: its settings (the file sidebar's and tool stack's layout, the appearance, the home's layout, the folder the explorer was last in) and the view of the file on screen (its camera, Display settings, Preview's Render settings, its playback settings, and renderer slices), what is written when, and what is never stored (`@text-to-cad/ui/tab-store`, `kit/shell/fileView.js`) |
 | `chrome` (the navbar, `"page"`, or the view alone, `"bare"`), `navigation.home`, `links` (its version, GitHub, Discord, where a new issue opens, how a link opens), `appSettings` (the person's own settings), `colorScheme` (the person's theme and how it changes) | The navbar's order and look, over a file and over the home, the app menu (one menu in the viewer and on the home) and what a new issue says |
 | `host.files`, `fileActions`, `navigation`, `clipboard`, `promptContext`, `promptFiles` | When a copy, capture or open happens and what it carries |
 | `host.environment`: color scheme, keyboard `platform`, `reducedMotion` | How the chrome honours them |
@@ -189,13 +189,15 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   between (a file with only tools that pick has its view's controls after a rule, as their own second
   section), in every host, with a navbar or without. 24px tiles with 14px icons,
   an even 4px apart, a tool's chevron touching its button, in a 34px row (`FloatingToolBar`,
-  `data-cad-toolbar`). A file with no tools has no strip. On a phone
+  `data-cad-toolbar`). A file with no tools and no 3D view has no strip. On a phone
   ([mobile](#the-file-sidebar-and-the-tool-stack)) the tiles are 36px with 18px icons, a chevron
   20px wide, in one row that never wraps. Centre it on the viewport whenever it fits;
   clamp its position to keep 8px from the edges and from the file sidebar's tile at its left.
-  Its available width still uses all the room after that tile. What does not fit goes, from the
-  strip's end (the view's controls where the strip has them, then the tools from the last), into **More tools** (an ellipsis, last), a tool a row ticked while it is
-  in hand and Display opening its popover from More (`touchStripFit`).
+  Its available width still uses all the room after that tile. What does not fit goes into
+  **More tools** (an ellipsis, last): on a phone the view's controls are always its rows, and the
+  tools that do not fit join them from the strip's end; a tool there is a row ticked while it is
+  in hand, and Projection's and Display's rows open their choices as nested submenus
+  (`touchStripFit`).
 - **Sub-toolbar** under the strip, 8px below it, centred: the tool in hand's one row of
   controls (`SubToolbar`, `data-cad-sub-toolbar`), there for as long as the tool is up (see
   [Tools and lifecycle](#tools-and-lifecycle)). Select and Measure have none. On a phone its
@@ -238,8 +240,9 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   none of them, and neither does a view drawn as a picture or one that is loading or failed to
   load. In Preview the strip is gone and Preview's own controls are its bar's (see
   [Preview](#camera-animation-and-preview)).
-- **Nothing sits at the bottom centre**, in the tools view or Preview: a file's routines
-  play from the file sidebar's Animation section (see [Preview](#camera-animation-and-preview)).
+- **Nothing sits at the bottom centre of the tools view**: a file's routines play from the
+  file sidebar's Animation section; in Preview its playbar is under the model (see
+  [Preview](#camera-animation-and-preview)).
 - **Model update status** sits under the strip and its sub-toolbar, centred, and where
   there is no strip (Preview, a compact view, a load) at the top centre, in the strip's
   34px row, in every host. It is renderer chrome: the navbar carries no status. On mobile
@@ -297,7 +300,8 @@ routine played from the Animation section is the third motion: playing it puts E
 pose back at rest, and using either puts the routine back at rest; paused, its frame stays on the
 model as a pose does. Preview's routine is its own and moves nothing of the tools view's.
 Another file has the motions its tools have, under the same rule, decided by value
-(`kit/tools/model-effects/motionExclusion.js`): a GLB's Explode, routine and Clip; a robot's
+(`kit/tools/model-effects/motionExclusion.js` for a GLB and an engine document; the robot
+renderer's own rule, `RobotRenderer.jsx`, for a robot): a GLB's Explode, routine and Clip; a robot's
 Position and Clip; an engine document's Explode, Position and its motions (its **Motion**
 section, where Position shows a motion's frame read-only while it owns the pose).
 
@@ -451,7 +455,7 @@ snapshots, and measuring never opens Quick Edit. They stay, drawn on the model, 
 tool; a press on Measure while it is up does nothing.
 
 **Explode and Clip** have no enabled checkbox, and their rows are drawn alike, each in its popover.
-Explode's: its slider, the amount (a percentage), **Reset explode**. Clip's: its axis — a
+Explode's: its name, its slider, the amount (a percentage), **Reset explode**. Clip's: its axis — a
 borderless button reading the axis in hand, "X ⌄", lit while its menu is open — its slider, the
 amount, **Reset clip**. The axis's dropdown holds all of Clip's settings, on Display's surface
 and in its type, as narrow as its content, with no heading and no glyphs: first X, Y and Z, a
@@ -489,8 +493,8 @@ file with routines (`kit/tools/playbar/AnimationSection.jsx`), headed **Motion**
 sidebar. It is a toolbar of its own at the view's top-left, 8px in, on the strip's line and of
 its surface, padding and 24px tiles (`data-file-sidebar-tools`, "File sidebar"): one tile per
 section, a tree's a tree icon named for it (Model tree, Links), Position's a spline, Animation's a
-clapperboard, any other section's a page named for it. Preview offers its Position and
-Animation alone, their tiles bare in its top-left corner; the rest stay mounted, out of sight.
+clapperboard, any other section's a page named for it. Preview has no file sidebar: every
+section stays mounted, out of sight, and a routine plays from Preview's playbar.
 
 - **One section at a time.** None is open as a file opens. A tile opens its section in a panel
   under the toolbar, 8px below it, and is pressed while it is open; another tile opens its
@@ -521,7 +525,7 @@ Animation alone, their tiles bare in its top-left corner; the rest stay mounted,
   buttons; a tree's names truncate) to half the viewer, its cap from 64px to its room. One write,
   when the gesture lets go (or per key), never per pointer move; each section keeps its own size
   (`sidebar:<id>`), so the model tree may be wide and tall while Position stays narrow.
-- **On a phone** the sidebar is one touch tile, **Sidebar** (a panel icon,
+- **On a phone** the sidebar is one touch tile, **Sidebar** (a menu icon,
   `data-file-sidebar-toggle`), at the left of the strip's line, the strip padded clear of it on
   both sides and keeping to its tools (`FileSidebar`'s `phone`). It opens one panel on the section
   last open (the first, at first): its top a row of tabs, one per section with its tile's icon
@@ -531,7 +535,7 @@ Animation alone, their tiles bare in its top-left corner; the rest stay mounted,
   stopping above Quick Edit's peek (`--cad-quick-edit-peek`), at a phone's own width (288px,
   within the view's inset), with no grip. Its text is the panel's one size (13px, as the
   Display menu's), its tree rows 36px with 16px glyphs, its filter, dropdowns and value fields
-  32px (`globals.css`). In Preview its tiles are its top-left's, as on a desktop.
+  32px (`globals.css`). Preview hides it, as on a desktop.
 - **The layout is the person's.** The section sizes are one of the tab's settings, across its
   files (`CadPreferences.toolStack`: `{ panels: { [id]: { width?, height? } }, collapsed: { [id]: boolean } }`,
   a section's panel under `sidebar:<id>`, kept beside the appearance; any other key a stored
@@ -565,8 +569,7 @@ Its panels follow these rules:
   `TOOL_PANEL_HEADING_TEXT_CLASS`), 28px tall, 8px in: a title, a summary where there is one,
   then at its right end its own actions, the chevron where it folds (up while open, down while
   folded) and an X where it has something to remove. Every small button in a heading is 20px,
-  2px apart and 4px from the edge. A panel can end in one full-row button under its body,
-  which never scrolls (`footer`, `ToolPanelFooterButton`).
+  2px apart and 4px from the edge.
 
 - **Surfaces.** Three, defined once (`lib/floatingSurface.js`), with one border: the
   tool strip, its sub-toolbars and the stack's panels, which stay up beside the model, share
@@ -616,7 +619,8 @@ buttons. A pinch zooms at the touch speed from the first gesture after a load. A
 and worked with a finger, so its chrome is one step up the scale, after the platforms' own
 guidance (Apple's 44pt and Material's 48dp touch targets, an 11pt type floor and 15-17pt body
 text, and iOS Safari zooming into any field under 16px): type 12, 13, 14 and 15px for `text-micro`,
-`text-tiny`, `text-xs` and `text-ui`; text entry 16px; menu, select and tree rows 36-40px; the
+`text-tiny`, `text-xs` and `text-ui`; text entry at the panel's own size (the page's viewport,
+not a 16px font, stops a phone zooming in on a field); menu, select and tree rows 36-40px; the
 navbar, and Preview's bar in its place, a 48px row of 36px controls; the strip and the sub-toolbars 36px tiles (the strip one row,
 **More tools** holding what does not fit; the drawing tools' row the same single row, wrapping where it must).
 The scale is set once, in `globals.css`, for the whole page while a phone's view is on it, so a
@@ -645,7 +649,8 @@ Display is a choice of mode and the Grid switch, and nothing else: a mode has no
 of its own, and there is no settings page. The modes, in order, are **Solid** (shaded with
 the model's CAD edges, the default), **Shaded** (no edges), **Parts** (Solid with each part
 its own colour), **X-ray**, **Hidden line** and **Wireframe**, filtered by the view's
-injected capabilities (`viewFeaturesForKind`, `DisplayModeOptions.js`): a STEP assembly
+injected capabilities (`viewFeaturesForKind`, `@text-to-cad/core/common/viewSettings.js`; the
+rows and icons `DisplayModeOptions.js`): a STEP assembly
 offers all six, a STEP part file all but Parts, and a file without CAD edges (STL, 3MF, GLB,
 a robot) Solid, with Parts when it has several parts, objects or links. **Grid** draws the
 measuring grid in every mode, off by default. Each row has its icon, the sphere drawn as the
@@ -684,7 +689,7 @@ Type comes from the token scale only (`text-micro` 10px, `text-tiny` 11px,
 `text-xs` 12px, `text-ui` 13px, a phone's a step up: see [mobile](#the-file-sidebar-and-the-tool-stack));
 no pixel font sizes. Settings controls and the
 menu labels use `text-tiny`, regular weight;
-panel headings use 12px. Sections use 8px gutters and bottom insets
+panel headings use `text-tiny` (11px) too. Sections use 8px gutters and bottom insets
 and 4px row and column gaps. `FileSheetFieldGrid` owns horizontal spacing; its
 children never pad again. Menu, select and context-menu typography comes from
 the primitives, portals included. Selected values show their icon where it
@@ -830,9 +835,11 @@ annotations a note can carry has it (a STEP's, a robot's); a compact host gets n
 Preview puts it away with the tools. While the view loads it is out of sight, its note
 and its state kept. It is essential, so no setting turns it off.
 
-The sidebar and Quick Edit keep their corners, 8px in, unless one would reach under the tool
-strip or its tool's row: then it starts 8px below them instead (measured, `--cad-sidebar-top` and
-`--cad-top-right-top`), so the strip is never covered. They may overlap each other.
+The sidebar and Quick Edit keep their corners, 8px in, and neither reaches under the tool
+strip or its tool's row: the sidebar's panel is never wider than the room left of the strip
+(`--cad-file-sidebar-max-width`), and the top-right column starts past the strip's right edge
+(`--cad-top-right-left`), both measured by the shell (`RendererShell.jsx`), so the strip is never
+covered. They may overlap each other.
 
 On a phone Quick Edit is a bottom sheet, shadcn's drawer as it ships (`primitives/drawer.jsx`,
 vaul): full width, non-modal, never swiped away (its X clears it). It opens at a peek of its
@@ -877,9 +884,8 @@ Escape in an empty box is the viewer's Escape (clearing the selection, and so th
 in a box with a note it only hands the keyboard back to the model.
 
 The person's picks put the keyboard in the note, each one (a pick right after their
-primary press in this view), and so does a first annotation stroke once the pen lifts. A
-selection an agent or host makes through the live controller (`select`) opens it without
-taking the keyboard.
+primary press in this view), and so does a first annotation stroke once the pen lifts. No
+live command selects (every renderer declines `select`), so nothing but a person opens it.
 
 The buttons, left to right, are only those the host can carry out, and the rightmost
 is the primary one, which Enter presses (Shift+Enter is a new line). They are the

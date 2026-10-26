@@ -31,7 +31,7 @@ the last release disposes shared GPU/BVH state.
 - Disposable resource admission never changes exact geometry or persistent
   cache identity.
 - A scene's sibling (`createSibling()` of `lib/render/glbScene.js`,
-  `lib/render/meshScene.js`, `lib/urdf/robotScene.js`) draws over the source's
+  `lib/render/meshScene.js`, `lib/urdf/robotScene.js` and `lib/xbf/xbfScene.js`) draws over the source's
   geometry through `lib/render/sharedGeometry.js`: `shareGeometry` gives it the
   source's index and attribute objects, so one renderer drawing both scenes uploads
   each buffer once, and copies only what the sibling rewrites for itself (a robot's
@@ -57,73 +57,32 @@ the last release disposes shared GPU/BVH state.
 - Failed or pending builds keep stock picking. A result must match the
   geometry's attributes, arrays, versions, groups, draw range and live
   ownership; the last geometry release cancels queued or active work.
-- Deformation runs before the bounds test.
+- A geometry's `cadBeforeRaycast` hook, where one is installed, runs before the bounds
+  test (nothing installs one today).
 
 ## 3. Reuse without changing geometry
 
 ### Recomposition
 
-Recomposition may take its previous result when the descriptor and component
-inputs are immutable. It shares unchanged occurrence rows and unchanged tree
-metadata across progressive publishes; changed triangle ranges, bounds, placements and
-appearance still produce the corresponding new records. Its private weak
-ownership metadata never enters saved geometry or cache identity. Complete
-same-file revisions can also seed from the prior composition.
+An engine document read again with the last version as `previous`
+(`loadXbfDocument(source, { previous })`, `lib/xbf/xbfDocument.js`) keeps every part buffer
+whose geometry key the new version still holds, and the geometry built over it; only the
+parts the edit changed are fetched and built. Nothing of that reuse enters saved geometry or
+cache identity.
 
-Detached occurrence snapshots detect in-place descriptor or material edits;
-only rows proven to belong to the current composition may skip scene work. A
-static delta requires the same last-applied render context and no dynamic
-pose, animation or clip. Changed components update their own records, while
-unchanged occurrence geometry and selectors retain their owners. Arbitrary
-mutable caller meshes keep normal reconciliation.
+### Instancing, culling and material passes
 
-Imported STEP products without faces keep their occurrence identity. A product
-that holds only wires has no triangles, so its mesh's box comes from its edges'
-polylines. One with no faces or edges meshes to empty arrays, a zero-size box at
-the origin and a positive minimum scale. Either way the same body validation
-applies. That box is only the body's metadata: only triangles are
-drawn, so composition gives an occurrence without them no bounds, and it
-cannot change the assembly's framing or hide the real parts.
-
-### Instancing and culling
-
-Repeated compatible opaque surfaces share instanced draws and retain
-occurrence identity; mirrors and transparency use explicit fallback paths.
-
-Later publications of the same model retain compatible surface instance sets and
-their original occurrence slots. Only changed membership or render passes replace those sets;
-selected and hidden occurrences keep inactive slots until eligible
-again. Transform passes reuse each mesh's matrix while observing mutable
-source transforms and effect matrices on every update.
-
-Surface instance groups use aggregate frustum bounds, invalidated by instance
-matrix and slot changes. Transformed component boxes and conservative parent
-affine padding keep boundary-crossing geometry eligible, including shear.
-Culling changes draw submission only; occurrence slots and picking remain
-intact. Screen-space edge instances retain their separate drawing policy.
-
-### Material pass keys
-
-Material pass keys reuse serialized strings only after comparing their current
-scalar values, emission state, render order and clipping planes. Direct
-material and plane mutations remain observable; custom values use ordinary
-serialization. Reapplying material settings preserves unchanged shader programs
-and owned emissive colors. Colour and PBR uniforms still update on every pass;
-feature changes, vertex-colour mode and transparency invalidate the appropriate
-program. Reflection intensity belongs to the shared pass key. A distinct
-nonblack emissive channel, or emission over vertex colours, uses the ordinary
-material so the instance colour cannot tint that channel.
-
-Clients that apply pose, selection or material changes directly to display
-records finish with `scene.syncSurfaceInstances()`; this uses the same
-reconciliation as a source update. Clip-only viewer updates also synchronize
-the shared surface material.
+An engine document draws one `Mesh` per instance over one shared prototype geometry
+(`lib/xbf/xbfScene.js`, `lib/render/sharedGeometry.js`), with no instanced draws of its own;
+a rebuild keeps the buffers and geometries whose keys it still holds, as above. The
+composed-package path — `lib/assembly/meshData.js`'s progressive publishes and wire-only
+products, `common/cadSurfaceInstances.js`'s instanced surface sets, aggregate frustum bounds
+and material pass keys (`scene.syncSurfaceInstances()`) — is 0.7's, reached by no product path.
 
 ### Revision reuse
 
-Canonical geometry trees contain no producer selection. Snapshot source scopes
-remain isolated. Placement and appearance belong to each tree's occurrence
-composition.
+Snapshot source scopes remain isolated (`lib/renderAssetSourceScope.js`: the document
+it renders). Placement and appearance belong to the document's instances.
 
 ## 4. Decode workers
 
