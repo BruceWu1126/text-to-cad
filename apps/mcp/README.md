@@ -400,13 +400,14 @@ host-specific timing rule. The manifests continue to launch `cadgen mcp`.
 
 ```bash
 npm run build:mcp                             # packages, then this app
+npm --prefix apps/mcp run typecheck          # tsc over src/ (the Vite build checks no types)
 npm --prefix apps/mcp run test               # jsdom units
 scripts/install/dev_install.py codex --restart  # run it in the Codex app
 scripts/install/dev_install.py claude-desktop   # run it in Claude Desktop (then restart it)
 ```
 
-`scripts/test/test-js.sh --select mcp` is what CI runs: the tests, then the
-build. A build names itself in the app menu (`vite.config.mjs`, through
+`scripts/test/test-js.sh --select mcp` is what CI runs: the type check, the tests,
+then the build. A build names itself in the app menu (`vite.config.mjs`, through
 `@text-to-cad/ui/build-id`): the release's own build shows `v<VERSION>`, any other
 `v<VERSION>-dev.<commit>`, the commit of the checkout it was built from. Every host
 `dev_install.py` takes is in CONTRIBUTING.md ("Test In Agent Apps"). A checkout's `cadgen mcp` serves `apps/mcp/dist` when it exists
