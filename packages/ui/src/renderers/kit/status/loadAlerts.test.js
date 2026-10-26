@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildFailedAlert } from "./loadAlerts.js";
+import { buildFailedAlert, failureAlert } from "./loadAlerts.js";
 
 test("a failed build is said over the model on screen: what was raised, the traceback in the details", () => {
   const failed = { model: "demo.py::demo", progress: { phase: "body", label: "Building geometry", detail: "base" },
@@ -14,4 +14,15 @@ test("a failed build is said over the model on screen: what was raised, the trac
   assert.equal(over.blocking, false);
   const alone = buildFailedAlert("XBF/demo.xbf", { error: "" }, false);
   assert.deepEqual([alone.title, alone.blocking, alone.reason], ["Couldn’t build the model", undefined, "The build returned no diagnostic."]);
+});
+
+test("a request that failed says what it was doing in words, and keeps the client's name for it in the details", () => {
+  const lost = failureAlert("741015b2", "Failed to fetch", { kind: "network", operation: "engine-document", detail: "Failed to fetch" });
+  assert.equal(lost.message, "The browser lost contact with the viewer while loading the model for “741015b2”. Check that the viewer is running and this tab has the correct address, then reload.");
+  assert.ok(lost.details.includes("Operation: engine-document"));
+  const refused = failureAlert("/m/a.dxf", "", { kind: "http", status: 502, operation: "drawing", detail: "bad gateway" });
+  assert.equal(refused.message, "The server returned HTTP 502 while loading the drawing for “/m/a.dxf”.");
+  // An operation already in words is said as it is.
+  assert.match(failureAlert("/m/a.step", "", { kind: "network", operation: "preparing display assets", detail: "Failed to fetch" }).message,
+    /while preparing display assets for/);
 });
