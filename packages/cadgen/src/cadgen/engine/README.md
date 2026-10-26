@@ -134,6 +134,9 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
 
 ## Laws
 
+The laws are the package README's (**The design laws**), numbered as this document cites
+them; each is restated here as the engine meets it.
+
 1. **An xbf carries its build closure as pointers and digests** -- script and
    function, modules, data inputs, versions and the key; never source, never lines on
    elements, never input contents, and nothing of a version control's (the engine calls
@@ -253,7 +256,12 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
    patched with an attribute of cadgen's own: it is dropped, or refused by name at document
    time (`test_kinematics`' conformance test walks the subtree and holds it).
 
-14. **Connected means warm.** A page watches a document while it has a version wait outstanding
+Laws 14 to 18 hold for the whole package (the package ships alone, no backwards compatibility,
+closed vocabularies, loud failure or correct output, nothing waits on the network) and are the
+package README's alone; so is 23 (push, not pull: a model is what its last run told the
+engine), whose mechanism is **Document lifetime** below.
+
+19. **Connected means warm.** A page watches a document while it has a version wait outstanding
     or completed a sync within `serve.LIVE` seconds. Heartbeats use the document's id (`ids`): a
     file's `file_id`, a model's `model_id` or `key_id`; they never turn a model into a file path.
     A watched model document keeps the worker that built it warm; a watched file -- a model's
@@ -263,7 +271,7 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
     is exceeded instead. Memory may take a document out of memory, for the cache to give back,
     only when nothing watches it (**Document lifetime**). Closing a page never stops the engine or its worker.
 
-15. **One HTTP owner per installation.** The daemon serves its one page and document
+20. **One HTTP owner per installation.** The daemon serves its one page and document
     reads on one authenticated listener. Both `serve` and `viewer` start or reuse it;
     neither command has a standalone serving mode. A launcher exits after handing its client the
     engine URL; closing a client never stops the engine. Tabs select documents at `/<uuid>`: a
@@ -271,13 +279,15 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
     The explorer opens where it was last, else the person's home folder; a launch's folder resolves
     only the relative files it names, and requests read files by absolute path. No page replaces or
     re-executes the engine; stopping it is an explicit engine operation.
-16. **No kernel in request threads.** Reading XBF/STEP, meshing, topology facts and poses
+
+    **No kernel in request threads.** Reading XBF/STEP, meshing, topology facts and poses
     run in child processes. The daemon holds structures and buffers, never live kernel objects.
 
-17. **MCP state belongs to the engine.** Each HTTP MCP session owns its tools, views
+    **MCP state belongs to the engine.** Each HTTP MCP session owns its tools, views
     and UI resource. Stdio peers hold transport metadata only; deleting a session
     never stops the engine. Sidebar sharing is in memory and never writes a registry.
-18. **Host differences stay at the boundary.** The stdio peer translates host capabilities;
+
+    **Host differences stay at the boundary.** The stdio peer translates host capabilities;
     the app page keeps version reads short enough for the host's tool-call slots. Engine
     request handlers act on declared capabilities, never on a host's identity.
 
@@ -1592,8 +1602,8 @@ a declared file follows that file's bytes (**Document lifetime**).
 **Functions** (`api`, also `cadgen.export`, `cadgen.snapshot` and `cadgen.inspect`; `serve`,
 `status`, `stop`, `delete` and `server` only the CLI calls): one per command, each through the daemon. No function builds source text;
 a shape made elsewhere is handed over, never built (`model(shape, name=...)`, **Shapes handed over**).
-`export(source, *destinations)` a list of `Written`; `snapshot(source, out, ...)` a `Drawn`, and `snapshot(job=PACKET, ...)` (with `source` in place of the packet's input, as `--job PACKET SRC`) a list of them, one verb with two input shapes, anything else refused as Python refuses a call; `where(doc)` the build
-closure an xbf holds, `where(doc, ref)` an element's facts. Each takes a handle (what a model call
+`export(source, *destinations)` a list of `Written`; `snapshot(source, out, ...)` a `Drawn`, and `snapshot(job=PACKET, ...)` (with `source` in place of the packet's input, as `--job PACKET SRC`) a list of them, one verb with two input shapes, anything else refused as Python refuses a call; `inspect(doc)` what
+the document holds and its build closure, `inspect(doc, ref)` an element's facts. Each takes a handle (what a model call
 returns), a document id or a file path; `export` and `snapshot` take the decorated function too,
 building it first. A handle exports and draws its document the same way (`.export()`,
 `.snapshot()`); a `Model`'s `.build(verify=, profile=, daemon=)` is the debug seam, a `Report`: it
@@ -2712,7 +2722,7 @@ holds (unsaved, detached) is refused with its state and the command that builds 
 `--query build` returns saved-file metadata/closure or live-build metadata; `--query closure` and
 `--query geometry` select the other queries explicitly. In the CAD Viewer a model's page is
 `/<id>`; it has no file of its own, so no file menu, and its name menu's Files lists the folder
-its record registered (the catalog row's `folder`).
+the explorer was last in, else the person's home folder, never the script's.
 
 A shape with no function -- a REPL's, a notebook cell's -- is handed over instead: `model(shape,
 name="bracket")` returns the same kind of handle (**Shapes handed over**).

@@ -306,7 +306,7 @@ joints, couplings (name, kind, ratio, joints), states, sequences, animations and
 both as data; `--query closure`, and `cadgen.inspect()` with no reference, the closure alone);
 with a reference it returns geometry facts.
 `query="build"` (`--query build`) returns saved-file metadata and closure or live
-build metadata. File metadata does not imply a live worker. `where` is retired.
+build metadata. File metadata does not imply a live worker.
 
 ## The shape of the package
 
@@ -333,12 +333,13 @@ src/cadgen/
                          #   by the engine and in-process document reads (documents), a DXF's
                          #   payload (drawings), a robot's (robots), Quick Edit's packets
                          #   (prompt_files)
-  mcp/                   # stateless stdio proxy (shim), engine sessions (http), tools and
-                         #   launches (server), which host started the shim and how it
-                         #   presents CAD (host), open views (views), the viewer routes
-                         #   in-process (tunnel), roots, the page (ui), and the CAD Viewer
-                         #   link for a host that renders no MCP Apps, which the shim opens
-                         #   (browser)
+  mcp/                   # stateless stdio proxy (shim) and its JSON-RPC transport
+                         #   (protocol), engine sessions (http), tools and launches
+                         #   (server), the agent operations (operations), which host started
+                         #   the shim and how it presents CAD (host), open views (views),
+                         #   sidebar views shared in memory (sidebar), the viewer routes
+                         #   in-process (tunnel), the page (ui), and the CAD Viewer link for
+                         #   a host that renders no MCP Apps, which the shim opens (browser)
   urdf.py, sdf.py,       # the robot validators: one public namespace per format, its
   srdf.py                #   `validate` verb, and the checks behind it (*_source.py,
                          #   *_validation.py, sdf_external.py, findings.py, xml_common.py)

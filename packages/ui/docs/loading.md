@@ -29,7 +29,7 @@ with their names, geometry keys, colours and element names by ordinal; instances
 matrices; the tree; the version) and one XBM2 buffer per prototype, six at a time
 (`loadXbfDocument`, core's `lib/xbf/xbfDocument.js`), beside the engine's look. The viewport
 reads "Reading model", then "Loading geometry" with the parts in and the parts to come, and
-the scene is built once they are all in (`createXbfScene`, the builder a snapshot calls too).
+the scene is built once they are all in (`createXbfScene`).
 Every part is drawn at the mesh the engine made of it: the page never tessellates. What the
 kernel measures of an element is asked when a person asks (`fetchXbfElementFacts`), never
 extracted ahead.
@@ -43,5 +43,5 @@ part is fetched once per geometry key, so only the parts the edit changed are fe
 every other part keeps its buffer and the geometry already uploaded. The new scene replaces
 the old when it is ready, so the old one stays on screen meanwhile, reported as an update
 ("Updating model…"), never as the loading screen, and the camera stays where it is. An engine
-that stopped answering (its daemon idled out or was stopped) is asked again after a second,
-which starts it, and the document is read from it as it has it now.
+that stopped answering (stopped, or not yet running) is asked again after a second
+(`RETRY_MS`), which starts it, and the document is read from it as it has it now.

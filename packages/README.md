@@ -1,6 +1,6 @@
 # Packages
 
-Three shared packages support the applications in `apps/docs` and `apps/web`:
+Three shared packages support the applications in `apps/docs`, `apps/web` and `apps/mcp`:
 
 | Directory | Identity | Responsibility |
 | --- | --- | --- |
@@ -8,10 +8,9 @@ Three shared packages support the applications in `apps/docs` and `apps/web`:
 | [core](core/README.md) | `@text-to-cad/core` | Framework-independent JS/TS geometry, rendering and explicit CAD service client |
 | [ui](ui/README.md) | `@text-to-cad/ui` | Complete shared FileViewer, injectable renderers, navigation, controls and styles |
 
-This migration is a pure refactor. All apps retain their existing UI, UX and
-functionality. Web and desktop both consume the same FileViewer; their adapters
-own browser/native services and application state. Docs consumes core for its
-hero, a static GLB.
+The web app and the CAD app (`apps/mcp`) both consume the same FileViewer; their
+adapters own browser and host services and application state. Docs consumes core for
+its hero, an animated GLB cadgen exported.
 
 Apps import compiled public package exports. UI may depend on core; core never
 depends on React or UI. Shared packages never import application source, and

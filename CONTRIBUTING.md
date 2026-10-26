@@ -159,14 +159,13 @@ retires a worker), `CADGEN_ENGINE_MEMORY_MB` (the daemon's one memory budget,
 **Document lifetime**), `CADGEN_ENGINE_CACHE_IDLE` (the document cache's idle seconds, the
 tests' seam), `CADGEN_ENGINE_PORT` (its HTTP port,
 `0` for any free one, refused when held; unset, 3245, else the next free port, kept per installation), `CADGEN_ENGINE_MEMO=0` (no memo
-hits), `CADGEN_ENGINE_BODIES=0` (no body replay), `CADGEN_ENGINE_MESH=processes|inline`
+hits), `CADGEN_ENGINE_BODIES=0` (no body replay), `CADGEN_ENGINE_MESH=processes|inline`,
 `CADGEN_ENGINE_THREE` (the three.js folder `cadgen serve` pages load) and
 `CADGEN_VIEWER_WARM=0` (no engine warm-up at `cadgen viewer`'s launch). What the
 engine builds is written beside a project only as the files models declare or a command
 exports. Beside cadgen's settings, in the state folder, it keeps one record per model or
 opened file (`documents/<uuid>/document.json`: the script and function that build it, or
-the file's path, and its rebuild command; never geometry; a copied model's sources and
-inputs beside it). In the cache folder (`CADGEN_CACHE_DIR`, else the platform's:
+the file's path; never geometry). In the cache folder (`CADGEN_CACHE_DIR`, else the platform's:
 `~/.cache/cadgen`) it keeps each model document's bytes as last built,
 `documents/<uuid>/document.xbf`, regenerable and wiped at no loss, so a restart reopens
 every document without a build, and under `pycache/` the bytecode the daemon and its
@@ -511,7 +510,8 @@ imports remain inside its directory.
 
 ## Viewer Development In This Repo
 
-The apps are `docs`, `web` and `codex`. Framework-independent CAD code lives
+The npm apps are `docs`, `web` and `mcp` (`apps/api` is a Vercel project of its own, with no
+dependencies). Framework-independent CAD code lives
 in `@text-to-cad/core`; `@text-to-cad/ui` owns the complete FileViewer and injectable
 renderers. Apps consume compiled public exports. Apps never import another app,
 and packages never import apps. `npm run check:boundaries` checks the graph,
@@ -563,7 +563,8 @@ cache provider and worker lease.
 FILE's at `/<id>`, else the home -- and exits. `--json` prints the authenticated launch record
 without opening a browser. Each launch's folder becomes the folder the home shows.
 An explicit `--host` or `--port` pins the engine listener; a conflict with an
-already-running engine fails. There is no fixed default port or viewer process.
+already-running engine fails. The engine's default port is 3245, rolled past when another
+program holds it (`cadgen status` says which); there is no viewer process of its own.
 A checkout serves its local web build; `CADGEN_VIEWER_DIST` and
 `CADGEN_MCP_APP_DIR` are explicit asset overrides. A wheel resolves its
 bundled assets without the repository. Run `scripts/bundle/bundle.sh` after
@@ -619,9 +620,9 @@ debugging; normal iteration goes through `bundle.sh`.
 `main` is the source tree, what installers clone, and what releases are cut
 from. There is no development symlink layout and no generated publish tree:
 every path is the real file, and the repository root is itself the agent plugin
-package (`.claude-plugin/` and `.codex-plugin/` hold the manifests; the plugin's
-skills are `skills/` directly), so whatever is on `main` is what agent
-installers copy.
+package (`.claude-plugin/`, `.codex-plugin/`, `.cursor-plugin/`, `gemini-extension.json`
+and the Agent Plugins `plugin.json` hold the manifests; the plugin's skills are `skills/`
+directly), so whatever is on `main` is what agent installers copy.
 
 Four consequences are enforced by `scripts/github-workflows/check-builds.sh`
 on every push:
@@ -794,7 +795,7 @@ green: that is the release. `Publish Release`, on the merge commit:
    the CAD app can name, by the debug id its build stamped on it, with its map
    -- a page whose maps PostHog could not use stops the release here.
 4. **Install test.** The built wheel into a fresh venv — `cadgen --help`,
-   `cadgen viewer --help`, `cadgen doctor skills/cad` — then
+   `cadgen viewer --help`, `cadgen doctor --no-server skills/cad` — then
    `scripts/test/test-installed.sh --wheel <built-wheel>`; the distribution is
    uploaded as a workflow artifact (`cadgen-<version>`).
 5. **Source maps, then PyPI** (on `main` only). The maps go to PostHog first
@@ -1075,7 +1076,7 @@ requests `Prepare Release` opens start their checks. It needs Contents and Pull
 requests write on this repository; nothing merges with it, so it need not be an
 admin's.
 PyPI is published to from one place. The `pypi` job runs in the GitHub environment
-`pypi`, whose deployment branches are `main` alone, and cadgen's trusted publisher on
+`release`, whose deployment branches are `main` alone, and cadgen's trusted publisher on
 PyPI names this repository, `release-publish.yml` and that environment, so no run on
 another branch (or a workflow changed on one) can mint a token PyPI takes. No other
 job asks for `id-token`. `build-test` is protected as `main` is (a pull request to

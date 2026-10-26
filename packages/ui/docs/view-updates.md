@@ -30,18 +30,17 @@ Both paths yield until the controls have painted, then apply the latest recipe.
 Only the preparation path loads resources and compiles shader variants. Live
 updates coalesce to the next frame and do not wait for an artificial debounce.
 
-The Clip and Explode tool buttons add neutral control panels. Editing a slider or
-number enables the effect; X or pressing the tool again resets and removes it.
-Clip uses original model bounds for its slider and the rendered plane, independent
-of pose and Explode. Its neutral endpoint is the maximum coordinate (minimum when
-flipped). It has one active axis and plane, exposed in its panel as a compact X/Y/Z
-dropdown and a single cut-amount slider. The slider starts neutral on the left and
+Explode and Clip are popovers from their strip tiles: the slider, the amount and Reset, and
+Clip's axis dropdown with Part colours and Reverse. Editing the slider enables the effect;
+Reset puts it back to neutral. Clip uses original model bounds for its slider and the rendered
+plane, independent of pose and Explode. Its neutral endpoint is the maximum coordinate
+(minimum when flipped). It has one active axis and plane. The slider starts neutral on the left and
 advances from maximum to minimum coordinate; a flipped cut (`invert`) reverses that direction. CLI coordinates, including zero, remain supported. Clip and Explode stay outside mode presets.
 
 ## Renderer and resources
 
-`kit/look/studioEnvironmentCache.js` keeps at most three reflection maps per
-viewport. `studioEnvironment.worker.js` generates PMREM in worker WebGL and
+`kit/look/studioEnvironmentCache.js` keeps at most three reflection maps per GPU device,
+shared by every viewport of the page (per viewport where there is no device). `studioEnvironment.worker.js` generates PMREM in worker WebGL and
 transfers half-float pixels; model geometry stays on the main renderer. Rotation
 and exposure reuse the map. Superseded work terminates the worker; completed
 maps are reused by key. Workers terminate after transferring their pixels, so inactive tabs do not

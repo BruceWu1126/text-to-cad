@@ -1,7 +1,7 @@
 # @text-to-cad/core
 
 The shared JavaScript half of cadgen: everything the distribution and its
-clients need to turn cached geometry into pixels and motion.
+clients need to turn the meshes the engine made into pixels and motion.
 Source builds to ordinary ESM and package-owned declarations in `dist/`.
 Apps and UI consume compiled exports; the OCCT parity bench bundles the
 headless entry into a snapshot page of its own, outside the Python
@@ -12,7 +12,8 @@ this package's source nor supply ambient module declarations.
 helpers. Never React, ReactDOM, Electron, Next.js, UI or application source.
 Browser entry points never import Node-only code.
 
-**Consumers:** `@text-to-cad/ui`, docs, web and desktop apps, and runtime bundlers.
+**Consumers:** `@text-to-cad/ui`, the docs, web and CAD (`apps/mcp`) apps, and the parity
+bench's bundler.
 `@text-to-cad/core/client` communicates with `cadgen.viewer` over HTTP; this
 protocol relationship never imports Python or discovers an interpreter.
 
@@ -26,11 +27,11 @@ protocol relationship never imports Python or discovers an interpreter.
   as definitions, and per occurrence what its appearance resolves to (material,
   finish, base colour, opacity). The page reads nothing beside the document. A
   document ships no code, and no adjacent file is discovered or fetched. The code in this package must be
-  writable against exactly those inputs. Composition joins the tree's
-  occurrences to the display table by id (`applyOccurrenceDisplay`), carries
-  material ids, names, finish and the folded opacity into mesh data, decides no
-  precedence of its own, and never mutates the stored tree or component
-  meshes. Materials are read-only in viewers: Inspect and Render honor
+  writable against exactly those inputs. The engine document's scene
+  (`lib/xbf/xbfScene.js`) places one group per instance over its prototype's buffer and
+  wears the colour and material the structure gives it (`xbfLookParameters`); it decides no
+  precedence of its own and never mutates the document. Materials are read-only in viewers:
+  the regular modes (Inspect) and Render honor
   authored color, finish and opacity, with scene settings supplying fallbacks.
   There are no session material overlays.
   Authored finishes use a small fixed reflection fill in Inspect so metals
@@ -69,36 +70,31 @@ protocol relationship never imports Python or discovers an interpreter.
   form, played by linear interpolation as a glTF sampler is), which occurrences
   each joint carries, what a drag writes, named poses — by dot products and TRS
   composition, into per-occurrence transforms; it mints no id, decides no
-  default or ownership, solves no mechanism, and checks nothing cadgen checked. The animation runtime
-  (`animationRuntime.js`) plays the baked keyframes,
-  `{clips: [{id, label, duration, loop, tracks}, ...]}`, which cadgen bakes
-  from the model's Python clips when it builds, as a glTF player plays its
-  samplers (a transform's keys CUBICSPLINE). Each track drives one channel
-  (transform, opacity or visible) of the document occurrence ids it
-  lists; an evaluation is a pure function of t, so scrub, loop and seek are
-  free. It runs no model code, resolves no names and checks nothing cadgen
-  checked. Neither half references the other; they meet only in the effect
-  records.
+  default or ownership, solves no mechanism, and checks nothing cadgen checked. A GLB's clips
+  are played as the file carries them (`lib/render/glbAnimationRuntime.js`, three's
+  `AnimationMixer`), and an engine document's motions by `lib/xbf/xbfMotion.js`, whose
+  `values(t)` is the engine's `mechanism.Timeline.values`: an evaluation is a pure function
+  of t, so scrub, loop and seek are free. Neither runs model code, resolves names or checks
+  anything cadgen checked, and neither references the articulation player.
 - **One scene builder per file family, two callers**: a GLB, an STL or 3MF, a
   robot description (URDF, SRDF, SDF) and an engine document (an `.xbf`, or a STEP,
   which opens as one) are each drawn by ONE builder here
   (`lib/render/glbScene.js`, `lib/render/meshScene.js`, `lib/urdf/robotScene.js`, over
   `lib/urdf/loadRobot.js` and `lib/urdf/robotParts.js`, and `lib/xbf/xbfScene.js`, over
   `lib/xbf/xbfDocument.js`), which the viewer's renderer
-  for that family and the snapshot CLI's headless stage (`common/headlessScene.js`)
+  for that family and the OCCT parity bench's headless page (`common/headlessScene.js`)
   both call; the look they wear is resolved in one place (`resolveSceneSurfaceLook`,
   `common/sceneSettings.js`) and a robot opens at one pose: the opening of the
   articulation cadgen resolved for it (`cadgen.robot_payload`, played by
-  `common/articulation.js`). A
-  snapshot therefore cannot draw one of them differently from the viewer, and none is
-  flattened into mesh data for a render. They are cut, exploded and measured the same
+  `common/articulation.js`). The
+  parity page therefore cannot draw one of them differently from the viewer (cadgen's own
+  stills are OCCT's), and none is flattened into mesh data for a render. They are cut, exploded and measured the same
   way in both, too: Clip through `lib/viewer/sceneClip.js`, Explode through the scene's
   `setExplode` (`lib/viewer/sceneExplode.js`, a GLB's), Measure's snapping through
   `lib/viewer/meshMeasure.js`, every number in the FILE's unit (`lib/viewer/sceneUnits.js`)
   and a mesh's measurement marked approximate. What a file's view offers is one rule,
   `viewFeaturesForKind` (`common/viewSettings.js`). `npm run check:boundaries` holds both callers
-  to the shared modules. A STEP render package's scene is `buildModel` (`common/cadScene.js`);
-  the docs hero is a GLB, read by `lib/render/glbMeshData.js` and played by
+  to the shared modules. The docs hero is a GLB, read by `lib/render/glbMeshData.js` and played by
   `lib/render/glbAnimationRuntime.js`, the viewer's own GLB path.
 - **Direct GLB stays native**: a direct GLB is its glTF scene graph (nodes, skins,
   morph targets, authored materials) with its translation, rotation, scale, skin and
@@ -121,19 +117,20 @@ src/
   client/          # CAD service/resource contracts, HTTP adapter and worker tickets
   prompt/          # typed context bundles, identity/targets and pure serialization
   common/          # rendering + runtime entries shared by every consumer:
-                   #   cadScene (a STEP's scene build), renderMeshScene/
-                   #   renderModel/renderOptions (stills), headlessRenderEntry
-                   #   (the parity bench's snapshot page's entrypoint), headlessScene
+                   #   renderModel/renderOptions (interactive canvases, the docs
+                   #   hero), renderMeshScene (the parity page's stills),
+                   #   headlessRenderEntry (that page's entrypoint), headlessScene
                    #   (a GLB, mesh, robot or engine document job through its
-                   #   family builder),
-                   #   articulation (cadgen's articulation, played),
-                   #   animationRuntime (clips), applySceneState (the one
-                   #   effects pass), recordEffects (effects onto records),
-                   #   source (render-source loading), sceneSettings (shared
-                   #   CAD/Render contract), camera, themeSettings internals,
-                   #   displaySettings
-  lib/             # subsystems: selectors/ (ref runtime), assembly/
-                   #   (package composition), render/ (format mesh loaders; the GLB and mesh scene
+                   #   family builder), articulation (cadgen's articulation,
+                   #   played), sceneSettings (shared CAD/Render contract),
+                   #   camera, themeSettings internals, displaySettings; cadScene
+                   #   and what hangs off it (applySceneState, recordEffects,
+                   #   cadSurfaceInstances, displayRecordTransform,
+                   #   animationRuntime's players) is 0.7's STEP package path,
+                   #   which no product path calls
+  lib/             # subsystems: xbf/ (an engine document: its structure and
+                   #   XBM2 part buffers, scene, look, kinematics and motions),
+                   #   render/ (format mesh loaders; the GLB and mesh scene
                    #   builders), viewer/ (exploded view, part visual state,
                    #   the surface look, the scene contract), urdf/ (a robot
                    #   payload's meshes loaded; the robot parts and scene
@@ -153,13 +150,14 @@ docs/              # subsystem docs (the map below)
 Contract mirrors that must stay in lockstep (each has a sync test):
 `lib/cadRefs.js` ↔ `cadgen/engine/refs.py` (an engine document's refs, an `.xbf`'s and
 a STEP's: their parse and their canonical spelling), one fixture, `lib/cadRefs.parity.json`,
-which also holds the element names `cadgen/engine/naming.py` reads.
+which also holds the element names (`elementNameCases`) that the engine's `ELEMENT_NAME`
+(`cadgen/engine/kernel/trace.py`) must accept (`test_naming.py`).
 
 Where the mechanism is written:
 
 | Document | Covers |
 |---|---|
-| [docs/render-pipeline.md](docs/render-pipeline.md) | The staged pipeline (`buildModel` → `renderModel` → `captureModel`), the unified display state, the two lighting recipes, the photographic rig, display modes, CAD edges and per-component geometry sharing |
+| [docs/render-pipeline.md](docs/render-pipeline.md) | The family scene builders and the staged render (`renderModel` → `captureModel`), the unified display state, the two lighting recipes, the photographic rig, display modes and CAD edges |
 | [docs/resource-ownership.md](docs/resource-ownership.md) | Ownership and disposal, the selector/BVH demand boundary, recomposition and instancing reuse, the decode worker pool, part-store admission |
 
 ## Public modules and lifetimes
@@ -167,7 +165,7 @@ Where the mechanism is written:
 Use `@text-to-cad/core/client`, `/common/*` and `/lib/*` exports.
 Construct `createCadClient({ origin, fetch })` in a host. Its `exports` service
 (`client/exports.js`) asks the session's epoch, submits idempotent jobs, long-polls their
-status, cancels/releases them, and names a ready job's file URL (`fileUrl`). It
+status and names a ready job's file URL (`fileUrl`). It
 starts no download; the host hands that URL to the browser. Construction is
 inert; subscriptions start catalog polling, which the host's `shouldPoll` gates
 (the web's pauses while its page is hidden). The client also carries what every
