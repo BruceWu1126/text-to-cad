@@ -8,7 +8,7 @@ export const RECONNECT_LONGEST_MS = 5000;
  * A page whose engine is gone (`gone`) asks the same address again -- with its token, the cookie its
  * link left -- after a second, backing off to every five, until an engine answers it. The
  * installation's engine comes back on the same port with the same token (`cadgen/engine/daemon.py`,
- * `bind`), so a restart, an idle stop or a reboot costs an open tab nothing: once another engine
+ * `bind`), so a restart, a stop or a reboot costs an open tab nothing: once another engine
  * than the one the page loaded from (`pid`) answers, the page reloads itself into the same document
  * (its URL, `/<id>`), whatever the page's reads said meanwhile. The same engine answering was a
  * blip: nothing is reloaded. An engine that answers without knowing the token -- another

@@ -14,11 +14,6 @@ export interface FileMetadata extends FileEntry {
    * file menu.
    */
   navigationPath?: string | null;
-  /**
-   * A document with no file of its own: the folder it was registered from (a model's script's),
-   * where its Files tab starts.
-   */
-  folder?: string | null;
   size: number;
   extension: string;
   mime?: string;

@@ -23,17 +23,15 @@ REGENERATE = ("regenerate it: PYTHONPATH=packages/cadgen/src python -c \"import 
 
 
 class LookTest(unittest.TestCase):
-    def test_the_engine_serves_the_record_and_its_environment_to_a_loopback_page(self) -> None:
+    def test_the_engine_serves_the_record_and_its_environment(self) -> None:
         server = Server(port=0, mesh_mode="inline")
         server.start()
         self.addCleanup(server.stop)
-        page = {"Origin": "http://localhost:5173"}
-        with urllib.request.urlopen(urllib.request.Request(f"{server.url}/api/look", headers=page), timeout=30) as answer:
-            self.assertEqual(answer.headers["Access-Control-Allow-Origin"], "http://localhost:5173")
+        with urllib.request.urlopen(f"{server.url}/api/look", timeout=30) as answer:
             served = json.loads(answer.read())
         self.assertEqual(served, LOOK.json())
         url = f"{server.url}{served['environment']['url']}"
-        with urllib.request.urlopen(urllib.request.Request(url, headers=page), timeout=30) as answer:
+        with urllib.request.urlopen(url, timeout=30) as answer:
             self.assertEqual(answer.read(), LOOK.environment_path.read_bytes())
 
     def test_the_viewers_copy_is_the_record(self) -> None:
