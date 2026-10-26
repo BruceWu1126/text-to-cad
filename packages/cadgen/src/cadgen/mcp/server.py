@@ -521,6 +521,7 @@ class Server:
             if not self.text and isinstance(result.get("structuredContent", {}).get("launch"), dict):
                 # MCP result metadata is delivered to the app, never put in the model's context.
                 result.setdefault("_meta", {})[_APP_TOKEN_META] = self._app_token
+                self._reach(result["structuredContent"]["launch"])
             ok = not (isinstance(result, dict) and result.get("isError"))
             return result
         except ToolFailed as failure:
@@ -595,6 +596,28 @@ class Server:
         # Wall-clock time orders views across restarts of this process; seq breaks a tie.
         launch["order"] = {"createdAt": int(time.time() * 1000), "seq": seq}
         return launch
+
+    def _reach(self, launch: dict[str, Any]) -> None:
+        """Stamp a launch a tool hands the page with the ways to the engine that need no tool call:
+        ``browser``, the web viewer's page of what it shows (the home's with no model), the same day
+        link ``_browser_page`` gives the card and a text client's ``cad_show`` gives the agent; and
+        ``engine``, that page's origin (loopback: the engine binds nowhere else). A card whose host
+        carries no ``tools/call`` back (the Claude app's Code tab) links the page, and first tries the
+        engine directly with the link's token. A tab host's launches go without them: its card always
+        has its channel, and what Codex is served stays as it was (``test_codex_contract``). So do
+        launches where this server was given no engine (``viewer_url``), or the engine gives no page."""
+        if self._viewer_url is None or self.tabs:
+            return
+        from .browser import ViewerUnavailable
+
+        try:
+            link = self._viewer_url(launch.get("model") or None)
+        except ViewerUnavailable as failure:
+            LOG.info("the launch carries no page: %s", failure)
+            return
+        parts = urlparse(link)
+        launch["browser"] = link
+        launch["engine"] = f"{parts.scheme}://{parts.netloc}"
 
     def _model_path(self, value: Any) -> str:
         """An existing CAD file, from the absolute path a caller named; or a document the engine holds,
