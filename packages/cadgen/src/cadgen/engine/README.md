@@ -268,9 +268,9 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
     neither command has a standalone serving mode. A launcher exits after handing its client the
     engine URL; closing a client never stops the engine. Tabs select documents at `/<uuid>`: a
     model's id, or a file's id after a launcher registers it; Python scripts are never documents.
-    The home shows the folder of the most recent launch, which each launch replaces; requests read
-    files by absolute path. No page replaces or re-executes the engine; stopping it is an explicit
-    engine operation.
+    The explorer opens where it was last, else the person's home folder; a launch's folder resolves
+    only the relative files it names, and requests read files by absolute path. No page replaces or
+    re-executes the engine; stopping it is an explicit engine operation.
 16. **No kernel in request threads.** Reading XBF/STEP, meshing, topology facts and poses
     run in child processes. The daemon holds structures and buffers, never live kernel objects.
 
@@ -455,10 +455,10 @@ opened under that name, or once its running operations finish (`Sessions.release
 A card's `cad_sync` renews its served document's warm-worker lease.
 
 The viewer launcher owns no server, reload watcher or process-reuse probe. It
-asks the existing engine for its page: the launch's folder becomes the one the home shows, and
-each file it names is registered by its id (the id of its canonical path) and printed as its
-page, `/<id>`. Development client reload remains a browser concern; Python changes take effect
-when that installation's engine is explicitly restarted. What the page knows by id is memory
+asks the existing engine for its page: each file it names, a relative one read from the launch's
+folder, is registered by its id (the id of its canonical path) and printed as its page, `/<id>`.
+Development client reload remains a browser concern; Python changes take effect when that
+installation's engine is explicitly restarted. What the page knows by id is memory
 only, and a file's id is derived again from its path after a restart.
 
 

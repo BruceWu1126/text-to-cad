@@ -2,8 +2,9 @@
 
 One engine serves one page, at its origin. Every document is addressed by path, ``/<id>``
 (``cadgen.engine.ids``): a model's id, or a file's once a launcher or the page registers it. The
-home is ``/``: Recents, and the folder of the most recent launch (``launch``), which each launch
-replaces. There are no page sessions and no per-launch folders.
+home is ``/``: Recents; the explorer opens where it was last, else the person's home folder. A
+launch's folder (``launch``'s ``start``) resolves only the relative files it names. There are no
+page sessions and no per-launch folders.
 """
 from __future__ import annotations
 
@@ -244,9 +245,8 @@ class EngineApp:
 
     def launch(self, options):
         """A launch of the one page (``cadgen viewer``, a text-only host's link, the dev client's
-        ``--api-only``): its folder (``start``) becomes the folder the home shows, and each file it
-        names (``files``: on-disk CAD files, or ids the engine holds) is registered and given its
-        page, ``/<id>``. ``url`` is the first file's page, else the home's, each with a fresh link,
+        ``--api-only``): each file it names (``files``: on-disk CAD files, a relative one read from its
+        folder, ``start``, or ids the engine holds) is registered and given its page, ``/<id>``. ``url`` is the first file's page, else the home's, each with a fresh link,
         which ``token`` is too -- the user's token itself only for the dev client's ``--api-only``,
         whose proxy outlives a link."""
         from .main import resolve_dist_dir

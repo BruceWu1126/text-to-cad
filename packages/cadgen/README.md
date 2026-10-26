@@ -217,8 +217,9 @@ Laws 1 to 13 and 19 to 23 are the engine's; 14 to 18 hold for the whole package.
     share its authenticated HTTP listener. `serve` and `viewer` always start or reuse it, with no
     standalone serving mode, and no Python function starts, stops or serves it (law 21). Launchers
     exit; clients closing never stop it. Kernel operations run in child processes, never in the
-    engine's request threads. There are no page sessions: the home shows the folder of the most
-    recent launch; each MCP session owns its views and resource. The
+    engine's request threads. There are no page sessions: the explorer opens where it was last, else
+    the person's home folder, and a launch's folder resolves only the relative files it names; each
+    MCP session owns its views and resource. The
     stdio shim owns only connection metadata. Sidebar sharing stays in memory, and host
     quirks stay in the shim and page. MCP's shared `cad_http` exposes only telemetry
     status and opt-out to agents; other viewer routes require the session capability

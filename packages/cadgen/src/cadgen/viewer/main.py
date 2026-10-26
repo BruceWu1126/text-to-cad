@@ -1,8 +1,8 @@
 """Ensure this installation's engine and open its viewer page: the home, or each file named.
 
-The page is the engine's one page. A launch's folder becomes the folder its home shows, replacing
-the last launch's; each FILE (an on-disk CAD file, or a document id the engine holds) is registered
-and printed as its page, ``/<id>``."""
+The page is the engine's one page, whose explorer opens where it was last, else your home folder.
+Each FILE (an on-disk CAD file, a relative one read from this folder, or a document id the engine
+holds) is registered and printed as its page, ``/<id>``."""
 from __future__ import annotations
 
 import argparse
