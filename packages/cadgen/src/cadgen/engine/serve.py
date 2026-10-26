@@ -70,11 +70,15 @@ first, by their shape bytes (of face count, bounding diagonal and bytes, the byt
 predicted a part's mesh time best), and a part of ``PARALLEL_BYTES`` or more is meshed
 with the kernel's face parallelism inside its pool process. When a page asks for a
 document's structure, every part not held is sent to the pool at once, so the page's part
-requests join meshes already running.
+requests join meshes already running; an inspection's read of it, through the daemon's door
+(``Server.read``), sends nothing. The pool takes its jobs from two queues (``Mesher.run``):
+a fact someone waits on (an inspection's volumes, a picked element's facts, a pose) before
+every mesh still waiting.
 """
 
 from __future__ import annotations
 
+import collections
 import concurrent.futures
 import hashlib
 import itertools
@@ -425,6 +429,19 @@ def _ready() -> bool:
 
 
 MODES = ("inline", "processes")
+# The pool's queues, in the order a free process takes from them (``Mesher.run``): ``FACT``, an answer
+# someone waits on -- an inspection's volumes, a picked element's facts, a pose; ``MESH``, a part's
+# tessellation. The pool is handed one job per process at a time, so a fact waits for one job that
+# runs at most, never for the meshes queued behind it.
+FACT, MESH = 0, 1
+
+
+class _Job:
+    __slots__ = ("fn", "args", "priority", "future")
+
+    def __init__(self, fn: Callable, args: tuple, priority: int) -> None:
+        self.fn, self.args, self.priority = fn, args, priority
+        self.future: concurrent.futures.Future = concurrent.futures.Future()
 
 
 class Mesher:
@@ -436,11 +453,22 @@ class Mesher:
         # One thread runs inline meshing: the kernel's threads are its parallelism.
         self._inline = concurrent.futures.ThreadPoolExecutor(1, thread_name_prefix="mesh")
         self._processes: concurrent.futures.ProcessPoolExecutor | None = None
+        self._warm = False  # every process started and its kernel loaded (``processes``)
         self.lock = threading.Lock()
+        # The jobs waiting for a process, by queue (``FACT``, ``MESH``), and how many the pool holds
+        # now: at most ``workers``, handed over by one dispatching thread (``_dispatch``).
+        self._queued: dict[int, collections.deque[_Job]] = {FACT: collections.deque(), MESH: collections.deque()}
+        self._running = 0
+        self._wake = threading.Condition()
+        self._dispatcher: threading.Thread | None = None
+        self._stopped = False
 
-    def processes(self) -> concurrent.futures.ProcessPoolExecutor:
+    def processes(self, warm: bool = True) -> concurrent.futures.ProcessPoolExecutor:
         """The pool, started on its first use: a build serves its document with no page open,
-        and a pool started then would hold ``workers`` kernels nobody asked for."""
+        and a pool started then would hold ``workers`` kernels nobody asked for. ``warm`` (a mesh,
+        a page's warm): every process started at once, its kernel loaded; else (a fact) a process
+        starts only for a job no started one is free for, so an inspection that meshes nothing
+        starts the few its jobs take."""
         with self.lock:
             if self._processes is not None and getattr(self._processes, "_broken", False):
                 self._processes.shutdown(wait=False, cancel_futures=True)  # a child died; rebuild on next use
@@ -450,18 +478,82 @@ class Mesher:
 
                 self._processes = concurrent.futures.ProcessPoolExecutor(
                     self.workers, mp_context=multiprocessing.get_context("spawn"), initializer=exit_with_parent)
+                self._warm = False
+            if warm and not self._warm:
+                self._warm = True
                 for _ in range(self.workers):
                     self._processes.submit(_ready)
             return self._processes
 
     def submit(self, data: bytes, mode: str | None = None) -> concurrent.futures.Future:
         """One part meshed from its ``shape_bytes``: a future of its buffer, its unmeshed
-        faces and the seconds it took."""
+        faces and the seconds it took. On the pool, after every fact waiting (``MESH``)."""
         if (mode or self.mode) == "processes":
-            return self.processes().submit(_timed, data, len(data) >= PARALLEL_BYTES)
+            self.processes()
+            return self.run(_timed, data, len(data) >= PARALLEL_BYTES, priority=MESH)
         return self._inline.submit(_timed, data, True)
 
+    def run(self, fn: Callable, *args: Any, priority: int = FACT) -> concurrent.futures.Future:
+        """``fn(*args)`` in a pool process, in its queue (``FACT``, ``MESH``): a future of what it
+        returns. Cancelled while it waits, it never runs."""
+        job = _Job(fn, args, priority)
+        with self._wake:
+            if self._stopped:
+                job.future.cancel()
+                return job.future
+            self._queued[priority].append(job)
+            if self._dispatcher is None:
+                self._dispatcher = threading.Thread(target=self._dispatch, name="cadgen-pool-dispatch", daemon=True)
+                self._dispatcher.start()
+            self._wake.notify_all()
+        return job.future
+
+    def _dispatch(self) -> None:
+        """Hands the next job (``FACT`` first, then ``MESH``) to the pool whenever it holds fewer
+        than ``workers``."""
+        while True:
+            with self._wake:
+                while not self._stopped and (self._running >= self.workers
+                                             or not any(self._queued.values())):
+                    self._wake.wait()
+                if self._stopped:
+                    return
+                job = next(queue for queue in self._queued.values() if queue).popleft()
+                if not job.future.set_running_or_notify_cancel():
+                    continue  # cancelled while it waited
+                self._running += 1
+            try:
+                pool = self.processes(warm=False)
+                handed = pool.submit(job.fn, *job.args)
+            except BaseException as error:  # noqa: BLE001 - a pool shut down or broken: the job's answer
+                self._settle(job, None, error)
+                continue
+            handed.add_done_callback(lambda done, job=job: self._settle(job, done))
+
+    def _settle(self, job: _Job, done: concurrent.futures.Future | None, error: BaseException | None = None) -> None:
+        """A job the pool answered (``done``), or could not take (``error``): its slot free again."""
+        with self._wake:
+            self._running -= 1
+            self._wake.notify_all()
+        if done is not None and done.cancelled():
+            error = concurrent.futures.CancelledError()
+        elif done is not None:
+            error = done.exception()
+        if error is not None:
+            job.future.set_exception(error)
+        else:
+            assert done is not None
+            job.future.set_result(done.result())
+
     def stop(self) -> None:
+        with self._wake:
+            self._stopped = True
+            waiting = [job for queue in self._queued.values() for job in queue]
+            for queue in self._queued.values():
+                queue.clear()
+            self._wake.notify_all()
+        for job in waiting:
+            job.future.cancel()
         self._inline.shutdown(wait=False, cancel_futures=True)
         if self._processes is not None:
             self._processes.shutdown(wait=False, cancel_futures=True)
@@ -505,13 +597,16 @@ def _topology_fact(key: str, data: bytes, method: str, args: tuple) -> Any:
 
 
 class _RemoteTopology:
-    def __init__(self, pool, key: str, data: bytes) -> None:
-        self.pool, self.key, self.data = pool, key, data
+    """A part's ``mesh.Topology`` in a pool process: each fact asked a job in the pool's ``FACT`` queue,
+    ahead of every mesh waiting."""
+
+    def __init__(self, mesher: "Mesher", key: str, data: bytes) -> None:
+        self.mesher, self.key, self.data = mesher, key, data
 
     def __getattr__(self, method: str):
         if method not in {"face", "edge", "vertex", "groups", "volume"}:
             raise AttributeError(method)
-        return lambda *args: self.pool.submit(_topology_fact, self.key, self.data, method, args).result()
+        return lambda *args: self.mesher.run(_topology_fact, self.key, self.data, method, args, priority=FACT).result()
 
 
 def _pose_structure(structure: dict, pose: Any) -> dict:
@@ -1406,7 +1501,7 @@ class Server:
     def topology(self, key: str, data: bytes) -> Any:
         """A part's ``mesh.Topology``, for its facts: a few held, for the process's convenience."""
         if self.isolated:
-            return _RemoteTopology(self.mesher.processes(), key, data)
+            return _RemoteTopology(self.mesher, key, data)
         from cadgen.engine.mesh import Topology
 
         with self.topology_lock:
@@ -1542,7 +1637,8 @@ class Server:
                 if len(parts) == 3:
                     from cadgen.engine.mesh_format import TESSELLATION
 
-                    self.prefetch(doc)  # a page is about to ask for every part
+                    if getattr(handler, "prefetch", True):
+                        self.prefetch(doc)  # a page is about to ask for every part; an inspection asks for none
                     found = self.posed(doc, pose)
                     # A part's buffer is sent immutable: its URL names the tessellation it was made at.
                     return self.json(handler, {**found, "tessellation": TESSELLATION})
@@ -1584,7 +1680,7 @@ class Server:
         if pose is None:
             return structure
         if self.isolated:
-            return self.mesher.processes().submit(_pose_structure, structure, pose).result()
+            return self.mesher.run(_pose_structure, structure, pose, priority=FACT).result()
         return _pose_structure(structure, pose)
 
     def pose(self, handler: BaseHTTPRequestHandler, doc: Served) -> None:
@@ -1662,13 +1758,17 @@ class Server:
 
     def read(self, path: str) -> tuple[int, bytes]:
         """A document read (``GET /api/doc/<id>...``) answered in process, as a page would be
-        answered over HTTP: its status and body. What a client of the daemon asks through its door
-        (``inspect``), so a shell that may not open a loopback socket reads it all the same."""
+        answered over HTTP: its status and body -- but for the structure's, which meshes nothing
+        here. What a client of the daemon asks through its door (``inspect``), so a shell that may
+        not open a loopback socket reads it all the same."""
         import io
 
         class Reading:
             command = "GET"
             headers: dict[str, str] = {}
+            # Asked through the door, a document's structure is an inspection's, which asks for no
+            # part's buffer: nothing is sent to the mesher for it (``route``), so its facts wait on none.
+            prefetch = False
 
             def __init__(self) -> None:
                 self.path = path

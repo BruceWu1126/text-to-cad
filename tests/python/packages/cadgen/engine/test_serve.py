@@ -1,10 +1,12 @@
 """Serving a document: its structure, one plain buffer per part in the wire format, the
 same buffer whichever way it is meshed, a document read again after another process
 rebuilt it, a model's declared xbf served as a file following its bytes alone, and the cap on
-the buffers held."""
+the buffers held; an inspection's read, which meshes nothing; the pool's queue for facts, ahead of
+its meshes."""
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import os
 import shutil
@@ -21,8 +23,8 @@ from unittest import mock
 import numpy as np
 
 from cadgen.engine import build as engine_build
-from cadgen.engine import mesh
-from cadgen.engine.serve import Server
+from cadgen.engine import mesh, serve
+from cadgen.engine.serve import FACT, MESH, Server
 
 MODEL = """
 import build123d as bd
@@ -411,6 +413,92 @@ class NamedKeyTest(unittest.TestCase):
         mine = server.add(users)
         self.assertEqual(get(f"/api/doc/{mine}/part/{keys[0]}"), mesh.mesh_shape(mesh.shape_bytes(own.wrapped)).to_bytes())
         self.assertAlmostEqual(json.loads(get(f"/api/doc/{mine}/part/{keys[0]}/volume"))["volume"], 1000.0, places=6)
+
+
+PLATE = "a0000000-0000-5000-8000-0000000000aa"
+IDENTITY = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+
+
+def registered(server: Server, parts: dict[str, bytes], version: int = 1) -> list[int]:
+    """A model document of ``parts`` (each key's shape bytes) registered with ``server`` as a build
+    registers one, a part placed once each; the versions its worker was asked for, as it is asked."""
+    keys = list(parts)
+    structure = {"name": "plate", "version": f"v{version}", "path": PLATE, "id": PLATE, "tree": {"name": "plate"},
+                 "prototypes": [{"key": key, "name": key} for key in keys],
+                 "instances": [{"prototype": at, "path": f"plate/{key}", "matrix": IDENTITY} for at, key in enumerate(keys)]}
+    asked: list[int] = []
+
+    def load() -> tuple:
+        asked.append(version)
+        return structure, dict(parts)
+
+    server.register_model(PLATE, "plate", load, version)
+    return asked
+
+
+class InspectionReadTest(unittest.TestCase):
+    """What ``cadgen inspect`` reads through the engine's door (``Server.read``): a structure that
+    sends no part to the mesher."""
+
+    def setUp(self) -> None:
+        self.server = Server(port=0, mesh_mode="inline")
+        self.server.start()
+        self.addCleanup(self.server.stop)
+
+    def read(self, route: str):
+        status, body = self.server.read(f"/api/doc/{PLATE}{route}")
+        self.assertEqual(status, 200, body)
+        return json.loads(body)
+
+    def test_an_inspection_s_structure_meshes_nothing_where_a_page_s_meshes_every_part(self) -> None:
+        registered(self.server, {"k1": b"one", "k2": b"two"})
+        with mock.patch.object(self.server, "_submit") as meshing:
+            self.assertEqual([p["key"] for p in self.read("")["prototypes"]], ["k1", "k2"])
+            meshing.assert_not_called()
+            with urllib.request.urlopen(f"{self.server.url}/api/doc/{PLATE}", timeout=60) as page:
+                self.assertEqual(page.status, 200)
+        self.assertEqual(sorted(call.args[0] for call in meshing.call_args_list), ["k1", "k2"], "pages still prefetch")
+
+
+class PoolQueueTest(unittest.TestCase):
+    """The pool's queues: a fact someone waits on goes before every mesh still waiting, and the pool
+    is handed one job per process at a time."""
+
+    def test_a_fact_waits_for_the_running_job_alone(self) -> None:
+        handed: list[tuple[str, concurrent.futures.Future]] = []
+        changed = threading.Condition()
+
+        class Pool:  # a ProcessPoolExecutor that runs nothing: the test settles each job it is handed
+            def __init__(self, *args, **kwargs) -> None:
+                self._broken = False
+
+            def submit(self, fn, *args):
+                future: concurrent.futures.Future = concurrent.futures.Future()
+                with changed:
+                    handed.append((fn, future))
+                    changed.notify_all()
+                return future
+
+            def shutdown(self, *args, **kwargs) -> None:
+                pass
+
+        def handed_by(count: int) -> None:
+            with changed:
+                self.assertTrue(changed.wait_for(lambda: len(handed) >= count, timeout=30), [name for name, _ in handed])
+
+        with mock.patch.object(serve.concurrent.futures, "ProcessPoolExecutor", Pool):
+            mesher = serve.Mesher("processes", workers=1)
+            self.addCleanup(mesher.stop)
+            running = mesher.run("mesh 1", priority=MESH)
+            handed_by(1)  # the one process is busy: everything after waits in its queue
+            jobs = {name: mesher.run(name, priority=priority) for name, priority in
+                    (("mesh 2", MESH), ("mesh 3", MESH), ("fact 1", FACT))}
+            for done in range(1, 4):
+                handed[done - 1][1].set_result(done)
+                handed_by(done + 1)
+            handed[3][1].set_result(4)
+        self.assertEqual([name for name, _future in handed], ["mesh 1", "fact 1", "mesh 2", "mesh 3"])
+        self.assertEqual((running.result(1), jobs["fact 1"].result(1), jobs["mesh 3"].result(1)), (1, 2, 4))
 
 
 class MeshCacheTest(unittest.TestCase):
