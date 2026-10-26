@@ -321,9 +321,11 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
   // A card's pin and its one menu (Open, what the host can do with it on disk, Pin or Unpin, then
   // Delete), there while the pointer is on the card (Figma's star): the pin toggles, and a pinned
   // card shows it, filled, whatever the pointer does.
+  // Pin or Unpin, from the card's pin or its menu: counted alike.
+  const pin = (item: Model) => { usage.used(item.pinned ? "home_unpin" : "home_pin"); void change(item.pinned ? "unpin" : "pin", item); };
   const actions = (card: LibraryCard<Model>) => { const item = card.item; return <div className="cad-library-actions" data-pinned={item.pinned || undefined}>
     <Button variant="ghost" size="icon-xs" className="cad-library-pin" aria-label={t(item.pinned ? "home.unpin" : "home.pin")} aria-pressed={item.pinned}
-      onClick={() => change(item.pinned ? "unpin" : "pin", item)}><Pin aria-hidden="true" fill={item.pinned ? "currentColor" : "none"} /></Button>
+      onClick={() => pin(item)}><Pin aria-hidden="true" fill={item.pinned ? "currentColor" : "none"} /></Button>
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon-xs" aria-label={t("home.actionsAria", { name: item.name })}><Ellipsis aria-hidden="true" /></Button>
@@ -331,7 +333,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
       <DropdownMenuContent align="end" className="min-w-40">
         <DropdownMenuItem disabled={item.missing} onSelect={() => open(item)}>{t("home.menuOpen")}</DropdownMenuItem>
         {(deletes(item) ? item.script : item.path) ? fileItems.map(entry => <DropdownMenuItem key={entry.action} onSelect={() => perform(entry.action, item)}>{entry.label}</DropdownMenuItem>) : null}
-        <DropdownMenuItem onSelect={() => { usage.used(item.pinned ? "home_unpin" : "home_pin"); void change(item.pinned ? "unpin" : "pin", item); }}>{t(item.pinned ? "home.unpin" : "home.pin")}</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => pin(item)}>{t(item.pinned ? "home.unpin" : "home.pin")}</DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(card)}>{t("home.delete")}</DropdownMenuItem>
       </DropdownMenuContent>
@@ -430,7 +432,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-32">
-              <DropdownMenuRadioGroup aria-label={t("home.kindsAria")} value={kind} onValueChange={(value: string) => { if (kind !== value) usage.used(`home_chip_${value as LibraryKind}`); setKind(value as LibraryKind); }}>
+              <DropdownMenuRadioGroup aria-label={t("home.kindsAria")} value={kind} onValueChange={(value: string) => { if (kind !== value) usage.used(`home_filter_${value as LibraryKind}`); setKind(value as LibraryKind); }}>
                 {(["all", "models", "files"] as const).map(value => <DropdownMenuRadioItem key={value} value={value} className="">{t(`home.kind.${value}`)}</DropdownMenuRadioItem>)}
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>

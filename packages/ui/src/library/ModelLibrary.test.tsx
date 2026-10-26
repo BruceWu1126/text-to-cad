@@ -403,18 +403,27 @@ it('reads its list again every couple of seconds while the home is up, keeping t
   } finally { vi.useRealTimers(); }
 });
 
-it("counts what a person does on the home by name: a chip, a fold opened, a search begun, a card opened, a delete cancelled and one confirmed", async () => {
+it("counts what a person does on the home by name: a type chosen, a fold opened, a search begun, a card opened, a delete cancelled and one confirmed", async () => {
   const reports: { control: string; count: number; seconds: number }[][] = [];
   const script = '/work/juno/juno.py';
   const ids = ['0', '1'].map(digit => `8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f1${digit}`);
   const source = library([model('juno', { path: ids[0], kind: 'model', script, updated: 10 }),
     model('wheel', { path: ids[1], kind: 'model', script, updated: 5 }), model('bracket.step')]);
+  // The type filter's choice, in a home of its own: a second menu opened in one jsdom render stays shut.
+  const choose = async (value: string) => {
+    const view = render(<ControlUsageProvider report={counts => reports.push(counts)}><ModelLibrary library={source} /></ControlUsageProvider>);
+    await screen.findByRole('button', { name: 'Open juno' });
+    await act(async () => { fireEvent.pointerDown(screen.getByRole('button', { name: 'Show All' }), { button: 0, ctrlKey: false, pointerType: 'mouse' }); });
+    await act(async () => { fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitemradio', { name: value })); });
+    view.unmount();
+    cleanup();
+  };
+  await choose('Models');
+  await choose('All'); // already shown: no use
+  expect(reports.flat()).toEqual([{ control: 'home_filter_models', count: 1, seconds: 0 }]);
+  reports.length = 0;
   const view = render(<ControlUsageProvider report={counts => reports.push(counts)}><ModelLibrary library={source} /></ControlUsageProvider>);
   await screen.findByRole('button', { name: 'Open juno' });
-  const chips = screen.getByRole('group', { name: 'Show' });
-  fireEvent.click(within(chips).getByRole('button', { name: 'Models' }));
-  fireEvent.click(within(chips).getByRole('button', { name: 'Models' })); // already shown: no use
-  fireEvent.click(within(chips).getByRole('button', { name: 'All' }));
   const more = screen.getByRole('button', { name: 'and 1 more' });
   fireEvent.click(more);
   fireEvent.click(more); // folding it again is no use
@@ -425,7 +434,7 @@ it("counts what a person does on the home by name: a chip, a fold opened, a sear
   await act(async () => { fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' })); });
   view.unmount();
   const said = Object.fromEntries(reports.flat().map(({ control, count }) => [control, count]));
-  expect(said).toEqual({ home_chip_models: 1, home_chip_all: 1, home_fold: 1, home_search: 1, home_open: 1, home_delete_cancel: 1 });
+  expect(said).toEqual({ home_fold: 1, home_search: 1, home_open: 1, home_delete_cancel: 1 });
   // A delete the person confirms is counted as one.
   cleanup();
   reports.length = 0;
@@ -435,4 +444,31 @@ it("counts what a person does on the home by name: a chip, a fold opened, a sear
   await act(async () => { fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' })); });
   again.unmount();
   expect(reports.flat()).toEqual([{ control: 'home_delete', count: 1, seconds: 0 }]);
+});
+
+it('counts the pin, from its button or the menu, the grid/list switch, and Copy path and Reveal', async () => {
+  const reports: { control: string; count: number; seconds: number }[][] = [];
+  const fileActions = { platform: 'darwin' as const, perform: { 'copy-path': () => {}, reveal: () => {} } };
+  const source = library([model('bracket.step'), model('plate.step', { pinned: true })]);
+  const home = () => render(<ControlUsageProvider report={counts => reports.push(counts)}>
+    <ModelLibrary library={source} fileActions={fileActions} onLayoutChange={() => {}} /></ControlUsageProvider>);
+  let view = home();
+  await screen.findByRole('button', { name: 'Open bracket.step' });
+  const bracket = screen.getByRole('button', { name: 'Open bracket.step' }).closest('li')!;
+  await act(async () => { fireEvent.click(within(bracket).getByRole('button', { name: 'Pin' })); });
+  fireEvent.click(screen.getByRole('button', { name: 'List' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Grid' }));
+  await act(async () => { fireEvent.click(within(await menu('bracket.step')).getByRole('menuitem', { name: 'Copy path' })); });
+  view.unmount();
+  cleanup();
+  // A menu each render (jsdom): Reveal, then Unpin from the menu.
+  for (const item of ['Reveal in Finder', 'Unpin']) {
+    view = home();
+    await screen.findByRole('button', { name: 'Open plate.step' });
+    await act(async () => { fireEvent.click(within(await menu('plate.step')).getByRole('menuitem', { name: item })); });
+    view.unmount();
+    cleanup();
+  }
+  const said = Object.fromEntries(reports.flat().map(({ control, count }) => [control, count]));
+  expect(said).toEqual({ home_pin: 1, home_layout_list: 1, home_layout_grid: 1, home_copy_path: 1, home_reveal: 1, home_unpin: 1 });
 });
