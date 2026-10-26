@@ -245,3 +245,42 @@ test('a viewer resized in one step paints the model at its new size in that same
   assert.equal(await page.evaluate(() => window.__glDraws || 0), idleBefore, 'an idle viewer draws nothing');
   assert.deepEqual(errors, []);
 });
+
+// The viewport's frame is the browser's: drawn in the next animation frame, however late that comes
+// (a GPU behind on the frames it was handed holds every frame back, and holding this one back with
+// them is what keeps the page answering), and only a HIDDEN document, which gets no animation
+// frames at all, draws its frame from a timer -- as it hides, and 120 ms after each later request
+// (`useViewerRuntime.js`, `requestRender`). The regression this holds off drew from the timer
+// whenever a frame was late, five draws for every frame shown under a software GL, and left the
+// page frozen for the GPU's backlog after every drag. It shares this file's harness.
+test('a late frame waits for the browser while the page is visible, and is drawn as the page hides', async (t) => {
+  const { open } = await serveHarness(t);
+  const { page, pane, errors } = await open();
+  await idle(page);
+  const box = await pane.locator('[aria-busy="false"] > div > canvas').first().boundingBox();
+  // Animation frames withheld, as a browser behind on its frames withholds them: the viewport's
+  // `requestAnimationFrame` never calls back. (Playwright's own waits run in a world of their own.)
+  await page.evaluate(() => {
+    window.requestAnimationFrame = () => 0;
+    window.cancelAnimationFrame = () => {};
+    window.__drawsAtMark = window.__glDraws || 0;
+  });
+  // The camera moves: a frame is asked for.
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -120);
+  const outcome = await page.evaluate(() => new Promise(resolve => {
+    const drawn = () => (window.__glDraws || 0) - window.__drawsAtMark;
+    // Five of the timer's periods with the page visible, then the document hides: its owed frame is
+    // drawn in the event.
+    setTimeout(() => {
+      const whileVisible = drawn();
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+      document.dispatchEvent(new Event('visibilitychange'));
+      resolve({ whileVisible, onceHidden: drawn() });
+    }, 600);
+  }));
+  assert.equal(outcome.whileVisible, 0, 'a visible page draws no frame from the timer while the browser withholds its frames');
+  assert.ok(outcome.onceHidden > 0, 'the hidden document is drawn its owed frame as it hides');
+  assert.deepEqual(errors, []);
+});
