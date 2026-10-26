@@ -174,6 +174,34 @@ def stop_engine(top: str, engine_dir: str) -> None:
         raise RuntimeError(f"the test engine daemon in {engine_dir} did not stop: {stopped.stdout}{stopped.stderr}")
 
 
+def _engine_python(top: str, code: str, **env: str) -> subprocess.CompletedProcess:
+    """``code`` run against this checkout's cadgen, the environment as this run's but ``env``."""
+    given = {key: value for key, value in os.environ.items() if key != "CADGEN_ENGINE_DIR"}
+    given["PYTHONPATH"] = os.pathsep.join(filter(None, [os.path.join(top, "packages", "cadgen", "src"),
+                                                        os.environ.get("PYTHONPATH", "")]))
+    return subprocess.run([sys.executable, "-P", "-c", code], env={**given, **env}, capture_output=True, text=True,
+                          timeout=ENGINE_STOP_SECONDS)
+
+
+def default_engine_door(top: str) -> str | None:
+    """Where this installation's engine has its door when nothing names its folder
+    (``daemon.default_state_dir``): the developer's own engine's place. None where it cannot be said."""
+    found = _engine_python(top, "import os; from cadgen.engine import daemon; "
+                                "print(os.path.join(daemon.default_state_dir(), daemon._tag() + "
+                                "('.port' if os.name == 'nt' else '.door')))")
+    return (found.stdout.strip() or None) if found.returncode == 0 else None
+
+
+def engine_answers(top: str, door: str) -> bool:
+    """Whether an engine answers at ``door``'s folder (its file alone may be a dead engine's)."""
+    if not os.path.exists(door):
+        return False
+    found = _engine_python(top, "from cadgen.engine.client import request; "
+                                "print('yes' if request({'op': 'pid'}, start=False) else 'no')",
+                           CADGEN_ENGINE_DIR=os.path.dirname(door))
+    return found.stdout.strip() == "yes"
+
+
 def _run_one_file(path: str, top: str, verbose: bool, env: dict[str, str]) -> tuple[str, int, str, float]:
     started = time.perf_counter()
     try:
@@ -218,6 +246,21 @@ def run_files(files: list[str], top: str, jobs: int, verbose: bool, print_weight
     # where each file's own cache folder would compile them again (seconds a file). A test whose
     # subject is where the engine keeps its bytecode starts that engine without it.
     shared = {} if os.environ.get("PYTHONPYCACHEPREFIX") else {"PYTHONPYCACHEPREFIX": os.path.join(engines, "pycache")}
+    # A test never starts an engine where nothing names its folder: that is the developer's own
+    # engine's place, and one left there runs on after the run. Checked as each file ends (an engine
+    # running there before the run is the developer's, and is left alone); one found is stopped, and
+    # fails the run naming the files that were running.
+    door = default_engine_door(top)
+    developers = door is not None and engine_answers(top, door)
+    leaked: list[str] = []
+    running: set[str] = set()  # the files whose interpreters are running now
+
+    def run_one(path: str, env: dict[str, str]) -> tuple[str, int, str, float]:
+        running.add(path)
+        try:
+            return _run_one_file(path, top, verbose, env)
+        finally:
+            running.discard(path)
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
             futures = []
@@ -227,10 +270,14 @@ def run_files(files: list[str], top: str, jobs: int, verbose: bool, print_weight
                 env = {**os.environ, **shared, "CADGEN_ENGINE_DIR": os.path.join(engines, f"e{index}"),
                        "CADGEN_STATE_DIR": os.path.join(engines, f"s{index}"),
                        "CADGEN_CACHE_DIR": os.path.join(engines, f"c{index}")}
-                futures.append(pool.submit(_run_one_file, path, top, verbose, env))
+                futures.append(pool.submit(run_one, path, env))
             for future in concurrent.futures.as_completed(futures):
                 path, code, output, seconds = future.result()
                 durations.append((path, seconds))
+                if door is not None and not developers and engine_answers(top, door):
+                    beside = ", ".join(sorted(running)) or "none"
+                    leaked.append(f"{door}, after {path} (running beside it: {beside})")
+                    _engine_python(top, "from cadgen.engine import api; api.stop()", CADGEN_ENGINE_DIR=os.path.dirname(door))
                 counts = _counts(output)
                 if not _RAN.search(output):
                     # The interpreter died before unittest could summarise (a crash, a
@@ -261,7 +308,10 @@ def run_files(files: list[str], top: str, jobs: int, verbose: bool, print_weight
     for key in ("failures", "errors", "skipped", "expected failures", "unexpected successes"):
         if totals[key]:
             verdict_parts.append(f"{key}={totals[key]}")
-    ok = not failed_modules and not unparsed and totals["failures"] == 0 and totals["errors"] == 0
+    if leaked:
+        sys.stderr.write("a test started an engine where nothing named its folder, and left it running (stopped now):\n"
+                         + "".join(f"  {where}\n" for where in leaked))
+    ok = not failed_modules and not unparsed and not leaked and totals["failures"] == 0 and totals["errors"] == 0
     verdict = "OK" if ok else "FAILED"
     sys.stderr.write(verdict + (f" ({', '.join(verdict_parts)})" if verdict_parts else "") + "\n")
     if failed_modules:

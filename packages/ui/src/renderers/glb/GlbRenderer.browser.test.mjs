@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { createServer } from 'node:http';
 import { harnessBundle } from '../harness/bundle.mjs';
+import { pressInPreview } from '../harness/preview.mjs';
 import { chromium } from 'playwright';
 import { PNG } from 'pngjs';
 
@@ -182,23 +183,13 @@ const differingPixels = (left, right) => {
   return count;
 };
 const settle = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+// A press on a control Preview's bar may hide (`harness/preview.mjs`), or on any other.
+const pressPreviewable = async (page, pane, control) => (await pane.locator('[data-preview-view]').count()
+  ? pressInPreview(page, pane, control) : control.click());
 // Render is Preview's: in by Preview at the strip's end and out by Exit preview in Preview's bar, each once the view has
 // come together under its cover.
-// Preview's bar and playbar hide two seconds after the pointer last moved over the view, and a person's pointer,
-// moving to one of their controls, brings them back: a test's pointer does the same before it presses one (Playwright
-// checks what is under the point before it moves there, so a hidden bar would never come back).
-async function press(page, pane, control) {
-  const view = pane.locator('[data-preview-view]');
-  if (await view.count()) {
-    const box = await view.boundingBox();
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.waitForFunction(() => !document.querySelector('[data-testid="one"] [data-preview-bar]')?.hasAttribute('data-hidden'));
-    await control.hover();  // resting on the bar holds it
-  }
-  await control.click();
-}
 async function togglePreview(page, pane, enter) {
-  await press(page, pane, pane.getByRole('button', { name: enter ? 'Preview' : 'Exit preview', exact: true }));
+  await pressPreviewable(page, pane, pane.getByRole('button', { name: enter ? 'Preview' : 'Exit preview', exact: true }));
   await pane.getByRole('button', { name: enter ? 'Exit preview' : 'Preview', exact: true }).waitFor();
   await page.waitForFunction(() => !document.querySelector('[data-testid="one"] [data-preview-cover]')
     && document.querySelector('[data-testid="one"] [aria-busy="false"]'));
@@ -339,14 +330,14 @@ test('an animated GLB opens at rest, its clips the file sidebar\'s Animation sec
 
   // Playing moves the model, never the floor; pausing leaves it where it stopped.
   const floor = await page.evaluate(() => window.__cadStage().studioGround);
-  await press(page, pane, section.getByRole('button', { name: 'Play animation', exact: true }));
+  await pressPreviewable(page, pane, section.getByRole('button', { name: 'Play animation', exact: true }));
   await page.waitForFunction(() => Number(document.querySelector('[data-testid="one"] [data-preview-playbar] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')) > 0.25);
-  await press(page, pane, section.getByRole('button', { name: 'Pause animation', exact: true }));
+  await pressPreviewable(page, pane, section.getByRole('button', { name: 'Pause animation', exact: true }));
   assert.ok(differingPixels(rest, await capture(page)) > 200, 'the rider moved');
   assert.deepEqual(await page.evaluate(() => window.__cadStage().studioGround), floor);
 
   // Orbit, in Preview's settings, turns the camera; turned off again, it stops.
-  await press(page, pane, pane.getByRole('button', { name: 'Preview settings', exact: true }));
+  await pressPreviewable(page, pane, pane.getByRole('button', { name: 'Preview settings', exact: true }));
   const orbit = pane.getByRole('region', { name: 'Preview settings' }).getByRole('checkbox', { name: 'Orbit', exact: true });
   assert.equal(await orbit.getAttribute('aria-checked'), 'false', 'Preview opens still');
   const held = await page.evaluate(() => window.__cadCamera().position);
@@ -369,7 +360,7 @@ test("an animated GLB's Speed and Loop are the file's: chosen in its Animation s
   let settingsButton = animationSection(pane).getByRole('button', { name: 'Playback settings' });
   const menu = page.getByRole('menu', { name: 'Playback settings', exact: true });
   const settings = async () => {
-    await press(page, pane, settingsButton);
+    await pressPreviewable(page, pane, settingsButton);
     const read = [await menu.getByRole('menuitem', { name: /^Animation speed: / }).getAttribute('aria-label'),
       await menu.getByRole('menuitemcheckbox', { name: 'Loop', exact: true }).getAttribute('aria-checked')];
     await page.keyboard.press('Escape');
@@ -378,11 +369,11 @@ test("an animated GLB's Speed and Loop are the file's: chosen in its Animation s
   };
   // A Speed chosen and Loop turned over, by keyboard (an item easing in never reads as stable under the pointer).
   const choose = async speed => {
-    await press(page, pane, settingsButton);
+    await pressPreviewable(page, pane, settingsButton);
     await menu.getByRole('menuitem', { name: /^Animation speed: / }).click();
     await page.getByRole('menuitemradio', { name: `${speed}×`, exact: true }).press('Enter');
     await menu.waitFor({ state: 'detached' });
-    await press(page, pane, settingsButton);
+    await pressPreviewable(page, pane, settingsButton);
     await menu.getByRole('menuitemcheckbox', { name: 'Loop', exact: true }).press('Enter');
     await page.keyboard.press('Escape');
     await menu.waitFor({ state: 'detached' });
@@ -395,12 +386,12 @@ test("an animated GLB's Speed and Loop are the file's: chosen in its Animation s
   await togglePreview(page, pane, true);
   settingsButton = playbar(pane).getByRole('button', { name: 'Playback settings' });
   assert.deepEqual(await settings(), ['Animation speed: 0.5×', 'false'], 'the file\'s, in Preview too');
-  await press(page, pane, pane.getByRole('button', { name: 'Preview settings', exact: true }));
+  await pressPreviewable(page, pane, pane.getByRole('button', { name: 'Preview settings', exact: true }));
   await orbit.click();
   assert.equal(await orbit.getAttribute('aria-checked'), 'true');
   await togglePreview(page, pane, false);
   await togglePreview(page, pane, true);
-  await press(page, pane, pane.getByRole('button', { name: 'Preview settings', exact: true }));
+  await pressPreviewable(page, pane, pane.getByRole('button', { name: 'Preview settings', exact: true }));
   assert.equal(await orbit.getAttribute('aria-checked'), 'false', 'still again');
   assert.deepEqual(await settings(), ['Animation speed: 0.5×', 'false'], 'the file\'s, kept');
   await togglePreview(page, pane, false);

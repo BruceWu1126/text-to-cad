@@ -1443,7 +1443,8 @@ settings, a toggle pressed while its panel is open (the panel docked under the b
 sliding in from the view's right edge with the file sidebar's `SIDEBAR_SLIDE_CLASS`:
 `kit/shell/PreviewSettings.jsx`, Orbit, off at every entry, and its speed, then Preview's own
 settings, `PreviewRenderSettings`), and Exit preview. The bar and the playbar fade together after
-two seconds without pointer movement and come back on movement, a tap or keyboard focus,
+two seconds without pointer movement (counted from the frame that shows them, so a long frame is
+never idle time) and come back on movement, a tap or keyboard focus,
 held while the pointer or the focus is on either or the settings are open (`usePreviewIdle`); nothing sits under the
 model or at the bottom centre. Preview is drawn in Render whatever the file's display mode:
 it draws `previewViewScene(store.renderScene())` (`kit/viewport/previewViewScene.js`: no
