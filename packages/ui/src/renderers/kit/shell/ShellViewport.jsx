@@ -59,6 +59,7 @@ import { requestSceneFrame } from "../viewport/sceneFrames.js";
 import { renderThumbnail } from "../viewport/thumbnail.js";
 import { useViewerRuntime } from "../viewport/useViewerRuntime.js";
 import ViewportError from "../status/ViewportError.jsx";
+import { useI18n } from "@text-to-cad/ui/i18n";
 import { VIEWPORT_CUBE_BOTTOM, VIEWPORT_CUBE_SIZE, VIEWPORT_CORNER_INSET_PX } from "./viewportLayout.js";
 
 const STORED_CAMERA_COORDINATES = "cad-z-up-v1";
@@ -154,6 +155,10 @@ const ShellViewport = forwardRef(function ShellViewport({
   const normalizedProjection = normalizeCameraProjection(projection);
   const defaultGridRadius = defaultSceneGridRadius(normalizedSceneScaleMode);
   const viewerTheme = BASE_VIEWER_THEME;
+  // The view's language, read when an alert is raised (an effect's or a callback's, which do not rerun for it).
+  const { t } = useI18n();
+  const tRef = useRef(t);
+  tRef.current = t;
   const interactionHostRef = useRef(null);
   const mountRef = useRef(null);
   const runtimeRef = useRef(null);
@@ -263,10 +268,10 @@ const ShellViewport = forwardRef(function ShellViewport({
         if (cancelled) return;
         viewerAlertChangeRef.current?.({
           severity: "error",
-          summary: "Render unavailable",
-          title: "Couldn't load Preview's lighting",
-          message: "Preview's photographic lighting is fetched the first time Preview is opened, and that request did not complete.",
-          recovery: "Check the connection to the viewer and reload the page, then open Preview again.",
+          summary: tRef.current("alert.lighting.summary"),
+          title: tRef.current("alert.lighting.title"),
+          message: tRef.current("alert.lighting.message"),
+          recovery: tRef.current("alert.lighting.recovery"),
           details: String(loadError?.message || loadError)
         });
         console.error("Failed to load the Render studio chunk", loadError);
@@ -922,10 +927,10 @@ const ShellViewport = forwardRef(function ShellViewport({
       applyBackgroundFallback();
       viewerAlertChangeRef.current?.({
         severity: "warning",
-        summary: "Environment unavailable",
-        title: "Couldn’t prepare studio lighting",
-        message: "The reflection environment could not be created. The model is shown with the studio’s direct lighting, so reflective materials may look different.",
-        recovery: "Reload the viewer to retry the studio environment.",
+        summary: tRef.current("alert.environment.summary"),
+        title: tRef.current("alert.environment.title"),
+        message: tRef.current("alert.environment.message"),
+        recovery: tRef.current("alert.environment.recovery"),
         details: String(environmentError?.message || environmentError)
       });
       console.error("Failed to apply environment resource", environmentError);

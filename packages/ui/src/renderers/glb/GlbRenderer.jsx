@@ -29,8 +29,8 @@ function GlbSurface({ view, data }) {
   const loaded = useGlbScene({ entry: document.entry, resources: document.client.resources });
   const scene = loaded.scene;
   const loadAlert = useMemo(() => workspaceLoadAlert({
-    catalogError: document.catalogError, error: loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene)
-  }), [document.catalogError, loaded.error, document.modelKey, scene]);
+    catalogError: document.catalogError, error: loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene), t
+  }), [document.catalogError, loaded.error, document.modelKey, scene, t]);
 
   const shellRef = useRef(null);
   const sceneRef = useRef(scene);

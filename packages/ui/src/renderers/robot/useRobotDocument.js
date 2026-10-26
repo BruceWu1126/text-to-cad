@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { english } from "../../i18n/core.js";
 import { entryUrdfAssetHash } from "@text-to-cad/core/lib/entryAssets.js";
 import { isAbortError, loadRenderRobot, peekRenderRobot } from "@text-to-cad/core/lib/renderAssetClient.js";
 import { loadRobotMeshes, peekRobotMeshes, robotMeshUrls, robotModel } from "@text-to-cad/core/lib/urdf/loadRobot.js";
@@ -17,17 +18,25 @@ function meshConcurrency() {
 
 // An SRDF holds planning semantics only; what is drawn is the URDF it is about, which
 // cadgen pairs with it: the ONE `.urdf` in the same folder whose `<robot name>` matches.
-// cadgen's refusal says what it looked for; this is the alert a person reads around it.
+// cadgen's refusal says what it looked for; this is the alert a person reads around it, in `t`'s
+// language (`alertIn`; `alert` is English). cadgen's own sentence ends it as cadgen said it.
+function unpairedSrdfAlertIn(entry, error, t) {
+  const file = String(entry?.file || "");
+  const detail = String(error?.message || "");
+  const message = file.includes("/")
+    ? t("alert.srdf.message", { folder: file.slice(0, file.lastIndexOf("/")), detail })
+    : t("alert.srdf.messageHere", { detail });
+  return {
+    summary: t("alert.srdf.summary"),
+    title: t("alert.srdf.title"),
+    message: message.trim(),
+    recovery: t("alert.srdf.recovery")
+  };
+}
 function unpairedSrdfAlert(entry, error) {
   const file = String(entry?.file || "");
-  const folder = file.includes("/") ? `“${file.slice(0, file.lastIndexOf("/"))}”` : "the folder this SRDF is in";
-  const alert = {
-    summary: "URDF not found",
-    title: "No URDF beside this SRDF",
-    message: `An SRDF says how a robot is planned, not what it looks like, so the viewer draws the URDF it belongs to. It looked in ${folder} for exactly one .urdf file with the same <robot name>, and found none, or more than one. ${String(error?.message || "")}`.trim(),
-    recovery: "Put the robot's URDF next to this SRDF, or make the two <robot name> attributes match, then reload."
-  };
-  return Object.assign(new Error(`No URDF is paired with ${file || "this SRDF"}: ${String(error?.message || "")}`.trim(), { cause: error }), { alert });
+  return Object.assign(new Error(`No URDF is paired with ${file || "this SRDF"}: ${String(error?.message || "")}`.trim(), { cause: error }),
+    { alert: unpairedSrdfAlertIn(entry, error, english), alertIn: t => unpairedSrdfAlertIn(entry, error, t) });
 }
 
 const UNPAIRED_SRDF = /has no paired URDF|is ambiguous: \d+ \.urdf files|has no readable <robot name>/;

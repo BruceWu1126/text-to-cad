@@ -16,6 +16,7 @@ const KEYS = Object.freeze({
   "Updating model…": "viewUpdate.updatingModel",
   "Updating drawing…": "viewUpdate.updatingDrawing",
   "Updating view…": "viewUpdate.updatingView",
+  "Preparing section view…": "viewUpdate.preparingSection",
 });
 const MESHING = /^Meshing parts( \d+\/\d+)?…$/;
 

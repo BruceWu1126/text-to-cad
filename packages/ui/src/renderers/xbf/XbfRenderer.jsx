@@ -115,10 +115,10 @@ function XbfSurface({ view, data }) {
   // the code it came from: a script edited since is the engine's business, not the page's.
   const loadAlert = useMemo(() => workspaceLoadAlert({
     // One the engine no longer holds is opened again (above), never said as a load that failed.
-    catalogError: document.catalogError, error: goneFromEngine(loaded.error) ? null : loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene)
-  }) || (loaded.failed ? buildFailedAlert(document.modelKey, loaded.failed, Boolean(scene)) : null)
-    || (loaded.empty ? noGeometryAlert(document.modelKey) : null),
-  [document.catalogError, loaded.error, loaded.failed, loaded.empty, document.modelKey, scene]);
+    catalogError: document.catalogError, error: goneFromEngine(loaded.error) ? null : loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene), t
+  }) || (loaded.failed ? buildFailedAlert(document.modelKey, loaded.failed, Boolean(scene), t) : null)
+    || (loaded.empty ? noGeometryAlert(document.modelKey, t) : null),
+  [document.catalogError, loaded.error, loaded.failed, loaded.empty, document.modelKey, scene, t]);
   const tree = useMemo(() => presentXbfTree(scene?.structure || null), [scene?.structure]);
   // The model's two readiness moments, as a STEP's are published (`window.__cadViewerLoad`): its
   // first scene, and the whole of it -- one moment here, every part is in the first scene.

@@ -26,9 +26,9 @@ function MeshSurface({ view, data }) {
   const loaded = useMeshScene({ entry: document.entry, resources: document.client.resources });
   const scene = loaded.scene;
   const loadAlert = useMemo(() => workspaceLoadAlert({
-    catalogError: document.catalogError, error: loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene)
-  }) || (loaded.empty ? noGeometryAlert(document.modelKey) : null),
-  [document.catalogError, loaded.error, loaded.empty, document.modelKey, scene]);
+    catalogError: document.catalogError, error: loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene), t
+  }) || (loaded.empty ? noGeometryAlert(document.modelKey, t) : null),
+  [document.catalogError, loaded.error, loaded.empty, document.modelKey, scene, t]);
   // A 3MF has objects and a unit; an STL is one mesh in none.
   const parted = /\.3mf$/i.test(view.file.path);
   const toolModes = parted ? THREE_MF_TOOL_MODES : STL_TOOL_MODES;

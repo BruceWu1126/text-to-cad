@@ -306,15 +306,15 @@ function DxfSurface({ view, data }) {
   const alert = useMemo(() => {
     if (workspace.catalogError && !shown) {
       return {
-        severity: "error", kind: "status", title: "Couldn’t open the drawing",
-        message: "The viewer couldn’t retrieve this file’s information.",
-        recovery: "Try again. If this continues, check that the viewer is running.",
+        severity: "error", kind: "status", title: t("alert.openDrawingFailed"),
+        message: t("alert.catalogFailed"),
+        recovery: t("alert.catalogRecovery"),
         details: String(workspace.catalogError), reload: true
       };
     }
-    const failed = drawingLoadAlert(workspace.modelKey || file, payload.error);
-    return failed && shown ? { ...failed, blocking: false, message: `${failed.message} The existing drawing remains visible.` } : failed;
-  }, [workspace.catalogError, workspace.modelKey, file, payload.error, shown]);
+    const failed = drawingLoadAlert(workspace.modelKey || file, payload.error, t);
+    return failed && shown ? { ...failed, blocking: false, message: t("alert.drawingStillShown", { message: failed.message }) } : failed;
+  }, [workspace.catalogError, workspace.modelKey, file, payload.error, shown, t]);
   const empty = shown && !drawing.bounds;
   // Settled is this revision's drawing painted: a capture waits out an update.
   const ready = shown && !payload.loading && !payload.updating && !alert;
@@ -445,7 +445,7 @@ function DxfSurface({ view, data }) {
   // A drawing has settled once it is read and painted: a library card's picture waits for that.
   const whenSettled = useWhenSettled(() => ready);
   // The card the viewport shows, and its dismissal: put away, its icon in the navbar brings it back.
-  const cardAlert = alert || (actionError ? { severity: "error", kind: "status", blocking: false, title: "Couldn’t capture the drawing", message: actionError } : null);
+  const cardAlert = alert || (actionError ? { severity: "error", kind: "status", blocking: false, title: t("alert.captureDrawingFailed"), message: actionError } : null);
   const alertDismissal = useAlertDismissal(cardAlert, { hasContent: shown, scope: file, onNavigationActionsChange: view.onNavigationActionsChange });
   const binding = data.services.live;
   useEffect(() => {
@@ -533,7 +533,7 @@ function DxfSurface({ view, data }) {
       data-slot="cad-file-view" data-drawing-surface data-cad-scene-backdrop="" tabIndex={-1}
       onPointerDownCapture={event => { if (event.target instanceof Element && event.target.closest("canvas")) event.currentTarget.focus({ preventScroll: true }); }}>
       <div ref={containerRef} className="relative min-h-0 flex-1" aria-busy={payload.loading || payload.updating ? "true" : "false"}>
-        <canvas ref={canvasRef} aria-label={`Drawing: ${view.file.name}`} role="img" data-drawing-tool={toolMode}
+        <canvas ref={canvasRef} aria-label={t("drawing.canvas", { name: view.file.name })} role="img" data-drawing-tool={toolMode}
           className={cn("absolute inset-0 block touch-none select-none", cursor)} />
         {/* Measure's layer, over the drawing and under the tools: the pointer stays the drawing's. */}
         <canvas ref={measureCanvasRef} className="pointer-events-none absolute inset-0 z-[1] h-full w-full" aria-hidden="true" data-scene-measure="" />
@@ -541,7 +541,7 @@ function DxfSurface({ view, data }) {
         {empty ? (
           <p className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-muted-foreground"
             data-drawing-empty>
-            This drawing has no geometry in its modelspace, so there is nothing to show.
+            {t("drawing.empty")}
           </p>
         ) : null}
       </div>

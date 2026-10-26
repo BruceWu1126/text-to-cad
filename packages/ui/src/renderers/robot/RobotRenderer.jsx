@@ -54,8 +54,9 @@ const poseIsSet = pose => Boolean(pose) && Object.entries(pose.getSnapshot().val
 // reads the pose itself, and only whether it is off its defaults: a pose step renders it only when
 // that flips, and never the surface (a pose step renders no component of the renderer).
 function PositionSection({ pose, previewPose, revision }) {
+  const { t } = useI18n();
   const changed = useSyncExternalStore(pose.subscribe, () => !positionValuesAreDefault(pose.getSnapshot().values, pose.defaults));
-  return <ToolPanel id="position" title="Position" label="Position controls" fit="details" changed={changed}>
+  return <ToolPanel id="position" title={t("position.title")} label={t("position.controls")} fit="details" changed={changed}>
     {/* Preview poses its own robot (`previewPose`). */}
     <PositionControls key={`${revision}:${previewPose ? "preview" : "tools"}`} pose={previewPose || pose} />
   </ToolPanel>;
@@ -115,10 +116,10 @@ function RobotSurface({ view, data }) {
 
   const loadAlert = useMemo(() => {
     if (loaded.error?.alert && !scene) {
-      return { ...failureAlert(document.modelKey, loaded.error.message), ...loaded.error.alert, reason: undefined };
+      return { ...failureAlert(document.modelKey, loaded.error.message, undefined, false, t), ...(loaded.error.alertIn?.(t) ?? loaded.error.alert), reason: undefined };
     }
-    return workspaceLoadAlert({ catalogError: document.catalogError, error: loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene) });
-  }, [document.catalogError, loaded.error, document.modelKey, scene]);
+    return workspaceLoadAlert({ catalogError: document.catalogError, error: loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene), t });
+  }, [document.catalogError, loaded.error, document.modelKey, scene, t]);
 
   // ---- selection -------------------------------------------------------------------------
   const shellRef = useRef(null);
