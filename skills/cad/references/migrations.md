@@ -234,8 +234,8 @@ old spellings resolve to nothing: take refs again from the viewer, or from what
   carries the mechanism. Delete them once the model is ported.
 - STEP, STL, 3MF and GLB files 0.7 runs wrote stay where they were; nothing rewrites
   them. Export them again from the ported model when the person wants them current.
-- The CAD Viewer's Recents are the records of 0.8's documents; 0.7's list is not read,
-  so they start empty after the upgrade.
+- The CAD Viewer's home lists the records of 0.8's models and files; 0.7's Recents are
+  not read, so the home starts empty after the upgrade.
 - The CAD app: Quick Edit has no enable/disable preference (a stale
   `features.quickEdit: false` does nothing). The `cad_telemetry` tool is gone: telemetry
   status is `cad_http` with method `GET` and URL `/__cad/analytics`, and opt-out, when the

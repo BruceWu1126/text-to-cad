@@ -305,7 +305,8 @@ it again.
   Running it updates the same document and its open pages.
 - **Each document has a record** in cadgen's state folder (`documents/<uuid>/document.json`:
   the script and function that build it (the rebuild command is always `cadgen run` of that script); never
-  geometry). The home's Recents lists the records, most recent first. A record whose
+  geometry). The home lists the records, models and files alike, pinned first, then by
+  last activity. A record whose
   script is gone is detached: listed, saying so, with no rebuild command. Nothing else is
   written beside your files: no record of a run.
 - **A restart reopens what was built.** The engine keeps each model document's bytes in
@@ -314,7 +315,9 @@ it again.
   A document is what its last run made: the engine never checks the code on disk against
   it, no surface says the script changed, and nothing reruns. After an edit, run the script
   (`cadgen run /work/arm.py`) to update the document and its open pages.
-  The cache keeps every document until you delete it (`cadgen delete <id>`, or Delete on the home); nothing evicts from it.
+  The cache keeps every document until you delete it (`cadgen delete <id>`, or a script's
+  path for every document of it, or Delete in a card's menu on the home); nothing evicts
+  from it. Deleting removes the record and the cached document, never a file.
 - **A shape with no script** (a notebook cell, a REPL, a script that only holds a
   shape) is handed over: `model(shape, name="plate")` makes a document of it, held,
   cached, served on its page and exported like any other, and returns the same handle,

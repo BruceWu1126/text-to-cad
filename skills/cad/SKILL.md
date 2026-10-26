@@ -9,8 +9,9 @@ license: MIT
 Provenance: maintained in [earthtojake/text-to-cad](https://github.com/earthtojake/text-to-cad).
 Use the installed local skill files for the current interface.
 
-The viewer page is the open document, the script is its feature tree, running the
-script is the rebuild, and export is File → Export. A model is a Python function; running
+The viewer page is the open document, the script is its feature tree, and running the
+script is the rebuild. Export is the download button at the navbar's right: pick a
+format, the engine prepares the file, the browser saves it. A model is a Python function; running
 its script rebuilds it in cadgen's warm engine, and the page the person has open updates.
 Nothing is written to disk until someone asks for a file.
 
@@ -307,7 +308,8 @@ every assumption or departure from the request.
 
 ### Show the model
 
-Show the user each model and file you create or change, and any they ask to see.
+Show the user each model you create or change, and any model or file they ask to see.
+A file you export is a download: give its path, do not open it.
 Snapshots and validation don't replace this. Never screenshot the viewer to confirm your
 own work; review with `cadgen snapshot`.
 
@@ -315,11 +317,12 @@ own work; review with `cadgen snapshot`.
   or the file's absolute path, and follow its description for when to call it again.
   The other tools depend on the host. A host that draws CAD cards or tabs (Claude
   Desktop, the Codex app) also has `cad_view`, which reads what the user selected, and
-  `cad_screenshot`, which shows you what they see, for when they ask about it. A text host
-  (Claude Code in a terminal, `codex exec`) draws nothing: its `cad_show` opens the
-  model's page in the user's browser and answers with the URL to give them, and it has no
-  view to read. `cad_inspect`, `cad_snapshot` and `cad_export` are on every host. Call
-  only the tools you have, and never say a card shows a model when your host drew none.
+  `cad_screenshot`, which shows you what they see, both of a card or tab that is open, for
+  when they ask about it. A text host (Claude Code in a terminal, `codex exec`) draws
+  nothing: its `cad_show` opens the model's page in the user's browser and answers with
+  the URL to give them, and it has no view to read. `cad_inspect`, `cad_snapshot` and
+  `cad_export` are on every host. Call only the tools you have, and never say a card
+  shows a model when your host drew none.
 - Otherwise give the user the page's link once: a model's page is the `view:` line its
   run prints. For a file, run the CAD Viewer, from any folder:
 

@@ -295,8 +295,8 @@ value out of range and a coupling's joint set alone are refused by name before a
 renders.
 
 On the model's page, Position poses the document live: a slider per coupling and per
-joint no coupling moves, and the mechanism states as presets. The Motion tool plays the
-document's configuration sequences (play, pause, scrub, loop, speed), so the page is
+joint no coupling moves, and the mechanism states as presets. The sidebar's Motion section
+and Preview's playbar play the document's configuration sequences (play, pause, scrub, loop, speed), so the page is
 where to review one.
 
 A pose or a motion shows movement; it does not measure it. A check of the model measures

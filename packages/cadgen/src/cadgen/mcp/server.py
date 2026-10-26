@@ -99,16 +99,18 @@ _MOUNTING_KEPT = 64
 
 INSTRUCTIONS = (
     f"CAD shows local CAD models ({FORMATS}) in a viewer tab beside the chat. "
-    "To show a model, call cad_show with its absolute path: it switches an open viewer and never opens a tab. "
+    "To show a model, call cad_show with its document id (running its script prints it) or a CAD file's absolute "
+    "path: it switches an open viewer and never opens a tab. "
     "Only when cad_show reports no open viewer, call cad_open, once. "
-    "Viewers refresh when files change, so never reopen after a rebuild. "
+    "Viewers follow every rebuild of a model and every save of a file, so never reopen after a rebuild. "
     "cad_view reports what the user is looking at and has selected; cad_screenshot returns what they see."
 )
 
 INLINE_INSTRUCTIONS = (
     f"CAD shows local CAD models ({FORMATS}) in interactive viewers in the chat. "
-    "Call cad_show with a model's absolute path to show it: each call adds a viewer and pauses the earlier ones. "
-    "Viewers refresh when their files change, so never show a model again after a rebuild. "
+    "Call cad_show with a model's document id (running its script prints it) or a CAD file's absolute path to "
+    "show it: each call adds a viewer and pauses the earlier ones. "
+    "Viewers follow every rebuild of a model and every save of a file, so never show a model again after a rebuild. "
     "cad_view reports what the user is looking at and has selected in a viewer, and cad_screenshot returns "
     "what they see; both take the view that cad_show returned."
 )
@@ -464,9 +466,9 @@ class Server:
         return [
             {"name": "cad_show", "title": "Show in CAD", "icons": [ICON], "annotations": _READ_ONLY, "_meta": shows,
              "description": (f"Show a local CAD model ({FORMATS}) in an interactive viewer in the "
-                             "chat. Each call adds a viewer and pauses the earlier ones. A viewer refreshes by itself when "
-                             "its file changes, so show a model once, not after every rebuild. The result names the view: "
-                             "pass it to cad_view or cad_screenshot."),
+                             "chat. Each call adds a viewer and pauses the earlier ones. A viewer follows every rebuild of "
+                             "its model and every save of its file, so show a model once, not after every rebuild. "
+                             "The result names the view: pass it to cad_view or cad_screenshot."),
              "inputSchema": _object({"source": _SOURCE}, ["source"])},
             {"name": "cad_view", "title": "Read CAD view", "icons": [ICON], "annotations": _READ_ONLY,
              "description": ("Describe a CAD viewer in this chat: its model and revision, what the user has selected (as "

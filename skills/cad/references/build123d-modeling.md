@@ -86,7 +86,7 @@ paint(body, body.faces().filter_by(bd.Axis.Z)[-1:], materials.aluminium_6061.but
 - **`paint(part, faces, color_or_material)`** gives faces a colour or a material of
   their own.
 - A material's density weighs the model (`cadgen inspect <id> OWNER`), its look is
-  drawn in the viewer's Solid, Shaded and Preview modes, and a GLB carries it. A STEP
+  drawn in the viewer's Solid and Shaded modes and in Preview, and a GLB carries it. A STEP
   keeps a material's name and density only, and a face's colour.
 
 ## Placement and frame pitfalls
