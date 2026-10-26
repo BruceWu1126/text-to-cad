@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
-import { build } from 'esbuild';
+import { harnessBundle } from '../harness/bundle.mjs';
 import { chromium } from 'playwright';
 import { PNG } from 'pngjs';
 import { strToU8, zipSync } from 'three/examples/jsm/libs/fflate.module.js';
@@ -55,12 +53,10 @@ const HARNESS_SIZE = '<style>#root > div { width: 800px !important; height: 500p
 
 // One harness bundle, one server and one browser for the file; every test opens its own page.
 // (A browser's first WebGL page pays for compiling the viewer's shaders; later pages reuse them.)
-let temporary, server, browser;
+let server, browser;
 const requests = [];
 before(async () => {
-  temporary = await mkdtemp(join(tmpdir(), 'text-to-cad-mesh-browser-'));
-  await build({ entryPoints: [fileURLToPath(new URL('../harness/index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.svg': 'dataurl' } });
-  const bundle = await readFile(join(temporary, 'harness.js'));
+  const { bundle } = await harnessBundle();
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
   server = createServer((request, response) => {
     const url = new URL(request.url, 'http://test');
@@ -85,7 +81,6 @@ before(async () => {
 after(async () => {
   await browser?.close();
   if (server) await new Promise(resolve => server.close(resolve));
-  if (temporary) await rm(temporary, { recursive: true, force: true });
 });
 
 async function open(t, file) {

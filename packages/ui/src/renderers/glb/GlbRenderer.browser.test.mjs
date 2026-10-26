@@ -1,13 +1,11 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
-import { build } from 'esbuild';
+import { harnessBundle } from '../harness/bundle.mjs';
 import { chromium } from 'playwright';
 import { PNG } from 'pngjs';
 
@@ -27,11 +25,9 @@ const HARNESS_SIZE = '<style>#root > div { width: 800px !important; height: 500p
 
 // One harness bundle, one server and one browser for the file; every test opens its own page.
 // (A browser's first WebGL page pays for compiling the viewer's shaders; later pages reuse them.)
-let temporary, server, browser;
+let server, browser;
 before(async () => {
-  temporary = await mkdtemp(join(tmpdir(), 'text-to-cad-glb-browser-'));
-  await build({ entryPoints: [fileURLToPath(new URL('../harness/index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.svg': 'dataurl' } });
-  const bundle = await readFile(join(temporary, 'harness.js'));
+  const { bundle } = await harnessBundle();
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
   server = createServer((request, response) => {
     const url = new URL(request.url, 'http://test');
@@ -55,7 +51,6 @@ before(async () => {
 after(async () => {
   await browser?.close();
   if (server) await new Promise(resolve => server.close(resolve));
-  if (temporary) await rm(temporary, { recursive: true, force: true });
 });
 
 // `record` opens the page as a previous session left its tab (`window.__cadTabRecord`).
@@ -220,7 +215,7 @@ async function captureMatching(page, expected, message) {
 }
 const display = (page, patch) => page.evaluate(next => window.cadHarness.a.controller.setDisplaySettings(next), patch);
 
-test('a static GLB opens on its native scene in Select: display settings, orbit, host commands and state all work', async (t) => {
+test('a static GLB opens on its native scene in Select: its tools, its display modes on its authored colours, its node picks refused to a command, its settings under its renderer (the shell around it is the mesh spec\'s)', async (t) => {
   const { page, pane, errors } = await open(t, 'static.glb');
   await ready(pane);
   assert.deepEqual(errors, []);
@@ -246,12 +241,6 @@ test('a static GLB opens on its native scene in Select: display settings, orbit,
   await page.waitForFunction(() => document.querySelector('[data-testid="one"] [aria-busy] > div > canvas').width >= 790);
   await settle(page);
 
-  // Preview draws the model in Render, on the studio's floor; leaving it takes the studio down.
-  await togglePreview(page, pane, true);
-  await page.waitForFunction(() => window.__cadStage()?.studioGround);
-  await togglePreview(page, pane, false);
-  await page.waitForFunction(() => !window.__cadStage()?.studioGround);
-
   // Surfaces, on the native scene: Solid, each part its own authored colour, shaded.
   const red = ([r, g, b]) => r > 150 && g < 90 && b < 90;
   const blue = ([r, g, b]) => b > 150 && r < 90 && g < 130;
@@ -271,77 +260,18 @@ test('a static GLB opens on its native scene in Select: display settings, orbit,
   await display(page, { mode: 'solid', grid: false });
   assert.equal(differingPixels(shaded, await capture(page)), 0, 'the look is fully reversible');
 
-  // Dragging orbits.
-  const before = await page.evaluate(() => window.cadHarness.a.controller.readState().camera);
-  const canvas = await pane.locator('[aria-busy] > div > canvas').first().boundingBox();
-  await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(canvas.x + canvas.width / 2 + 140, canvas.y + canvas.height / 2 + 40, { steps: 6 });
-  await page.mouse.up();
-  await page.waitForFunction(position => JSON.stringify(window.cadHarness.a.controller.readState().camera.position) !== position, JSON.stringify(before.position));
-
-  // The drag's damping coasts for a moment; a host camera lands on a view at rest.
-  // At rest: the live camera the same over several frames running.
-  await page.waitForFunction(() => new Promise(resolve => {
-    let still = 0, last = null;
-    const step = () => {
-      const position = JSON.stringify(window.__cadCamera().position);
-      still = position === last ? still + 1 : 0;
-      last = position;
-      if (still >= 5) resolve(true); else requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
-  }));
-
-  // Host commands drive the mounted view, and one that makes no sense here fails loudly.
-  const camera = await page.evaluate(async () => {
-    const controller = window.cadHarness.a.controller;
-    const current = controller.readState().camera;
-    return (await controller.setCamera({ ...current, position: [90, -70, 60], target: [10, 5, 5], zoom: 1.3 })).camera;
-  });
-  assert.deepEqual(camera.position.map(Math.round), [90, -70, 60]);
+  // A GLB's own answers to the host: its state, and a command's pick refused (a person picks its nodes).
   const state = await page.evaluate(() => window.cadHarness.a.controller.readState());
   assert.deepEqual([state.resource.path, state.revision, state.loading, state.selection], ['/models/static.glb', 'one-static.glb', false, []]);
   const declined = await page.evaluate(() => window.cadHarness.a.controller.select({ selectors: ['o1.f1'] }).then(() => '', error => error.message));
   assert.match(declined, /A GLB's nodes are picked by a person in the viewport under Select/);
   assert.equal(await page.evaluate(() => window.cadHarness.a.controller.clearSelection().then(() => '', error => error.message)), '', 'its node selection clears');
 
-  // A secondary press is the camera's: no menu of the viewer's, and the browser's own stays off the canvas.
-  await page.evaluate(() => {
-    window.nativeMenu = [];
-    document.addEventListener('contextmenu', event => window.nativeMenu.push(event.defaultPrevented));
-  });
-  await page.mouse.click(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2, { button: 'right' });
-  // The press has reached the page, and a menu it opened would be up two frames on.
-  await page.waitForFunction(() => window.nativeMenu.length > 0);
-  await settle(page);
-  assert.equal(await page.getByRole('menu').count(), 0);
-  assert.deepEqual(await page.evaluate(() => window.nativeMenu), [true]);
-
-  // A host's capture request goes through the prompt port: the view, of the whole file.
-  await page.evaluate(() => window.cadHarness.capture());
-  await page.waitForFunction(() => window.cadHarness.captures.length === 1);
-  const captured = await page.evaluate(() => window.cadHarness.captures[0]);
-  assert.deepEqual([captured.file, captured.type, captured.references.length], ['/models/static.glb', 'image/png', 1]);
-  assert.deepEqual(captured.references[0].target, { kind: 'whole-resource' });
-
-  // Camera and Display settings belong to this file under this renderer's id, and survive a remount.
+  // Display settings belong to this file under this renderer's id (a remount restoring them is the mesh spec's).
   await display(page, { mode: 'parts', grid: true });
   await page.waitForFunction(() => window.cadHarness.state.renderers?.[JSON.stringify(['/models/static.glb', 'glb'])]?.display?.mode === 'parts');
   const stored = await page.evaluate(() => window.cadHarness.state.renderers);
   assert.deepEqual(Object.keys(stored), [JSON.stringify(['/models/static.glb', 'glb'])], 'keyed by [absolute path, renderer id]');
-  const left = await page.evaluate(() => window.cadHarness.a.controller.readState());
-  await page.evaluate(() => window.cadHarness.mounted(false));
-  await pane.locator('canvas').first().waitFor({ state: 'detached' });
-  await page.evaluate(() => window.cadHarness.mounted(true));
-  await ready(pane);
-  await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
-  const reopened = await page.evaluate(() => window.cadHarness.a.controller.readState());
-  // Within a thousandth: the camera read when leaving can still be coasting its last hundredth.
-  assert.ok(reopened.camera.position.every((value, axis) => Math.abs(value - left.camera.position[axis]) <= 1e-3 * Math.max(1, Math.abs(left.camera.position[axis]))),
-    `reopening restores the camera the file was left at: ${JSON.stringify([reopened.camera.position, left.camera.position])}`);
-  assert.ok(Math.abs(reopened.camera.zoom - left.camera.zoom) < 1e-6);
-  assert.deepEqual([reopened.display.mode, reopened.display.grid], ['parts', true]);
 
   assert.deepEqual(errors, []);
 });

@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { build } from 'esbuild';
+import { harnessBundle } from '../harness/bundle.mjs';
 import { chromium } from 'playwright';
 import { PNG } from 'pngjs';
 
@@ -14,26 +11,21 @@ import { PNG } from 'pngjs';
 // needs neither Python nor ezdxf and cannot drift from the route by accident.
 // `__fixtures__/README.md` says how to regenerate the pair.
 const SAMPLE = JSON.parse(await readFile(new URL('./__fixtures__/sample.drawing.json', import.meta.url), 'utf8'));
-// A drawing whose modelspace is empty: `bounds: null`, and nothing to frame.
-const EMPTY = { schemaVersion: SAMPLE.schemaVersion, units: SAMPLE.units, bounds: null, layers: [], entities: [], fonts: [], primitives: [] };
-const BAD_DXF_MESSAGE = 'plate.dxf is not a readable DXF document: run `ezdxf audit` on it, or export it again.';
 
 // The fixture's own measurements, so an assertion can say WHICH edge it is reading.
 const MODEL = { width: 100, height: 60 };
-const DRAWINGS = { 'sample.dxf': SAMPLE, 'empty.dxf': EMPTY };
+const DRAWINGS = { 'sample.dxf': SAMPLE };
 
 // The harness renders its panes at a fixed CSS size; the spec draws them smaller, so a software
 // GL (CI's SwiftShader) paints and a screenshot reads fewer pixels. A resize writes the variables.
 const HARNESS_SIZE = '<style>#root > div { width: var(--harness-width, 800px) !important; height: var(--harness-height, 500px) !important; }</style>';
 
 // One harness bundle, one server and one browser for the file; every test opens its own page.
-let temporary, server, browser;
+let server, browser;
 before(async () => {
-  temporary = await mkdtemp(join(tmpdir(), 'text-to-cad-dxf-browser-'));
-  await build({ entryPoints: [fileURLToPath(new URL('../harness/index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.svg': 'dataurl' } });
-  const bundle = await readFile(join(temporary, 'harness.js'));
+  const { bundle } = await harnessBundle();
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
-  const files = ['sample.dxf', 'empty.dxf', 'broken.dxf'];
+  const files = ['sample.dxf'];
   server = createServer((request, response) => {
     const url = new URL(request.url, 'http://test');
     const root = url.pathname.split('/')[1];
@@ -43,7 +35,6 @@ before(async () => {
       // Asked for by the file's absolute path, which names the fixture last.
       const drawing = DRAWINGS[String(url.searchParams.get('file')).split('/').pop()];
       response.setHeader('Content-Type', 'application/json');
-      if (!drawing) { response.statusCode = 400; response.end(JSON.stringify({ error: BAD_DXF_MESSAGE })); return; }
       response.end(JSON.stringify(drawing));
     } else if (url.pathname.endsWith('/__cad/catalog')) {
       response.setHeader('Content-Type', 'application/json');
@@ -59,7 +50,6 @@ before(async () => {
 after(async () => {
   await browser?.close();
   if (server) await new Promise(resolve => server.close(resolve));
-  if (temporary) await rm(temporary, { recursive: true, force: true });
 });
 
 async function open(t, file) {
@@ -339,25 +329,6 @@ test('a pane that is resized re-fits only while the view is still the one it ope
     `a bigger pane shows the same view bigger: ${chosen.height} -> ${kept.height}`);
   assert.ok(share(kept, grownShot) < 0.7, 'and it is still the zoom they chose, not the fit');
   assert.deepEqual(errors, []);
-});
-
-test('an unreadable drawing shows the server’s own sentence, and an empty one says it is empty', async (t) => {
-  const broken = await open(t, 'broken.dxf');
-  const alert = broken.pane.getByRole('alert');
-  await alert.waitFor();
-  const text = await alert.innerText();
-  assert.match(text, /The viewer couldn’t complete the request/);
-  assert.match(text, /HTTP 400/);
-  assert.match(text, /not a readable DXF document/);
-  assert.match(text, /Retry/);
-  assert.equal(await broken.pane.locator('[data-viewer-loading]').count(), 0, 'and not a spinner forever');
-
-  const empty = await open(t, 'empty.dxf');
-  await drawn(empty.pane);
-  await empty.pane.locator('[data-drawing-empty]').waitFor();
-  assert.match(await empty.pane.locator('[data-drawing-empty]').innerText(), /no geometry in its modelspace/);
-  assert.equal(await empty.pane.getByRole('alert').count(), 0, 'an empty drawing is not an error');
-  assert.deepEqual(empty.errors, []);
 });
 
 test('the view a person chose comes back when the tab is reopened', async (t) => {

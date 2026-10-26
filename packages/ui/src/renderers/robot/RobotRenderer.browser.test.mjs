@@ -1,25 +1,23 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
-import { build } from 'esbuild';
+import { harnessBundle } from '../harness/bundle.mjs';
 import { chromium } from 'playwright';
 import { PNG } from 'pngjs';
 
 // The robot renderer end to end in a real browser, over the fixture descriptions in `__fixtures__`
 // as cadgen resolved them (`make_fixtures.py`; the Python suite holds the files current): a URDF of
-// primitives, the SRDF paired with it (a "home" state, a named pose, an end effector), an SDF, a
+// primitives, the SRDF paired with it (a "home" state, a named pose, an end effector), a
 // long chain, a four-bar linkage cadgen closes, and the two cadgen refuses (their alerts are
-// `useRobotDocument.test.tsx`'s and `ViewportError.test.tsx`'s: no GPU needed). This server answers `GET /__cad/robot` as the viewer's does, from
+// `useRobotDocument.test.tsx`'s and `ViewportError.test.tsx`'s, an SDF's own section `SdfSection.test.tsx`'s: no GPU needed). This server answers `GET /__cad/robot` as the viewer's does, from
 // those files, so the page here is the page a CAD Viewer serves. Scene, pose store and handle adapter
 // have unit tests; these are the flows a person actually uses.
 
 const FIXTURES = new URL('./__fixtures__/', import.meta.url);
-const DESCRIPTIONS = ['arm.urdf', 'arm.srdf', 'swing.sdf', 'chain.urdf', 'linkage.urdf', 'gone.urdf', 'lonely.srdf'];
+const DESCRIPTIONS = ['arm.urdf', 'arm.srdf', 'chain.urdf', 'linkage.urdf', 'gone.urdf', 'lonely.srdf'];
 const payloadFile = name => new URL(`${name.slice(0, name.lastIndexOf('.'))}.${name.split('.').pop()}.robot.json`, FIXTURES);
 // cadgen's answer for each description: its payload, or the sentence it refuses it with.
 const PAYLOADS = Object.fromEntries(DESCRIPTIONS.filter(name => existsSync(payloadFile(name))).map(name => [name, readFileSync(payloadFile(name), 'utf8')]));
@@ -33,13 +31,11 @@ const CHAIN_LINKS = 30;
 // GL (CI's SwiftShader) has fewer pixels to fill and a capture fewer to read.
 const HARNESS_SIZE = '<style>#root > div { width: 800px !important; height: 500px !important; }</style>';
 
-let server, browser, temporary;
+let server, browser;
 // Bumped by a test to publish a new revision of every description.
 let revision = 1;
 before(async () => {
-  temporary = await mkdtemp(join(tmpdir(), 'text-to-cad-robot-browser-'));
-  await build({ entryPoints: [fileURLToPath(new URL('../harness/index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.svg': 'dataurl' } });
-  const bundle = await readFile(join(temporary, 'harness.js'));
+  const { bundle } = await harnessBundle();
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
   server = createServer((request, response) => {
     const url = new URL(request.url, 'http://test');
@@ -71,7 +67,6 @@ before(async () => {
 after(async () => {
   await browser?.close();
   if (server) await new Promise(resolve => server.close(resolve));
-  if (temporary) await rm(temporary, { recursive: true, force: true });
 });
 
 async function open(t, file, { panel = true } = {}) {
@@ -702,55 +697,6 @@ test('Preview draws the robot as it opens, and leaving it finds the tools view a
   assert.deepEqual(await robot.links(), posed, 'the pose comes back');
   await robot.pressed(['Select upper_arm'], 'the selection comes back');
   assert.equal(await pane.getByRole('button', { name: 'Reveal base', exact: true }).count(), 1, 'the base is still hidden');
-  assert.deepEqual(robot.errors, []);
-});
-
-test('an SDF is the same robot with a section of its own; a snapshot depicts the whole file', async (t) => {
-  const robot = await open(t, 'swing.sdf');
-  const { page, pane } = robot;
-  await robot.openPosition();
-  await page.waitForFunction(() => window.__cadJointHandles?.().length === 1);
-  assert.deepEqual([await robot.toolNames(), await robot.filter()], [SELECT_IN_HAND, 'Selection filter: Position']);
-  // The same sections as any robot, whatever the format on disk, whatever Select picks: SDF is the
-  // sidebar's, its tile after Links' (what the description says about itself sits with its links).
-  const sections = [['Links', 'SDF', 'Position controls'], [], ['Links', 'SDF', 'Position']];
-  assert.deepEqual([await robot.sidebar(), await robot.stack(), await robot.tiles()], sections);
-  await robot.pickLinks();
-  assert.deepEqual([await robot.sidebar(), await robot.stack(), await robot.tiles()], sections);
-  await robot.openSection('SDF');
-  assert.equal(await robot.linksPanel().isVisible(), false, 'one section at a time');
-  const text = (await robot.section('SDF').innerText()).replace(/\s+/g, ' ');
-  // The ground plane under the base is a collision the viewer cannot draw: counted, never refused.
-  for (const fact of ['Version 1.9', 'Document world', 'World lab', 'Root link base', 'Model swing', 'Links 2', 'Joints 1', 'Lights 1',
-    'Unsupported geom. 1', 'sun / directional']) assert.ok(text.includes(fact), `${fact} in: ${text}`);
-  // Its joint frame and its child link frame differ (the child sits at an offset): the knob still drives it.
-  await robot.type('hinge', 40);
-  const links = await robot.links();
-  assert.equal(round6(translation(links.arm)[2]), round6(0.2 - 0.05 * Math.sin((40 * Math.PI) / 180)));
-  // Display offers no mode made of edges: Solid, and Parts for a robot of several link meshes; then Grid.
-  await robot.openDisplay();
-  const rootMenu = robot.displayPanel();
-  assert.deepEqual(await rootMenu.locator('[data-display-mode-option]').evaluateAll(items => items.map(item => item.getAttribute('data-display-mode-option'))),
-    ['solid', 'parts']);
-  assert.deepEqual(await rootMenu.getByRole('menuitemcheckbox').allInnerTexts(), ['Grid']);
-  assert.equal(await rootMenu.getByRole('menuitem').count(), 0, 'no settings, no Cross-section or Explode');
-  assert.equal(await rootMenu.getByRole('menuitemradio', { name: 'Perspective', exact: true }).count(), 0, 'Projection is no section of Display');
-  await page.keyboard.press('Escape');
-  await rootMenu.waitFor({ state: 'detached' });
-  // Projection is a tile of its own, before Display: its menu the two projections.
-  await robot.tools.locator('[data-view-controls]').getByRole('button', { name: /^Projection: / }).click();
-  const projectionMenu = page.locator('[role=dialog][aria-label="Projection"]');
-  assert.deepEqual(await projectionMenu.getByRole('radiogroup', { name: 'Projection', exact: true }).getByRole('radio').allInnerTexts(), ['Orthographic', 'Perspective']);
-  await page.keyboard.press('Escape');
-  await projectionMenu.waitFor({ state: 'detached' });
-  // Display was never the tool: Select was in hand throughout, picking links, and still is.
-  assert.deepEqual([await robot.toolNames(), await robot.filter()], [SELECT_IN_HAND, 'Selection filter: Links']);
-
-  await page.evaluate(() => window.cadHarness.capture());
-  await page.waitForFunction(() => window.cadHarness.captures.length === 1);
-  const captured = await page.evaluate(() => window.cadHarness.captures[0]);
-  assert.deepEqual([captured.file, captured.type, captured.references.length], ['/models/swing.sdf', 'image/png', 1], 'one context, of the file');
-
   assert.deepEqual(robot.errors, []);
 });
 
