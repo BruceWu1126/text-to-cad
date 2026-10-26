@@ -22,7 +22,9 @@ class ExportsTest(unittest.TestCase):
             self.entered.set()
             if not self.finish.wait(10):
                 raise RuntimeError("test worker was not released")
-            progress({"label": "Writing"})
+            # The engine's progress event of the write (``cadgen.engine.progress``), as the worker sends it.
+            progress({"kind": "export", "stage": "write", "job": "d", "outputs": [str(target)], "detail": target.name,
+                      "done": 0, "total": 1, "elapsedMs": 1})
             target.write_bytes(b"model")
             return {"files": []}
         self.jobs = ExportJobs(SimpleNamespace(touch=lambda: None), run=run, clock=lambda: self.now, root=self.tmp.name)

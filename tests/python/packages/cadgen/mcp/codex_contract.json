@@ -797,6 +797,10 @@
       "minLength": 1,
       "type": "string"
      },
+     "progress": {
+      "description": "The engine's latest progress event for the operation: {kind, stage, job, outputs, detail, done, total, elapsedMs}; absent until it says one.",
+      "type": "object"
+     },
      "requestId": {
       "minLength": 1,
       "type": "string"
@@ -1102,6 +1106,10 @@
       "minLength": 1,
       "type": "string"
      },
+     "progress": {
+      "description": "The engine's latest progress event for the operation: {kind, stage, job, outputs, detail, done, total, elapsedMs}; absent until it says one.",
+      "type": "object"
+     },
      "requestId": {
       "minLength": 1,
       "type": "string"
@@ -1303,6 +1311,10 @@
      "operation": {
       "minLength": 1,
       "type": "string"
+     },
+     "progress": {
+      "description": "The engine's latest progress event for the operation: {kind, stage, job, outputs, detail, done, total, elapsedMs}; absent until it says one.",
+      "type": "object"
      },
      "requestId": {
       "minLength": 1,

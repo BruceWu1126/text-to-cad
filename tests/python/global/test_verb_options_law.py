@@ -71,8 +71,10 @@ class SnapshotTakesThePictureAlone(unittest.TestCase):
         self.assertEqual([(p.name, p.kind, p.default) for p in parameters[2:]],
                          [(name, inspect.Parameter.KEYWORD_ONLY, verb[name].default) for name in self.PICTURE],
                          f"Document.snapshot(out, ...) spells out the snapshot verb's options, each about the picture; {LAW}")
-        self.assertEqual(set(verb) - {"source", "out", "job"}, set(self.PICTURE),
-                         "the verb takes no option Document.snapshot leaves out but its job")
+        self.assertEqual(set(verb) - {"source", "out", "job", "progress"}, set(self.PICTURE),
+                         "the verb takes no option Document.snapshot leaves out but its job and its progress seam")
+        self.assertEqual(inspect.signature(cadgen.inspect).parameters["progress"].default, None,
+                         "inspect's progress is a seam about where the measurement is, never about the model")
 
 
 if __name__ == "__main__":

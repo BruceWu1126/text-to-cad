@@ -333,8 +333,11 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
             source = export.Source.read(xbf)
     else:
         # A file path is the file: read as a file document, whichever model's build declared it.
+        from cadgen.engine.progress import say
+
         path = Path(source_spec["path"])
         clock = time.perf_counter()
+        say("read", detail=path.name)
         source = export.Source.read(path)
         log(f"read {path.name} in {time.perf_counter() - clock:.2f}s")
     if source.mesh and source.path is not None:
@@ -346,13 +349,13 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
         from cadgen.engine.export.viewer import check
         check(source, request["expected"])  # a held document's revision is the daemon's to check
     files = []
-    for destination in request["destinations"]:
+    for index, destination in enumerate(request["destinations"]):
+        from cadgen.engine.progress import say
+
         clock = time.perf_counter()
         target = Path(destination)
-        from cadgen.engine.progress import current
-        progress = current()
-        if progress is not None:
-            progress.stage("write", detail=target.name)
+        # Each destination written, counted of them all (``progress.py``: an export's ``write``).
+        say("write", detail=target.name, count=[index, len(request["destinations"])])
         before = _stat(target)
         if request.get("original"):
             from cadgen.engine.export.viewer import original
@@ -381,6 +384,28 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
         drawn = _occt(source.path or out.with_suffix(".xbf"), out, Still.from_json(options["still"]),
                       False, source, time.perf_counter())
     return {"reports": built, "files": files, "drawn": drawn}
+
+
+def job_progress(send: Callable[[dict[str, Any]], None], request: dict[str, Any], *,
+                 cwd: str | None = None) -> Any:
+    """An ``export`` request's progress (``progress.py``), each frame to ``send``: a snapshot's for a
+    request that draws (``draw``, ``draw_still``), an export's otherwise, named for what it is of --
+    a model as its report names it (``script::function``), a held document by its name, a file by
+    its name -- and the files it writes (its destinations, or its picture)."""
+    from cadgen.engine.progress import Progress
+
+    source = request["source"]
+    drawing = request.get("draw") or request.get("draw_still")
+    said = Progress(send, kind="snapshot" if drawing else "export", script=source.get("script"),
+                    cwd=cwd or request.get("cwd"))
+    if source.get("script"):
+        said.job = said.name(source["script"], source.get("function"))
+    elif source.get("path"):
+        said.job = Path(source["path"]).name
+    else:
+        said.job = str(source.get("name") or source.get("id") or "")
+    said.outputs = [str(drawing["out"])] if drawing else [str(path) for path in request.get("destinations") or []]
+    return said
 
 
 def _stat(path: Path) -> tuple[int, int, int] | None:
@@ -483,7 +508,7 @@ def main() -> int:
     from cadgen.engine.progress import Progress, building
 
     def progress(ident: Any, **where: Any) -> Progress:
-        """A request's progress, each frame sent as ``{"id", "progress"}`` (``progress.py``)."""
+        """A build request's progress, each frame sent as ``{"id", "progress"}`` (``progress.py``)."""
         return Progress(lambda frame: send({"id": ident, "progress": frame}), **where)
 
     requests: "queue.Queue[dict[str, Any] | None]" = queue.Queue()
@@ -569,9 +594,8 @@ def main() -> int:
                 cwd = request.get("cwd")
                 os.chdir(cwd or home)
                 if op == "export":
-                    source = request["source"]
-                    said = progress(ident, script=source.get("script"), cwd=cwd)
-                    said.model = said.name(source.get("script") or source.get("path"))
+                    # An export's frames, or a snapshot's for a request that draws (``job_progress``).
+                    said = job_progress(lambda frame: send({"id": ident, "progress": frame}), request, cwd=cwd)
                     with building(said):
                         done = _export(request, lambda text: send({"id": ident, "log": text}))
                     said.attach(done.get("reports") or [])

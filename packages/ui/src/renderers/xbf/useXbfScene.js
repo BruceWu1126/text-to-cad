@@ -5,12 +5,18 @@ import { loadXbfDocument, waitForXbfVersion } from "@text-to-cad/core/lib/xbf/xb
 import { createXbfScene } from "@text-to-cad/core/lib/xbf/xbfScene.js";
 
 const SERVING = Object.freeze({ phase: "read", label: "Opening document", done: 0, total: 0, determinate: false });
-// A STEP opened as a file is imported first: the engine's reader parses it, then collects its parts
-// (`cadgen.engine.serve`), and says so in frames the page hears (`engineDocument`'s `onProgress`).
-const IMPORTING = Object.freeze({ phase: "import", label: "Importing model", done: 0, total: 0, determinate: false });
 
-/** What the page says of a document before the engine has said anything: a STEP's is an import, any other document's a read. */
-export const openingProgress = file => (/\.(step|stp)$/i.test(String(file || "").split(/[?#]/)[0]) ? IMPORTING : SERVING);
+/**
+ * What the page says of a document before the engine has said anything: a STEP's is an import -- the
+ * engine's reader parses it, then collects its parts (`cadgen.engine.serve`), and says so in progress
+ * events the page hears (`engineDocument`'s `onProgress`), so the page starts on the first of them, the
+ * read (`kit/status/progressEvent.js`); any other document's is a read.
+ */
+export const openingProgress = file => {
+  const path = String(file || "").split(/[?#]/)[0];
+  if (!/\.(step|stp)$/i.test(path)) return SERVING;
+  return { kind: "import", stage: "read", job: path.split(/[\\/]/).pop(), outputs: [], detail: "", done: 0, total: null, elapsedMs: 0 };
+};
 // How long a page waits before asking an engine that stopped answering again.
 const RETRY_MS = 1000;
 // The least time from one ask for the next version to the next: the viewer holds an ask about this

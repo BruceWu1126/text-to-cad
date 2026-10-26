@@ -41,7 +41,10 @@ Once a version is on screen the page waits on the engine for the next (`waitForX
 written again, answers at once. The new version is read with the old one as `previous`: a
 part is fetched once per geometry key, so only the parts the edit changed are fetched, and
 every other part keeps its buffer and the geometry already uploaded. The new scene replaces
-the old when it is ready, so the old one stays on screen meanwhile, reported as an update
-("Updating model…"), never as the loading screen, and the camera stays where it is. An engine
+the old when it is ready, so the old one stays on screen meanwhile, reported as an update --
+the build's own stage while it runs ("Building geometry…", "Writing files 1/5…": the engine's
+progress event, said by its key, [view-updates](view-updates.md#status-placement)), then
+"Updating model…" while the new version is read -- never as the loading screen, and the camera
+stays where it is. An engine
 that stopped answering (stopped, or not yet running) is asked again after a second
 (`RETRY_MS`), which starts it, and the document is read from it as it has it now.

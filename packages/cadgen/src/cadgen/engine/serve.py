@@ -56,10 +56,10 @@ served meanwhile; one rewritten while it is served is read again in the backgrou
 page keeps the old version until the new one is in. Its structure says how long the parse
 took and which process made it (``read``). While a page's first open of a STEP runs, its import
 says where it is on the build's own channel (``importing``, read by ``build_of`` and the
-version route): a frame of ``phase: "import"`` -- ``reading <name> (<size>)`` while the reader
-parses the file, then ``collecting parts`` with ``done`` of ``total`` as the parts' shapes are
-collected (the reader writes its counts to a file the server reads while it waits) -- and
-nothing once the document is in, or what failed.
+version route): progress events of kind ``import`` (``progress.py``) -- ``read`` while the reader
+parses the file, its detail the file and its size, then ``collect`` with ``done`` of ``total`` as
+the parts' shapes are collected (the reader writes its counts to a file the server reads while it
+waits) -- and nothing once the document is in, or what failed.
 
 Meshing runs off the request's thread (``Mesher``): by default on a pool of processes
 started with the first page or view (``warm``) or the first mesh, topology or pose asked, and
@@ -1111,7 +1111,7 @@ class Server:
         last: dict[str, Any] | None = None
         counts = os.path.join(tempfile.gettempdir(), f"cadgen-import-{digest[:16]}-{os.getpid()}.json") if ident else None
         if ident is not None:
-            last = self._import_frame(path, started, f"reading {path.name} ({_megabytes(stat[1])})")
+            last = self._import_frame(path, started, "read", f"{path.name} ({_megabytes(stat[1])})")
             self.importing(ident, last)
         try:
             try:
@@ -1160,21 +1160,25 @@ class Server:
                 now = _import_counts(counts)
                 if now is not None and now != said:
                     said = now
-                    last = self._import_frame(path, started, "collecting parts", said["done"], said["total"])
+                    last = self._import_frame(path, started, "collect", "", said["done"], said["total"])
                     self.importing(ident, last)
 
     @staticmethod
-    def _import_frame(path: Path, started: float, detail: str, done: int = 0, total: int | None = None) -> dict[str, Any]:
-        """A frame of a STEP's import, shaped as a build's (``progress.py``): ``phase`` ``import``,
-        "Importing model", its ``detail`` the stage, counted where the parts are."""
-        return {"model": path.name, "outputs": [], "phase": "import", "label": "Importing model", "detail": detail,
-                "done": done, "total": total, "determinate": total is not None,
-                "elapsedMs": int((time.monotonic() - started) * 1000)}
+    def _import_frame(path: Path, started: float, stage: str, detail: str = "", done: int = 0,
+                      total: int | None = None) -> dict[str, Any]:
+        """A frame of a STEP's import: the progress event (``progress.py``) of kind ``import``, its
+        ``job`` the file's name, its ``stage`` ``read`` (the file and its size the detail) or
+        ``collect`` (counted where the parts are), its time since the import began."""
+        from cadgen.engine.progress import event
+
+        return event("import", stage, job=path.name, detail=detail, done=done, total=total,
+                     elapsed_ms=int((time.monotonic() - started) * 1000))
 
     def importing(self, ident: str, frame: dict[str, Any] | None, failed: dict[str, Any] | None = None) -> None:
         """A STEP's import, as the document's page hears it on the build's channel (``build_of``):
-        its last frame while it runs, None once the document is in, or ``failed`` (``{"model",
-        "error", "progress"}``) when the reader could not read it. Its pages are woken."""
+        its last frame (a progress event of kind ``import``, ``_import_frame``) while it runs, None
+        once the document is in, or ``failed`` (``{"model", "error", "progress"}``) when the reader
+        could not read it. Its pages are woken."""
         with self.load_lock:
             state = self.builds.setdefault(ident, {"building": None, "failed": None, "progress": 0})
             state.update(building=frame, failed=failed, progress=state["progress"] + 1)
@@ -1289,9 +1293,10 @@ class Server:
         return found
 
     def building(self, frame: dict[str, Any], documents: list[str]) -> None:
-        """A build's progress frame (``progress.py``): each served model document among
-        ``documents`` (the ones the build is building) is being built, as the frame says, and its
-        pages are woken. A file the frame's ``outputs`` name is no document of the build's."""
+        """A build's progress frame (``progress.py``, a progress event of kind ``build``): each served
+        model document among ``documents`` (the ones the build is building) is being built, as the
+        frame says, and its pages are woken. A file the frame's ``outputs`` name is no document of
+        the build's."""
         with self.load_lock:
             hit = self._ids(documents)
             for ident in hit:

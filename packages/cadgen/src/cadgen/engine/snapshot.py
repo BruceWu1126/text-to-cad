@@ -66,7 +66,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from cadgen.engine.atomic_replace import replace_atomic, staging
 
@@ -653,7 +653,8 @@ def draw(source: Any, out: Path, *, display: Any = None, camera: Any = None, gri
 def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None, camera: Any = None,
              preview: bool = False, size: tuple[int, int] | None = None, daemon: bool = True,
              pose: Any = None, source: Any = None, annotation: dict[str, Any] | None = None,
-             measurements: list[dict[str, Any]] | None = None, annotation_source: Any = None) -> dict[str, Any]:
+             measurements: list[dict[str, Any]] | None = None, annotation_source: Any = None,
+             progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
     """Draw ``document`` -- an ``.xbf`` or a ``.step`` the engine serves and meshes, or a file its
     reader reads (``FILES``: a mesh, a robot, a drawing) -- into ``out`` (a ``.png``); returns what
     was drawn and how long each stage took. ``pose``: a configuration's name (a robot's group
@@ -665,12 +666,15 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
     drawn in, read from the Quick Edit packet ``annotation_source`` is (or is beside: ``authored``),
     and its size and projection unless ``size`` and ``display.camera`` say otherwise. ``size`` None
     is the default size. Raises ``SnapshotRefused`` for a request it will not draw, before
-    rendering; one refused or failed leaves the file at ``out`` as it was (``write_png``)."""
+    rendering; one refused or failed leaves the file at ``out`` as it was (``write_png``). Where the
+    picture is goes to ``progress`` where one is given, a frame each stage (``progress.py``: ``scene``,
+    ``draw``, ``write``); inside a job of this process's (a worker's request) its frames are that
+    job's."""
     started = time.perf_counter()
     document, out = Path(document).resolve(), Path(out).resolve()
     return _snapshot(document, out, display=display, camera=camera, preview=preview, size=size, daemon=daemon,
                      pose=pose, source=source, annotation=annotation, measurements=measurements,
-                     annotation_source=annotation_source, started=started)
+                     annotation_source=annotation_source, started=started, progress=progress)
 
 
 def _checked(document: Path, out: Path, source: Any = None) -> str:
@@ -694,7 +698,8 @@ def _checked(document: Path, out: Path, source: Any = None) -> str:
 
 def _snapshot(document: Path, out: Path, *, display: dict[str, Any] | None, camera: Any, preview: bool,
               size: tuple[int, int] | None, daemon: bool, pose: Any, source: Any, annotation: dict[str, Any] | None,
-              measurements: list[dict[str, Any]] | None, annotation_source: Any, started: float) -> dict[str, Any]:
+              measurements: list[dict[str, Any]] | None, annotation_source: Any, started: float,
+              progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
     suffix = _checked(document, out, source)
     framed, exact, view = authored(camera, annotation, annotation_source, document)
     display = dict(display or {})
@@ -709,46 +714,68 @@ def _snapshot(document: Path, out: Path, *, display: dict[str, Any] | None, came
         raise SnapshotRefused(f"--pose poses a document's mechanism; {document.name} is a mesh and has none")
     if not out.parent.is_dir():
         out.parent.mkdir(parents=True, exist_ok=True)
-    return _occt(document, out, still, daemon, source, started)
+    return _occt(document, out, still, daemon, source, started, progress)
 
 
-def _occt(document: Path, out: Path, still: Still, daemon: bool, source: Any, started: float) -> dict[str, Any]:
+def _job_scope(document: Path, outputs: list[Path], progress: Callable[[dict[str, Any]], None] | None) -> Any:
+    """The job whose frames a picture's stages are (``progress.say``): this process's where one runs
+    (a worker's request, a job's pictures) -- left as it is -- else a snapshot job of its own for the
+    document (named by its id, or its file's name) and its pictures, each frame to ``progress``
+    (``progress.building``)."""
+    from cadgen.engine import progress as progressing
+
+    if progressing.current() is not None:
+        return contextlib.nullcontext()
+    job = os.fspath(document) if _by_id(document) else document.name
+    return progressing.building(progressing.Progress(progress or (lambda _frame: None), kind="snapshot", job=job,
+                                                     outputs=[str(path) for path in outputs]))
+
+
+def _occt(document: Path, out: Path, still: Still, daemon: bool, source: Any, started: float,
+          progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
     """A document drawn by OCCT from the engine's meshes, or a file from what its reader read
     (``render/service.py``): by the daemon's render process for it, warm, or in this process
     (``daemon=False``, a model's own document from its worker's memory). The answer is the PNG's
     bytes; this writes the one file. A document named by its id is drawn by the engine from what
-    it holds (``api._source``): read, never built."""
-    if _by_id(document) and source is None:
-        from cadgen.engine import api
+    it holds (``api._source``): read, never built. Its stages are said as the picture reaches them
+    (``progress.py``): the daemon's or the worker's frames relayed to ``progress``, this process's
+    said by itself (``_job_scope``), and ``write`` as the file is written."""
+    from cadgen.engine.progress import say
 
-        spec = api._source(str(document))
-        drawn = api._exported({"op": "export", "source": spec, "destinations": [],
-                               "draw_still": {"out": str(out), "still": still.as_json()},
-                               "cwd": os.getcwd()}, spec, lambda _text: None, daemon)["drawn"]
-        return {**drawn, "document": str(document)}  # the id it was named by, not the worker's stand-in
-    if daemon and source is None:
-        from cadgen.engine.client import request
+    with _job_scope(document, [out], progress):
+        if _by_id(document) and source is None:
+            from cadgen.engine import api
 
-        answer = request({"op": "draw", "path": str(document), "still": still.as_json()})
-        if answer is None:
-            raise RuntimeError("no engine daemon")
-        if "refused" in answer:
-            raise SnapshotRefused(answer["refused"])
-        if "failed" in answer:
-            raise RuntimeError(answer["failed"])
-        data, report = base64.b64decode(answer["png"]), answer["report"]
-    else:
-        from cadgen.engine.formats import FormatError
-        from cadgen.engine.render.service import draw_here
+            spec = api._source(str(document))
+            drawn = api._exported({"op": "export", "source": spec, "destinations": [],
+                                   "draw_still": {"out": str(out), "still": still.as_json()},
+                                   "cwd": os.getcwd()}, spec, lambda _text: None, daemon, progress)["drawn"]
+            return {**drawn, "document": str(document)}  # the id it was named by, not the worker's stand-in
+        if daemon and source is None:
+            from cadgen.engine.client import request
 
-        try:
-            data, report = draw_here(document, still, source=source)
-        except FormatError as error:
-            raise SnapshotRefused(str(error)) from None
-    # A build's document held in memory, no file of it (``draw``), is served under a name made from
-    # ``out``: a path no file is at, which the report never names.
-    stand_in = source is not None and getattr(source, "path", None) is None
-    return _written(document, out, data, report, started, named=None if stand_in else str(document))
+            answer = request({"op": "draw", "path": str(document), "still": still.as_json(), "out": str(out)},
+                             on_progress=progress)
+            if answer is None:
+                raise RuntimeError("no engine daemon")
+            if "refused" in answer:
+                raise SnapshotRefused(answer["refused"])
+            if "failed" in answer:
+                raise RuntimeError(answer["failed"])
+            data, report = base64.b64decode(answer["png"]), answer["report"]
+        else:
+            from cadgen.engine.formats import FormatError
+            from cadgen.engine.render.service import draw_here
+
+            try:
+                data, report = draw_here(document, still, source=source)
+            except FormatError as error:
+                raise SnapshotRefused(str(error)) from None
+        # A build's document held in memory, no file of it (``draw``), is served under a name made from
+        # ``out``: a path no file is at, which the report never names.
+        stand_in = source is not None and getattr(source, "path", None) is None
+        say("write", detail=out.name)
+        return _written(document, out, data, report, started, named=None if stand_in else str(document))
 
 
 def _written(document: Path, out: Path, data: bytes, report: dict[str, Any], started: float, *,
@@ -968,46 +995,53 @@ def job_pictures(job: Any, source: Any = None, *, display: Any = None, camera: A
     return pictures
 
 
-def draw_pictures(pictures: list[tuple[Path, Path, Still]], *, daemon: bool = True) -> list[dict[str, Any]]:
+def draw_pictures(pictures: list[tuple[Path, Path, Still]], *, daemon: bool = True,
+                  progress: Callable[[dict[str, Any]], None] | None = None) -> list[dict[str, Any]]:
     """A job's pictures drawn (``job_pictures``), each written to its file: through the daemon, a
     render process warm for each file, or in this process, each file served once for all its
     pictures. All or nothing: every picture is drawn into a staged file beside its output, and
     the staged files are moved over the outputs only once every one is drawn. A picture that
-    fails leaves every output as it was and removes only the staged files (``_staged``)."""
+    fails leaves every output as it was and removes only the staged files (``_staged``). Where
+    each picture is goes to ``progress`` (``snapshot``'s frames)."""
     with contextlib.ExitStack() as stages:  # each picture's staging folder, gone with the job
         staged = []
         for document, out, still in pictures:
             out.parent.mkdir(parents=True, exist_ok=True)
             staged.append((document, out, stages.enter_context(staging(out)), still))
-        drawn = _draw_staged(staged, daemon)
+        drawn = _draw_staged(staged, daemon, progress)
         for (_document, out, stage, _still), found in zip(staged, drawn):
             replace_atomic(stage, out)
             found["output"] = str(out)
         return drawn
 
 
-def _draw_staged(staged: list[tuple[Path, Path, Path, Still]], daemon: bool) -> list[dict[str, Any]]:
+def _draw_staged(staged: list[tuple[Path, Path, Path, Still]], daemon: bool,
+                 progress: Callable[[dict[str, Any]], None] | None = None) -> list[dict[str, Any]]:
     """Each picture of a job drawn into its staged file (``draw_pictures``)."""
     if daemon or any(_by_id(document) for document, _out, _stage, _still in staged):
-        return [_occt(document, stage, still, daemon, None, time.perf_counter())
+        return [_occt(document, stage, still, daemon, None, time.perf_counter(), progress)
                 for document, _out, stage, still in staged]
     from cadgen.engine.formats import FormatError
+    from cadgen.engine.progress import say
     from cadgen.engine.render.service import draw_here_each
 
     drawn: list[dict[str, Any]] = []
     at = 0
     while at < len(staged):
         document = staged[at][0]
-        # The pictures of one file in a row, drawn from one serve of it.
+        # The pictures of one file in a row, drawn from one serve of it: one snapshot job, its stages
+        # said once for the serve and the scene, then per picture (``draw_here_each``, ``say``).
         group = staged[at:at + next((n for n, picture in enumerate(staged[at:]) if picture[0] != document),
                                     len(staged) - at)]
         started = time.perf_counter()
-        try:
-            answers = draw_here_each(document, [still for _document, _out, _stage, still in group])
-        except FormatError as error:
-            raise SnapshotRefused(str(error)) from None
-        drawn += [_written(document, stage, data, report, started)
-                  for (_document, _out, stage, _still), (data, report) in zip(group, answers)]
+        with _job_scope(document, [out for _document, out, _stage, _still in group], progress):
+            try:
+                answers = draw_here_each(document, [still for _document, _out, _stage, still in group])
+            except FormatError as error:
+                raise SnapshotRefused(str(error)) from None
+            for index, ((_document, out, stage, _still), (data, report)) in enumerate(zip(group, answers)):
+                say("write", detail=out.name, count=[index, len(group)] if len(group) > 1 else None)
+                drawn.append(_written(document, stage, data, report, started))
         at += len(group)
     return drawn
 

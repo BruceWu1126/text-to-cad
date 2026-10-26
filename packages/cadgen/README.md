@@ -276,8 +276,10 @@ Quick Edit packet.
 Start with a unique `requestId` (16–100 letters, digits, underscores or hyphens).
 A start is checked whole before anything is queued: a refusal names every argument
 missing and every one the tool does not take, and the shape it takes, in one line.
-The result carries `id`, `epoch`, `state`, `sequence`, stage/progress and, when done,
-`result` or `error`. Use the same tool with `action: "status"`, `operationId` and
+The result carries `id`, `epoch`, `state`, `sequence`, `stage` and `progress` -- the engine's
+latest progress event for the operation, the one shape every job the engine runs says where it is
+in (the engine's **Progress**: `{kind, stage, job, outputs, detail, done, total, elapsedMs}`), and
+its stage's words -- and, when done, `result` or `error`. Use the same tool with `action: "status"`, `operationId` and
 `epoch`; `waitMs` (up to 25000) waits for the result, on a start or a status, or with
 `afterSequence` for the next change. A retry
 with the same request ID joins the identical operation; changed arguments are

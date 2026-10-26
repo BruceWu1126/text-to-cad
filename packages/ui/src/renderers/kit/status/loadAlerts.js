@@ -7,6 +7,7 @@
 // language of the `t` a renderer hands over (English unless it does); the diagnostic in
 // `details` stays English, as it is reported.
 import { english } from "../../../i18n/core.js";
+import { isProgressEvent, progressKey } from "./progressEvent.js";
 
 export function isViewerServiceFailure(failure, detail) {
   const kind = String(failure?.kind || "").toLowerCase();
@@ -88,17 +89,19 @@ export function failureAlert(fileRef, error, failure, compile = false, t = engli
 
 /**
  * The file's last build failed (`failed`: the engine's record of it -- the model, its error and the
- * stage it reached): over a model on screen, the last version that built, the card is no block and
- * can be put away; the error is said, and held whole in the details. The view updates by itself
- * when a build succeeds, so there is nothing to retry here.
+ * stage it reached, its last progress event): over a model on screen, the last version that built,
+ * the card is no block and can be put away; the error is said, and held whole in the details (the
+ * stage in English, as the details are). The view updates by itself when a build succeeds, so there
+ * is nothing to retry here.
  * @param {string} fileRef
- * @param {{ model?: string, error?: string, progress?: { label?: string, detail?: string } | null }} failed
+ * @param {{ model?: string, error?: string, progress?: { kind?: string, stage?: string, detail?: string } | null }} failed
  * @param {boolean} hasModel  A version of the file is on screen.
  * @param {(key: string, params?: Record<string, unknown>) => string} [t]
  */
 export function buildFailedAlert(fileRef, failed, hasModel, t = english) {
   const error = String(failed?.error || "").trim() || t("alert.build.noDiagnostic");
-  const stage = [failed?.progress?.label, failed?.progress?.detail].filter(Boolean).join(" · ");
+  const reached = isProgressEvent(failed?.progress) ? english(progressKey(failed.progress)) : "";
+  const stage = [reached, failed?.progress?.detail].filter(Boolean).join(" · ");
   const details = [`File: ${fileRef}`, failed?.model && `Model: ${failed.model}`, stage && `Stage: ${stage}`,
     "Operation: building the model", error].filter(Boolean).join("\n");
   // What was raised, the traceback's last line; the traceback itself is in the details.

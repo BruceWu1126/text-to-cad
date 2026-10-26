@@ -80,6 +80,18 @@ where there is no strip (preview, a load), without changing scheduling. It appea
 “Preparing section view…” for Clip), stays nonmodal, and never disables controls.
 Fast changes produce no spinner. Failures show a retry action.
 
+A job the engine runs behind the view -- a build rewriting the model on screen, a STEP's import
+before anything is on screen -- says where it is in the engine's one progress event
+(`kit/status/progressEvent.js`: `{kind, stage, job, outputs, detail, done, total, elapsedMs}`, the
+engine's `progress.py`). The page reads its `kind` and `stage` and nothing of the engine's words: the
+status line says `t("progress.<kind>.<stage>")` with the count where the stage has one ("Writing
+files 1/2…", `modelUpdateStatus` and `statusLine`), and the loading overlay says the same key with
+its fraction (`loadingState.js`), each in the view's language (`i18n/locales`, a key per stage of
+every kind, held to the engine's vocabulary by `tests/python/global/test_progress_vocabulary_sync.py`).
+A stage with no countable units says its stage alone; the page never times, guesses or invents a
+fraction. The page's own loading steps (`Finding file`, `Loading geometry`, …) keep their closed
+vocabulary beside it (`statusLabels.js`).
+
 Tests cover latest-request wins, cancellation back to the visible recipe,
 serialized reconciliation, failure/retry, capture readiness, disposal, and
 StrictMode/control independence. Real browser checks must also exercise cold

@@ -411,8 +411,10 @@ FileViewer opens a file's document when the file is shown, and again only on `re
 renderer follows its file itself. A CAD renderer (its document from
 `prepareWorkspaceEntry`) reads the live catalog entry, so a content change — or a write
 that briefly empties the file — loads the next revision behind the model on screen, under
-"Updating model…" (a drawing's: "Updating drawing…"). Once a model has been shown, a
-rebuild is an update, never the loading screen.
+"Updating model…" (a drawing's: "Updating drawing…"); an engine document's rebuild says the
+build's own stage while it runs ("Building geometry…", "Writing files 1/5…": the engine's
+progress event, [view-updates](view-updates.md#status-placement)). Once a model has been shown,
+a rebuild is an update, never the loading screen.
 
 State remains controlled through FileViewer props, and everything the viewer keeps
 is the tab's (`@text-to-cad/ui/tab-store`): one record per tab, `{ version, settings,

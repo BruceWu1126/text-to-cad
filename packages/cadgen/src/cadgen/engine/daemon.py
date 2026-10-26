@@ -439,13 +439,12 @@ builds no script until a build takes it (``adopt``)."""
         self.on_progress = on_progress
         self.on_saved = on_saved
         self.saves = itertools.count(1)
-        # The running request's last progress frame.
+        # The running request's last progress frame (``progress.py``: a build's, an export's or a snapshot's).
         self.progress: dict[str, Any] | None = None
         # When the running build began (``time.time()``), None while no build runs; and the requests
         # queued behind it, each sent its progress frames as its own build would be (``Daemon.behind``).
         self.building: float | None = None
         self.followers: list[Callable[[dict[str, Any]], None]] = []
-        self.document_read = False
         self.answers: "queue.Queue[dict[str, Any] | None]" = queue.Queue()
         self.started = time.time()
         self.builds = 0
@@ -581,7 +580,6 @@ builds no script until a build takes it (``adopt``)."""
               payload: bytes = b"") -> dict[str, Any]:
         with self.lock:
             self.sink = send
-            self.document_read = bool(request.get("expected"))
             self.progress = None
             self.building = time.time() if request.get("op") == "build" else None
             try:
@@ -604,7 +602,6 @@ builds no script until a build takes it (``adopt``)."""
                 raise WorkerGone(str(error)) from error
             finally:
                 self.sink = None
-                self.document_read = False
                 self.building = None
 
     def stop(self) -> None:
@@ -1711,12 +1708,13 @@ class Daemon:
                       on_saved=self.models.cache.saved)
 
     def progressed(self, _worker: Worker, frame: dict[str, Any]) -> None:
-        """A build's progress frame: the pages waiting on the model document it builds are woken
-        with it (``serve.Server.building``). A file it writes is no document of the build's: a page
-        serving it follows its bytes, and hears nothing of the run."""
+        """A worker's progress frame (``progress.py``): a build's wakes the pages waiting on the model
+        document it builds (``serve.Server.building``). An export's or a snapshot's is the request's,
+        never its document's build, and reaches its caller alone; a file a build writes is no document
+        of the build's: a page serving it follows its bytes, and hears nothing of the run."""
         server = self.server
-        if server is not None and not _worker.document_read:
-            documents = self.models.paths(_worker, frame.get("model"))
+        if server is not None and frame.get("kind") == "build":
+            documents = self.models.paths(_worker, frame.get("job"))
             if documents:
                 server.building(frame, documents)
 
@@ -1749,8 +1747,8 @@ class Daemon:
                         "model": identity, "error": child.get("error"), "progress": frame}
         if "failed" in answer:
             frame = worker.progress or {}
-            outcomes = {path: {"model": frame.get("model"), "error": answer["failed"], "progress": frame}
-                        for path in [*outcomes, *self.models.paths(worker, frame.get("model"))]}
+            outcomes = {path: {"model": frame.get("job"), "error": answer["failed"], "progress": frame}
+                        for path in [*outcomes, *self.models.paths(worker, frame.get("job"))]}
         if outcomes:
             server.built(outcomes)
 
@@ -1760,7 +1758,7 @@ class Daemon:
         from cadgen.engine.progress import describe
 
         frame = worker.progress if worker is not None else None
-        return f"{error}, at {frame.get('model')}: {describe(frame)}" if frame else str(error)
+        return f"{error}, at {frame.get('job')}: {describe(frame)}" if frame else str(error)
 
     def lease(self, script: str, environment: dict[str, str], cwd: str | None = None,
               loading: Callable[[str], None] | None = None) -> Worker:
@@ -2224,20 +2222,26 @@ class Daemon:
             send({"failed": f"unknown request {op!r}"})
 
     def draw(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
-        """A picture of a document (``{"op": "draw", "path", "still"}``, a ``snapshot.Still``):
-        served, meshed by the daemon's pool, drawn by its render process; answered with the PNG
-        (base64) and what was drawn, or refused by name."""
+        """A picture of a document (``{"op": "draw", "path", "still", "out"}``, a ``snapshot.Still``
+        and the picture's path): served, meshed by the daemon's pool, drawn by its render process;
+        answered with the PNG (base64) and what was drawn, or refused by name. Where it is goes to the
+        caller as it draws, a snapshot's progress frames (``progress.py``: ``scene`` while the
+        document is served, meshed and held by its render process, ``draw`` while the frame is drawn),
+        as a build's frames go to its caller."""
+        from cadgen.engine.progress import Progress
         from cadgen.engine.render.service import Refused, Renders, answer_png
 
         with self.busy_lock:
             self.busy += 1
+        said = Progress(lambda frame: send({"progress": frame}), kind="snapshot", job=Path(request["path"]).name,
+                        outputs=[request["out"]] if request.get("out") else [])
         try:
             server = self.serve(request)
             with self.serving:
                 if self.renders is None:
                     self.renders = self.pool.renders = Renders(server)
             try:
-                data, report = self.renders.draw(Path(request["path"]), request["still"])
+                data, report = self.renders.draw(Path(request["path"]), request["still"], said)
             except Refused as error:
                 send({"refused": str(error)})
                 return
@@ -2246,6 +2250,7 @@ class Daemon:
                 return
             send({"ok": True, "report": report, "png": answer_png(data)})
         finally:
+            said.close()
             with self.busy_lock:
                 self.busy -= 1
             self.touch()

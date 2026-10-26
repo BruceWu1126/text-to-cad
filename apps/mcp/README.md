@@ -75,7 +75,13 @@ all presentations, including text-only hosts. They use the Python operations,
 not page state. Each tool starts work with a request ID and polls or cancels its
 own operation; there is no `cad_job` tool. See the
 [operation contract](../../packages/cadgen/README.md#agent-operations) for progress,
-retry, cancellation and explicit server-host destinations. No tool builds source
+retry, cancellation and explicit server-host destinations. An operation's status carries where the
+engine is as the engine's own progress event -- `progress`, `{kind, stage, job, outputs, detail, done,
+total, elapsedMs}`, the latest it said (an export's `read` and `write`, a snapshot's `scene`, `draw`
+and `write`, an inspection's `measure`, counted where the stage has units) -- and the stage's words
+as `stage`; a status asked with `afterSequence` wakes with each event, as it wakes with the result.
+The same event is what a view's status line says of a build behind the model it shows
+(`@text-to-cad/ui`'s `kit/status`, in the view's language), so a card and an agent read one shape. No tool builds source
 text: to build a shape, wrap the shape in a decorated function and run its script.
 Inspection never builds. The web viewer's Export is a browser download; this page has no Export, having no HTTP origin to download from.
 
