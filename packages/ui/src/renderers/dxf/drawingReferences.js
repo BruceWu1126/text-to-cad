@@ -1,3 +1,4 @@
+import { english } from "../../i18n/core.js";
 /**
  * What a drawing's picks are called, and what the viewer says of them: a DXF's references.
  *
@@ -24,22 +25,23 @@ export function drawingHandleOf(id) {
   return match ? match[1].toUpperCase() : "";
 }
 
-const TYPE_NAMES = Object.freeze({
-  LINE: "Line", ARC: "Arc", CIRCLE: "Circle", ELLIPSE: "Ellipse", SPLINE: "Spline", LWPOLYLINE: "Polyline",
-  POLYLINE: "Polyline", POINT: "Point", TEXT: "Text", MTEXT: "Text", HATCH: "Hatch", SOLID: "Solid",
-  DIMENSION: "Dimension", LEADER: "Leader", MULTILEADER: "Leader", INSERT: "Block", IMAGE: "Image",
-  WIPEOUT: "Wipeout", RAY: "Ray", XLINE: "Construction line", "3DFACE": "Face", TRACE: "Trace"
+// Each DXF type's name as a person says it, by its key (`drawing.type.*`); the type itself is the DXF's.
+const TYPE_KEYS = Object.freeze({
+  LINE: "line", ARC: "arc", CIRCLE: "circle", ELLIPSE: "ellipse", SPLINE: "spline", LWPOLYLINE: "polyline",
+  POLYLINE: "polyline", POINT: "point", TEXT: "text", MTEXT: "text", HATCH: "hatch", SOLID: "solid",
+  DIMENSION: "dimension", LEADER: "leader", MULTILEADER: "leader", INSERT: "block", IMAGE: "image",
+  WIPEOUT: "wipeout", RAY: "ray", XLINE: "constructionLine", "3DFACE": "face", TRACE: "trace"
 });
 
-/** An entity's kind, as a person says it: "Circle", "Block BOLT", or its DXF type for anything rarer. */
-export function entityKind(entity) {
+/** An entity's kind, as a person says it in `t`'s language: "Circle", "Block BOLT", or its DXF type for anything rarer. */
+export function entityKind(entity, t = english) {
   const type = String(entity?.type || "");
-  if (type === "INSERT") return entity.block ? `Block ${entity.block}` : "Block";
-  return TYPE_NAMES[type] || type || "Entity";
+  if (type === "INSERT") return entity.block ? t("drawing.blockNamed", { name: entity.block }) : t("drawing.type.block");
+  return TYPE_KEYS[type] ? t(`drawing.type.${TYPE_KEYS[type]}`) : type || t("drawing.entity");
 }
 
 /** An entity as Quick Edit's chip names it: its kind, on its layer. */
-export const entityName = entity => `${entityKind(entity)} on ${entity.layer || "0"}`;
+export const entityName = (entity, t = english) => t("drawing.onLayer", { kind: entityKind(entity, t), layer: entity.layer || "0" });
 
 const round = value => String(Math.round(Number(value) * 1e4) / 1e4);
 
@@ -48,17 +50,17 @@ const round = value => String(Math.round(Number(value) * 1e4) / 1e4);
  * and DXF type, its layer, the block an INSERT places, a circle's or arc's centre and radius.
  * @param {import("@text-to-cad/core/lib/drawing2d/drawing.js").DrawingEntity} entity
  */
-export function describeEntity(entity, unit = "") {
+export function describeEntity(entity, unit = "", t = english) {
   const units = unit ? ` ${unit}` : "";
   return {
-    name: entityName(entity),
+    name: entityName(entity, t),
     facts: [
-      { label: "Handle", value: entity.handle },
-      { label: "Type", value: entity.type || "—" },
-      { label: "Layer", value: entity.layer || "0" },
-      ...(entity.block ? [{ label: "Block", value: entity.block }] : []),
-      ...(entity.center ? [{ label: "Centre", value: `${round(entity.center[0])}, ${round(entity.center[1])}` }] : []),
-      ...(entity.radius != null ? [{ label: "Radius", value: `${round(entity.radius)}${units}` }] : [])
+      { label: t("drawing.handle"), value: entity.handle },
+      { label: t("drawing.typeLabel"), value: entity.type || "—" },
+      { label: t("drawing.layer"), value: entity.layer || "0" },
+      ...(entity.block ? [{ label: t("drawing.type.block"), value: entity.block }] : []),
+      ...(entity.center ? [{ label: t("drawing.centre"), value: `${round(entity.center[0])}, ${round(entity.center[1])}` }] : []),
+      ...(entity.radius != null ? [{ label: t("drawing.radius"), value: `${round(entity.radius)}${units}` }] : [])
     ]
   };
 }
@@ -70,9 +72,9 @@ export function describeEntity(entity, unit = "") {
  *
  * @param {import("@text-to-cad/core/lib/drawing2d/drawing.js").PreparedDrawing} drawing
  * @param {{ onHighlight(ink: { hovered: string[], selected: string[] }): void, unit?: string }} options
- *   `onHighlight` is given handles.
+ *   `onHighlight` is given handles; `t` says the entities in the view's language.
  */
-export function createDrawingScene(drawing, { onHighlight, unit = "" }) {
+export function createDrawingScene(drawing, { onHighlight, unit = "", t = english }) {
   const entityOf = id => {
     const handle = drawingHandleOf(id);
     return handle && HANDLE.test(handle) ? drawing.entities.get(handle) || null : null;
@@ -82,7 +84,7 @@ export function createDrawingScene(drawing, { onHighlight, unit = "" }) {
     hasPart: id => entityOf(id) !== null,
     describePart(id) {
       const entity = entityOf(id);
-      return entity ? describeEntity(entity, unit) : null;
+      return entity ? describeEntity(entity, unit, t) : null;
     },
     setHighlight({ hovered = [], selected = [] } = {}) {
       onHighlight({ hovered: handles(hovered), selected: handles(selected) });

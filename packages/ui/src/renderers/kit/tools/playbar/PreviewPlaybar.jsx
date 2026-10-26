@@ -9,15 +9,17 @@ import { cn } from "@text-to-cad/ui/utils";
 import { FLOATING_SURFACE_CLASS } from "../../../../lib/floatingSurface.js";
 import { PREVIEW_FADE_CLASS, usePreviewShown } from "../PreviewChrome.jsx";
 import PlaybackMenu from "../PlaybackMenu.jsx";
-import { AnimationTimeControl, animationControlsHaveContent, formatSeconds } from "./AnimationTimeControl.js";
+import { AnimationTimeControl, animationControlsHaveContent, formatSeconds, playbarWords } from "./AnimationTimeControl.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 const ROUTINES_TRIGGER_CLASS = cn(TOOLBAR_ICON_BUTTON_CLASS, "aria-expanded:bg-sidebar-accent aria-expanded:text-sidebar-accent-foreground");
 
 /** The routines, where there are several: a list from its icon at the playbar's left end, opening up. */
 function RoutineMenu({ runtime, disabled }) {
+  const { t } = useI18n();
   const clips = runtime?.clips || [];
   if (clips.length < 2) return null;
-  const name = runtime.noun && runtime.noun !== "Animation" ? `${runtime.noun}s` : "Routines";
+  const name = playbarWords(runtime, t).list;
   return <DropdownMenu modal={false}>
     <TooltipHint content={name} side="top">
       <DropdownMenuTrigger asChild>
@@ -51,14 +53,15 @@ function RoutineMenu({ runtime, disabled }) {
  */
 export default function PreviewPlaybar({ runtime, autoplay, onAutoplayChange, disabled = false, idle = null }) {
   const shown = usePreviewShown(idle);
+  const { t } = useI18n();
   if (!animationControlsHaveContent(runtime)) return null;
   const playing = runtime.playing === true;
-  const noun = runtime.noun || "Animation";
-  return <div role="toolbar" aria-label={`${noun} playback`} data-preview-playbar="" data-state={shown ? "visible" : "hidden"} {...idle?.hold("playbar")}
+  const words = playbarWords(runtime, t);
+  return <div role="toolbar" aria-label={words.playback} data-preview-playbar="" data-state={shown ? "visible" : "hidden"} {...idle?.hold("playbar")}
     className={cn("absolute bottom-4 left-1/2 z-30 flex w-96 max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-1 px-2 py-1", PREVIEW_FADE_CLASS,
       shown ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0")}>
     <RoutineMenu runtime={runtime} disabled={disabled} />
-    <ToolbarButton tooltip={false} disabled={disabled} label={`${playing ? "Pause" : "Play"} ${noun.toLowerCase()}`} onClick={() => runtime.onPlayToggle?.()}>
+    <ToolbarButton tooltip={false} disabled={disabled} label={playing ? words.pause : words.play} onClick={() => runtime.onPlayToggle?.()}>
       {playing ? <Pause className="size-3.5" strokeWidth={1.5} aria-hidden="true" /> : <Play className="size-3.5" strokeWidth={1.5} aria-hidden="true" />}
     </ToolbarButton>
     <div className="min-w-0 flex-1 px-1">

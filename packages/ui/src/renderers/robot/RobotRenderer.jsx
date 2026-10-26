@@ -30,6 +30,7 @@ import { useLinkSelection } from "./useLinkSelection.js";
 import { useRobotVisibility } from "./useRobotVisibility.js";
 import { useRobotDocument } from "./useRobotDocument.js";
 import { TOOL_SHORTCUTS } from "../kit/tools/toolShortcuts.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 const NO_HANDLES = Object.freeze([]);
 const NO_REFERENCES = Object.freeze([]);
@@ -39,9 +40,9 @@ const menuIcon = Icon => <Icon className="size-3.5" strokeWidth={2} aria-hidden=
 // joints' knobs, as it opens; its links alone; or its knobs alone (a press on the model picks nothing).
 const ROBOT_SELECT_DEFAULT = Object.freeze(["links", "position"]);
 const ROBOT_SELECT_MODES = Object.freeze([
-  { id: "all", label: "All", kinds: ROBOT_SELECT_DEFAULT, icon: menuIcon(MousePointer2) },
-  { id: "links", label: "Links", kinds: ["links"], icon: menuIcon(Box) },
-  { id: "position", label: "Position", kinds: ["position"], icon: menuIcon(PositionIcon) },
+  { id: "all", label: "All", key: "pick.all", kinds: ROBOT_SELECT_DEFAULT, icon: menuIcon(MousePointer2) },
+  { id: "links", label: "Links", key: "pick.links", kinds: ["links"], icon: menuIcon(Box) },
+  { id: "position", label: "Position", key: "pick.position", kinds: ["position"], icon: menuIcon(PositionIcon) },
 ]);
 // Solid, cut by Clip: a robot is posed, never exploded.
 const CLIP_OFF = Object.freeze({ clip: { enabled: false, axis: "x", invert: false } });
@@ -53,14 +54,16 @@ const poseIsSet = pose => Boolean(pose) && Object.entries(pose.getSnapshot().val
 // reads the pose itself, and only whether it is off its defaults: a pose step renders it only when
 // that flips, and never the surface (a pose step renders no component of the renderer).
 function PositionSection({ pose, previewPose, revision }) {
+  const { t } = useI18n();
   const changed = useSyncExternalStore(pose.subscribe, () => !positionValuesAreDefault(pose.getSnapshot().values, pose.defaults));
-  return <ToolPanel id="position" title="Position" label="Position controls" fit="details" changed={changed}>
+  return <ToolPanel id="position" title={t("position.title")} label={t("position.controls")} fit="details" changed={changed}>
     {/* Preview poses its own robot (`previewPose`). */}
     <PositionControls key={`${revision}:${previewPose ? "preview" : "tools"}`} pose={previewPose || pose} />
   </ToolPanel>;
 }
 
 function RobotSurface({ view, data }) {
+  const { t } = useI18n();
   const document = useWorkspaceDocument({ view, data });
   const loaded = useRobotDocument({ entry: document.entry, client: document.client, resources: document.client.resources });
   const robot = loaded.robot;
@@ -113,10 +116,10 @@ function RobotSurface({ view, data }) {
 
   const loadAlert = useMemo(() => {
     if (loaded.error?.alert && !scene) {
-      return { ...failureAlert(document.modelKey, loaded.error.message), ...loaded.error.alert, reason: undefined };
+      return { ...failureAlert(document.modelKey, loaded.error.message, undefined, false, t), ...(loaded.error.alertIn?.(t) ?? loaded.error.alert), reason: undefined };
     }
-    return workspaceLoadAlert({ catalogError: document.catalogError, error: loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene) });
-  }, [document.catalogError, loaded.error, document.modelKey, scene]);
+    return workspaceLoadAlert({ catalogError: document.catalogError, error: loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene), t });
+  }, [document.catalogError, loaded.error, document.modelKey, scene, t]);
 
   // ---- selection -------------------------------------------------------------------------
   const shellRef = useRef(null);
@@ -296,7 +299,7 @@ function RobotSurface({ view, data }) {
   // the robot has loaded that is not known, and it is offered meanwhile); then Annotate, Measure and Clip.
   const sceneTools = useSceneTools({ shell, scene, features, state: tools, measurable: true, clearParts: clearSelection });
   const strip = [
-    shell.tools.own({ id: ROBOT_TOOL.SELECT, label: "Select", shortcut: TOOL_SHORTCUTS.select, icon: SELECT_ICON,
+    shell.tools.own({ id: ROBOT_TOOL.SELECT, label: t("tool.select"), shortcut: TOOL_SHORTCUTS.select, icon: SELECT_ICON,
       // A robot with nothing to pose has one thing to pick, and no menu.
       menu: robot && !posable ? null : <SelectFilterMenu value={selectFilter} modes={ROBOT_SELECT_MODES}
         onChange={value => { setSelectFilter(value); selectTool(ROBOT_TOOL.SELECT); }} /> }),

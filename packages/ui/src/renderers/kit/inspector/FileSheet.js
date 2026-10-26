@@ -3,6 +3,7 @@ import { Children, useEffect, useId, useRef, useState } from "react";
 import { cn } from "@text-to-cad/ui/utils";
 import { Checkbox } from "@text-to-cad/ui/primitives/checkbox";
 import { ColorPicker } from "@text-to-cad/ui/primitives/color-picker";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 export const FILE_SHEET_CONTROL_ROW_CLASSES = "space-y-1 px-2";
 export const FILE_SHEET_ROW_STACK_CLASSES = "space-y-3";
@@ -69,10 +70,11 @@ export function FileSheetSettingRow({ label, children, disabled = false, classNa
 // Figma-like property: the icon/unit carries the visible meaning; its accessible
 // name and shared hover hint keep the exact setting discoverable.
 export function FileSheetNumberProperty({ label, Icon, value, onValueCommit }) {
+  const { t } = useI18n();
   return (
     <TooltipHint content={label}><div  className="flex h-7 min-w-0 items-center gap-1 rounded-md border border-input bg-muted/30 px-2 focus-within:ring-1 focus-within:ring-ring">
       {Icon ? <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : null}
-      <FileSheetValueInput ariaLabel={`${label} value`} value={value} onValueCommit={onValueCommit}
+      <FileSheetValueInput ariaLabel={t("field.value", { name: label })} value={value} onValueCommit={onValueCommit}
         className="h-6 min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 text-left shadow-none focus-visible:ring-0 dark:bg-transparent" />
     </div></TooltipHint>
   );

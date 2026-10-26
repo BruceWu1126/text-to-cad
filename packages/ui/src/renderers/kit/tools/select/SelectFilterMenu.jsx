@@ -15,26 +15,28 @@ const PLURAL = Object.freeze({ vertex: "vertices", edge: "edges", face: "faces" 
  * menu is this one too (`MeasureFilterMenu.jsx`): `name` marks its trigger and rows
  * (`data-<name>-filter-trigger`, `data-<name>-filter`) and `triggerName` names its chevron
  * ("Measure filter"), so the two chevrons on the strip are told apart. The strip's button shows the
- * mode chosen as a badge on the tool's glyph (`modeGlyphs.jsx`'s `ToolModeIcon`).
+ * mode chosen as a badge on the tool's glyph (`modeGlyphs.jsx`'s `ToolModeIcon`). A mode says its `key`
+ * in the view's language where it has one, else its `label`.
  *
  * @param {{ value: readonly string[], onChange(filter: readonly string[]): void,
- *   modes: { id: string, label: string, kinds: readonly string[], icon?: import("react").ReactNode }[],
+ *   modes: { id: string, label: string, key?: string, kinds: readonly string[], icon?: import("react").ReactNode }[],
  *   disabled?: boolean, children?: import("react").ReactNode, name?: string, triggerName?: string }} props
  */
-export default function SelectFilterMenu({ value, onChange, modes, disabled = false, children = null, name = "select", triggerName = "Selection filter" }) {
+export default function SelectFilterMenu({ value, onChange, modes, disabled = false, children = null, name = "select", triggerName }) {
   const { t } = useI18n();
+  const named = modeOf => modeOf.key ? t(modeOf.key) : modeOf.label;
   const mode = pickModeOf(value, modes);
   const controls = useControlUsage();
-  return <ToolSettingsMenu label="Selection filter"
-    triggerLabel={`${triggerName}: ${mode === modes[0] ? "everything" : mode.label}`}
+  return <ToolSettingsMenu label={t("select.filter")}
+    triggerLabel={t("select.filterCurrent", { filter: triggerName ?? t("select.filter"), mode: mode === modes[0] ? t("select.everything") : named(mode) })}
     disabled={disabled} trigger="chevron" triggerProps={{ [`data-${name}-filter-trigger`]: mode === modes[0] ? "all" : mode.id }}>
     <DropdownMenuLabel className="text-tiny font-normal text-muted-foreground">{t("select.pick")}</DropdownMenuLabel>
     <DropdownMenuRadioGroup value={mode.id} onValueChange={id => {
       controls.used(`${name}_filter_${PLURAL[id] ?? id}`);
       onChange([...modes.find(candidate => candidate.id === id).kinds]);
     }}>
-      {modes.map(({ id, label, icon }, index) => <DropdownMenuRadioItem key={id} value={id} {...{ [`data-${name}-filter`]: index === 0 ? "all" : id }}>
-        {icon}{label}
+      {modes.map(({ id, icon, ...rest }, index) => <DropdownMenuRadioItem key={id} value={id} {...{ [`data-${name}-filter`]: index === 0 ? "all" : id }}>
+        {icon}{named(rest)}
       </DropdownMenuRadioItem>)}
     </DropdownMenuRadioGroup>
     {children ? <><DropdownMenuSeparator />{children}</> : null}

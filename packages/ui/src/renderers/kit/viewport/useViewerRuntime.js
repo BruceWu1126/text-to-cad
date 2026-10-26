@@ -1,5 +1,6 @@
 import { createViewportBuffer } from "./viewportBuffer.js";
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { useI18n } from "@text-to-cad/ui/i18n";
 import { isEditableTarget, prefersCoarsePointer } from "./dom.js";
 import {
   isWebGlContextCreationError,
@@ -107,6 +108,10 @@ export function useViewerRuntime({
   runtimeResetToken = 0
 }) {
   const renderModeRef = useRef(renderMode);
+  // The view's language, read when the context is lost (in a listener that does not rerun for it).
+  const { t } = useI18n();
+  const tRef = useRef(t);
+  tRef.current = t;
   renderModeRef.current = renderMode;
   useLayoutEffect(() => {
     if (runtimeRef.current) runtimeRef.current.renderMode = renderMode;
@@ -399,7 +404,7 @@ export function useViewerRuntime({
       const handleContextLost = (event) => {
         event.preventDefault();
         clearKeyboardOrbitState(keyboardOrbitState);
-        setError("WebGL context was lost. Restoring CAD Viewer...");
+        setError(tRef.current("viewer.contextLost"));
       };
       const handleContextRestored = () => {
         interactionState.shadowsDirty = true;

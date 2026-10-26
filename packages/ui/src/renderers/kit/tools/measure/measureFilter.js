@@ -11,9 +11,9 @@
 
 /** The kinds Measure snaps to, in its menu's order. */
 export const MEASURE_SNAP_KINDS = Object.freeze([
-  Object.freeze({ id: "vertex", label: "Vertices" }),
-  Object.freeze({ id: "edge", label: "Edges" }),
-  Object.freeze({ id: "face", label: "Faces" }),
+  Object.freeze({ id: "vertex", label: "Vertices", key: "pick.vertices" }),
+  Object.freeze({ id: "edge", label: "Edges", key: "pick.edges" }),
+  Object.freeze({ id: "face", label: "Faces", key: "pick.faces" }),
 ]);
 
 /** Every kind ticked: a file opens snapping to all three. */

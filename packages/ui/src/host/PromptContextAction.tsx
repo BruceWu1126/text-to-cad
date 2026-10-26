@@ -2,6 +2,7 @@ import { useState, type ComponentProps, type ReactNode } from 'react';
 import type { PromptContext, PromptDeliveryResult } from '@text-to-cad/core/prompt';
 import { Button } from '../primitives/button.jsx';
 import { usePromptDestination, useViewerHost } from './context.js';
+import { useI18n } from '../i18n/index.js';
 
 export interface PromptContextActionProps extends Omit<ComponentProps<typeof Button>, 'onClick' | 'children'> {
   createContext(): PromptContext;
@@ -13,7 +14,8 @@ export interface PromptContextActionProps extends Omit<ComponentProps<typeof But
  * One action, whose environmental delivery is selected by the host. Why it is unavailable is the
  * button's accessible description, not a hover hint: a disabled control has none (settings-ui.md).
  */
-export function PromptContextAction({ createContext, onResult, children, clipboardLabel = 'Copy for prompt', disabled, ...props }: PromptContextActionProps) {
+export function PromptContextAction({ createContext, onResult, children, clipboardLabel, disabled, ...props }: PromptContextActionProps) {
+  const { t } = useI18n();
   const { promptContext } = useViewerHost();
   const destination = usePromptDestination();
   const [pending, setPending] = useState(false);
@@ -27,5 +29,5 @@ export function PromptContextAction({ createContext, onResult, children, clipboa
       catch (error) { delivery = Promise.resolve({ status: 'failed', message: error instanceof Error ? error.message : String(error) }); }
       void delivery.catch((error: unknown): PromptDeliveryResult => ({ status: 'failed', message: error instanceof Error ? error.message : String(error) }))
         .then(result => onResult?.(result)).finally(() => setPending(false));
-    }}>{children ?? (destination.kind === 'composer' ? 'Add to prompt' : clipboardLabel)}</Button>;
+    }}>{children ?? (destination.kind === 'composer' ? t('prompt.addToPrompt') : clipboardLabel ?? t('prompt.copyForPrompt'))}</Button>;
 }

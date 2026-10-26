@@ -9,6 +9,7 @@ import { cn } from "@text-to-cad/ui/utils";
 import { FLOATING_CHROME_SURFACE_CLASS, FLOATING_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
 import { STRIP_BUTTON_CLASS, StripTouchProvider, TOUCH_STRIP_BUTTON_CLASS } from "./stripTouch.js";
 import { ChangedDot } from "./ChangedDot.jsx";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 export { STRIP_BUTTON_CLASS, StripTouchProvider, TOUCH_STRIP_BUTTON_CLASS, useStripButtonClass, useStripTouch } from "./stripTouch.js";
 
@@ -99,13 +100,14 @@ const rule = <span role="separator" aria-orientation="vertical" className="mx-0.
  */
 export default function FloatingToolBar({ tools = [], views = [], touch = false }) {
   // Nothing to hold, no strip: an empty bar is never drawn.
+  const { t } = useI18n();
   if (!tools.length && !views.length) return null;
   if (touch) return <TouchStrip tools={tools} views={views} />;
   // Two sections at most, parted by one thin rule: the tools of the first group, then the rest. The view's
   // controls end the last section the tools have; with one section only, they are the second.
   const sectioned = tools.some((tool, index) => index > 0 && (tool.group || "") !== (tools[index - 1].group || ""));
   return (<div className="relative z-20 flex max-w-full shrink-0 flex-col items-end gap-1" data-cad-toolbar="tools">
-      <div role="group" aria-label="Interaction tools" className={cn(GROUP_CLASS, "flex-wrap")}>
+      <div role="group" aria-label={t("toolbar.tools")} className={cn(GROUP_CLASS, "flex-wrap")}>
         {tools.map((tool, index) => <Fragment key={tool.id}>
           {index > 0 && (tool.group || "") !== (tools[index - 1].group || "") ? rule : null}
           {toolButton(tool)}
@@ -150,6 +152,7 @@ export function touchStripFit(entries, room, { more = false } = {}) {
  * its press, or its popover, which then opens from More.
  */
 function TouchStrip({ tools, views }) {
+  const { t } = useI18n();
   const root = useRef(null);
   const more = useRef(null);
   const [room, setRoom] = useState(Infinity);
@@ -180,7 +183,7 @@ function TouchStrip({ tools, views }) {
   const heldInMore = hidden.some(entry => !entry.view && entry.tool.active === true);
   return <StripTouchProvider value={true}>
     <div ref={root} className="relative z-20 flex max-w-full shrink-0 flex-col items-end gap-1" data-cad-toolbar="tools" data-touch-strip="">
-      <div role="group" aria-label="Interaction tools" className={cn(GROUP_CLASS, "flex-nowrap")}>
+      <div role="group" aria-label={t("toolbar.tools")} className={cn(GROUP_CLASS, "flex-nowrap")}>
         {shownTools.map(({ tool }) => <Fragment key={tool.id}>{toolButton(tool, TOUCH_STRIP_BUTTON_CLASS, true)}</Fragment>)}
         {shownTools.length && shownViews.length ? rule : null}
         {shownViews.length ? <span className="inline-flex items-center gap-1" data-view-controls="">
@@ -188,11 +191,11 @@ function TouchStrip({ tools, views }) {
         </span> : null}
         {hidden.length ? <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
-            <ToolbarButton ref={more} tooltipSide="top" label="More tools" active={heldInMore} className={TOUCH_STRIP_BUTTON_CLASS} data-strip-more="">
+            <ToolbarButton ref={more} tooltipSide="top" label={t("toolbar.more")} active={heldInMore} className={TOUCH_STRIP_BUTTON_CLASS} data-strip-more="">
               <Ellipsis aria-hidden="true" />
             </ToolbarButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" sideOffset={6} collisionPadding={8} aria-label="More tools"
+          <DropdownMenuContent align="end" sideOffset={6} collisionPadding={8} aria-label={t("toolbar.more")}
             className={cn(FLOATING_SURFACE_CLASS, "data-[state=closed]:animate-none!")}
             onCloseAutoFocus={event => {
               // A popover chosen here opens from More once the menu is gone, keeping the focus.

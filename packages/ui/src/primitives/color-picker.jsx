@@ -343,7 +343,7 @@ function ColorPicker({
           role="slider"
           tabIndex={0}
           aria-label={t("colorPicker.saturationBrightness")}
-          aria-valuetext={`${Math.round(colorNumbers.hsv.s)}% saturation, ${Math.round(colorNumbers.hsv.v)}% brightness`}
+          aria-valuetext={t("colorPicker.saturationBrightnessValue", { saturation: Math.round(colorNumbers.hsv.s), brightness: Math.round(colorNumbers.hsv.v) })}
           className="relative h-28 touch-none overflow-hidden rounded-md border shadow-inner outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
           style={{
             backgroundColor: svColor,

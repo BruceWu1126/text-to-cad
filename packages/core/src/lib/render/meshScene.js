@@ -98,8 +98,8 @@ export function createMeshScene(THREE, objects, { units = UNITLESS_SCENE_UNITS }
       const places = path.slice(1).split(".");
       const count = records.reduce((sum, { mesh }) => sum + Math.floor((mesh.geometry.index?.count ?? mesh.geometry.getAttribute("position").count) / 3), 0);
       return { name: objectName(path, records[0].mesh.name), facts: [
-        { label: "Build item", value: places.length > 1 ? `${places[0]}, component ${places.slice(1).join(".")}` : places[0] },
-        { label: "Triangles", value: count.toLocaleString("en-US") }
+        { label: "Build item", key: "part.buildItem", value: places.length > 1 ? `${places[0]}, component ${places.slice(1).join(".")}` : places[0] },
+        { label: "Triangles", key: "part.triangles", value: count.toLocaleString("en-US") }
       ] };
     },
     /** Light 3MF objects: `hovered` and `selected` are their places. */

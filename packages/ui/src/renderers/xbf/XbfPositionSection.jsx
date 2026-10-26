@@ -10,6 +10,7 @@ import {
 } from "../kit/inspector/FileSheet.js";
 import { DEFAULT_POSE_VALUE, KinematicsPoseRow, NO_PRESET_VALUE } from "../kit/inspector/kinematicsControls.jsx";
 import { useControlUsage } from "../../usage/controls.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 // An engine document's Position: the file sidebar's section exactly as a STEP's is (the STEP
 // renderer's `PoseControlsSection.js` and `MotionControlsSection.js`, copied: one again at the
@@ -167,6 +168,7 @@ export default function XbfPositionSection({ kinematics, motion = null, ...own }
 
 function PositionBody({ kinematics, values, couplings = null, preset, changed, onValues, onPreset, onReset, readOnly = false }) {
   const usage = useControlUsage();
+  const { t } = useI18n();
   const controls = xbfPositionRows(kinematics);
   const coupled = xbfCouplingControls(kinematics);
   const shown = couplings || xbfCouplingValues(kinematics, values);
@@ -189,24 +191,24 @@ function PositionBody({ kinematics, values, couplings = null, preset, changed, o
     return <FileSheetSliderField key={control.id} label={control.label}
     labelTitle={title} value={`${formatControlNumber(currentValue)}${unitSuffix(control.unit)}`}
     onValueCommit={text => write(control, parseFileSheetNumberInput(text, { fallback: currentValue, min: control.min, max: control.max }))}
-    valueInputProps={{ ariaLabel: `${control.label} slider value`, disabled: readOnly }}>
+    valueInputProps={{ ariaLabel: t("position.sliderValue", { name: control.label }), disabled: readOnly }}>
     <Slider className={FILE_SHEET_PRECISION_SLIDER_CLASSES} disabled={readOnly} value={[Number(currentValue) || 0]} min={control.min} max={control.max}
       step={controlStep(control)} onValueChange={next => write(control, next?.[0] ?? currentValue)} thumbProps={{ "aria-label": control.label }} />
   </FileSheetSliderField>;
   };
-  return <ToolPanel id="position" title="Position" label="Position controls" fit="details" changed={changed}>
+  return <ToolPanel id="position" title={t("position.title")} label={t("position.controls")} fit="details" changed={changed}>
     <div className="space-y-1.5 pb-1.5 pt-0.5">
       {poseNames.length || controls.length || coupled.length ? <KinematicsPoseRow poses={poseNames.map(name => ({ value: name, label: name }))}
         activeValue={preset} onSelect={onPreset} onReset={onReset} disabled={readOnly} /> : null}
       {coupled.map(control => slider(control, Number(shown[control.coupling]) || 0, couple,
-        `${control.label} · couples ${control.pairs.join(", ")}`))}
+        t("position.couples", { name: control.label, pairs: control.pairs.join(", ") })))}
       {controls.map((control) => {
         const currentValue = values[control.pair]?.[control.index] ?? 0;
         return slider(control, currentValue, change, control.label);
       })}
-      {!controls.length && !coupled.length && !poseNames.length ? <FileSheetStatusText>No pose controls.</FileSheetStatusText> : null}
+      {!controls.length && !coupled.length && !poseNames.length ? <FileSheetStatusText>{t("position.noControls")}</FileSheetStatusText> : null}
       {/* What the document's mechanism cannot pose, where a STEP's sidecar would have refused the joint. */}
-      {[...unposable].map(([label, why]) => <FileSheetStatusText key={label}>{`${label} cannot be posed: ${why}`}</FileSheetStatusText>)}
+      {[...unposable].map(([label, why]) => <FileSheetStatusText key={label}>{t("position.cannotPose", { name: label, reason: why })}</FileSheetStatusText>)}
       {others.map(text => <FileSheetStatusText key={text}>{text}</FileSheetStatusText>)}
     </div>
   </ToolPanel>;

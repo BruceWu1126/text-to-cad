@@ -30,7 +30,7 @@ const PICK_MS = 1500;
 export const QUICK_EDIT_LIMITS = Object.freeze({ minWidth: 208, maxWidth: 640, minHeight: 56, maxHeight: 320 });
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
-const failure = result => (result && (result.status === "failed" || result.status === "cancelled") ? result.message || "The prompt did not go." : "");
+const failure = (result, unsent) => (result && (result.status === "failed" || result.status === "cancelled") ? result.message || unsent : "");
 
 /** Each selected reference by its ids, one a line, as the prompt grammar names them (`promptReferenceIds`). */
 export function quickEditReferenceIds(selection) {
@@ -250,7 +250,7 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
     } catch (caught) { outcome = Promise.reject(caught); }
     setPending(action);
     Promise.resolve(outcome).then(result => {
-      const message = failure(result);
+      const message = failure(result, t("quickEdit.notSent"));
       if (message) throw new Error(message);
       try { host.usage?.used("quickEdit"); } catch { /* counting a use never fails it */ }
       controls.used(`quick_edit_${action}`);
@@ -260,9 +260,9 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
       .finally(() => setPending(""));
   };
   const actions = [
-    { id: "copy", label: "Copy Prompt", hint: "Copy prompt", Icon: Copy },
-    canQueue ? { id: "queue", label: "Queue", hint: "Add to your next message", Icon: ListPlus } : null,
-    canSend ? { id: "send", label: "Send", hint: "Send now", Icon: ArrowUp } : null,
+    { id: "copy", label: t("quickEdit.copyPrompt"), hint: t("quickEdit.copyPromptHint"), Icon: Copy },
+    canQueue ? { id: "queue", label: t("quickEdit.queue"), hint: t("quickEdit.queueHint"), Icon: ListPlus } : null,
+    canSend ? { id: "send", label: t("quickEdit.send"), hint: t("quickEdit.sendHint"), Icon: ArrowUp } : null,
   ].filter(Boolean);
   const primary = actions.at(-1).id;
   // Copy needs no note (the selection, the annotation and the views go as they are); Queue and Send do.
@@ -271,13 +271,13 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
   // the last the primary. On a phone they are as tall as the peek's (40px), a finger's.
   const ctas = () => actions.length === 1
     ? <Button type="button" variant="default" size="sm" className={cn("gap-1.5 text-xs", docked ? "h-10 px-3.5" : "h-7 px-2.5")}
-      aria-label={copied ? "Prompt copied" : undefined} aria-busy={pending === "copy" || undefined} disabled={!actionReady("copy")} onClick={() => run("copy")} data-quick-edit-action="copy">
+      aria-label={copied ? t("quickEdit.promptCopied") : undefined} aria-busy={pending === "copy" || undefined} disabled={!actionReady("copy")} onClick={() => run("copy")} data-quick-edit-action="copy">
       {copied ? <Check className={docked ? "size-4" : "size-3.5"} aria-hidden="true" /> : <Copy className={docked ? "size-4" : "size-3.5"} aria-hidden="true" />}
-      {copied ? "Copied" : "Copy Prompt"}
+      {copied ? t("chip.copied") : t("quickEdit.copyPrompt")}
     </Button>
     : actions.map(({ id, label, hint, Icon }) => <TooltipHint key={id} content={hint} side="bottom">
       <Button type="button" variant={id === primary ? "default" : "secondary"} size="icon-sm" className={docked ? "size-10" : "size-7"}
-        aria-label={id === "copy" && copied ? "Prompt copied" : label} disabled={!actionReady(id)} aria-busy={pending === id || undefined} onClick={() => run(id)} data-quick-edit-action={id}>
+        aria-label={id === "copy" && copied ? t("quickEdit.promptCopied") : label} disabled={!actionReady(id)} aria-busy={pending === id || undefined} onClick={() => run(id)} data-quick-edit-action={id}>
         {id === "copy" && copied ? <Check className={docked ? "size-4" : "size-3.5"} aria-hidden="true" /> : <Icon className={docked ? "size-4" : "size-3.5"} aria-hidden="true" />}
       </Button>
     </TooltipHint>);
@@ -285,7 +285,7 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
   // as tall as the field (the note's own buttons, in colour, are under it once the sheet opens).
   const peekActions = () => actions.map(({ id, label, Icon }) =>
     <Button key={id} type="button" variant="outline" size="icon" className="size-10 shrink-0 bg-background/80"
-      aria-label={id === "copy" && copied ? "Prompt copied" : label} disabled={!actionReady(id)} aria-busy={pending === id || undefined} onClick={() => run(id)} data-quick-edit-peek-action={id}>
+      aria-label={id === "copy" && copied ? t("quickEdit.promptCopied") : label} disabled={!actionReady(id)} aria-busy={pending === id || undefined} onClick={() => run(id)} data-quick-edit-peek-action={id}>
       {id === "copy" && copied ? <Check className="size-4" aria-hidden="true" /> : <Icon className="size-4" aria-hidden="true" />}
     </Button>);
 
@@ -301,7 +301,7 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
   const onPaste = event => {
     event.preventDefault();
     const note = event.currentTarget;
-    insertAtCaret(note, pasteNodes(pastedLines(event.clipboardData?.getData("text/plain"), copiedChips.current), note.ownerDocument, nameReference));
+    insertAtCaret(note, pasteNodes(pastedLines(event.clipboardData?.getData("text/plain"), copiedChips.current), note.ownerDocument, nameReference, t("quickEdit.annotation")));
     readNote(note);
   };
 
@@ -377,9 +377,9 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
   const referenceCount = chips ? 0 : referenceIds.length;
   const wipe = annotation?.clear;
   const annotationChip = useMemo(() => (annotated ? {
-    key: "annotation", label: "Annotation", glyph: "pencil",
+    key: "annotation", label: t("quickEdit.annotation"), glyph: "pencil",
     ...(wipe ? { onRemove: wipe } : {})
-  } : null), [annotated, wipe]);
+  } : null), [annotated, wipe, t]);
   // The chips stand in the order they came — picked or drawn — whatever their kind: each keeps the
   // place it first took, and one that goes and comes back takes a new one at the end.
   const order = useRef(new Map());
@@ -397,7 +397,7 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
       return value;
     } } : chip));
   }, [annotationChip, chips]);
-  const section = open ? <section ref={bindBox} aria-label="Quick Edit" data-quick-edit-box=""
+  const section = open ? <section ref={bindBox} aria-label={t("quickEdit.title")} data-quick-edit-box=""
       // The side column caps the box on a narrow view, clear of the toolbar and sidebar.
       // It opens in 150ms, animate-in's own: a `duration-*` class would also ease every width a drag
       // writes (the transition is of `all`), and the box would trail its corner.
@@ -406,19 +406,19 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
       style={docked ? { height: `calc(${SHEET_OPEN * 100}dvh - ${SHEET_HANDLE_PX + SHEET_BOTTOM_PX}px)` } : undefined}>
       <div className="flex min-h-5 min-w-0 items-center gap-2">
         {/* On a phone the title is a step up: the sheet's own heading. */}
-        {docked ? <h3 className="shrink-0 text-ui font-semibold leading-6 text-foreground">Quick Edit</h3> : <h3 className="shrink-0 pl-0.5 text-xs font-medium leading-5 text-foreground">Quick Edit</h3>}
+        {docked ? <h3 className="shrink-0 text-ui font-semibold leading-6 text-foreground">{t("quickEdit.title")}</h3> : <h3 className="shrink-0 pl-0.5 text-xs font-medium leading-5 text-foreground">{t("quickEdit.title")}</h3>}
         {/* What goes with the note, as it is now; the file always does. */}
         <p className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-tiny text-muted-foreground" data-quick-edit-attachments="">
           {referenceCount ? <TooltipHint content={<span className="block whitespace-pre-line text-left">{referenceIds.join("\n")}</span>}>
             <span tabIndex={0} className="rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/45" data-quick-edit-chip="references">
-              {referenceCount} {referenceCount === 1 ? "ref" : "refs"}
+              {t(referenceCount === 1 ? "quickEdit.ref" : "quickEdit.refs", { count: referenceCount })}
             </span>
           </TooltipHint> : null}
         </p>
         {/* On a phone the sheet's way out is a finger's size, in the foreground. */}
-        {docked ? <Button type="button" variant="ghost" size="icon" className="-mr-1.5 size-8 text-foreground" aria-label="Close Quick Edit" onClick={clearAll}>
+        {docked ? <Button type="button" variant="ghost" size="icon" className="-mr-1.5 size-8 text-foreground" aria-label={t("quickEdit.close")} onClick={clearAll}>
           <X className="size-4" aria-hidden="true" />
-        </Button> : <button type="button" aria-label="Close Quick Edit" className={TOOL_PANEL_BUTTON_CLASS} onClick={clearAll}>
+        </Button> : <button type="button" aria-label={t("quickEdit.close")} className={TOOL_PANEL_BUTTON_CLASS} onClick={clearAll}>
           <X className="size-3" aria-hidden="true" />
         </button>}
       </div>
@@ -439,8 +439,8 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
       <div ref={compose} className="flex flex-col gap-2" data-quick-edit-compose="" aria-hidden={folded || undefined} inert={folded || undefined}>
       <ScrollArea ref={noteBox} data-quick-edit-note-box="" data-vaul-no-drag=""
         className={cn(docked ? "min-h-14 flex-1 [&_[data-slot=scroll-area-viewport]>div]:h-full" : "max-h-40 min-h-14", "w-full rounded-md border border-input bg-background/80 transition-[border-color,box-shadow] focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:focus-within:border-blue-400 dark:focus-within:ring-blue-400/20")}>
-        <div ref={field} role="textbox" aria-multiline="true" aria-label="Describe your changes" tabIndex={0}
-          contentEditable="plaintext-only" suppressContentEditableWarning data-placeholder="Describe your changes" data-quick-edit-note=""
+        <div ref={field} role="textbox" aria-multiline="true" aria-label={t("quickEdit.describeLabel")} tabIndex={0}
+          contentEditable="plaintext-only" suppressContentEditableWarning data-placeholder={t("quickEdit.describeLabel")} data-quick-edit-note=""
           className={cn("min-h-[3.375rem] w-full whitespace-pre-wrap break-words px-2 py-1.5 text-xs leading-5 text-foreground outline-none empty:before:pointer-events-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]", docked && "h-full")}
           onInput={event => readNote(event.currentTarget)} onKeyDown={onKeyDown} onPaste={onPaste} onMouseDown={onNoteMouseDown} />
       </ScrollArea>
@@ -459,7 +459,7 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
     <DrawerContent overlay={false} container={viewerElement?.current || undefined} aria-describedby={undefined}
       onOpenAutoFocus={event => event.preventDefault()} onCloseAutoFocus={event => event.preventDefault()}
       className="h-full data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-none" data-quick-edit-sheet="">
-      <DrawerTitle className="sr-only">Quick Edit</DrawerTitle>
+      <DrawerTitle className="sr-only">{t("quickEdit.title")}</DrawerTitle>
       {section}
     </DrawerContent>
   </Drawer> : null;

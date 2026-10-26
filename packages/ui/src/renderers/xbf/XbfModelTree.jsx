@@ -74,14 +74,16 @@ function findNodeLabel(nodes, selectionId) {
 // The disclosure a row shows: a button, or — while Select's filter decides the tree's shape —
 // the same chevron as a mark nobody can press.
 function Disclosure({ node, open, locked, toggle }) {
+  const { t } = useI18n();
   if (locked) return <span aria-hidden="true" data-disclosure-locked={open ? "open" : "shut"} className="grid h-6 w-3 shrink-0 place-items-center opacity-50"><TreeRowChevron expanded={open}/></span>;
-  return <button type="button" aria-label={`${open ? 'Collapse' : 'Expand'} ${node.label}`} aria-expanded={open}
+  return <button type="button" aria-label={t(open ? "tree.collapse" : "tree.expand", { name: node.label })} aria-expanded={open}
     className="grid h-6 w-3 shrink-0 place-items-center rounded focus-visible:ring-2 focus-visible:ring-ring"
     onClick={()=>toggle(node)}><TreeRowChevron expanded={open}/></button>;
 }
 
 // One row of the tree, the rows under it drawn after it by the list (`visibleRows`).
 function ModelingRow({ node, depth, open, branch, locked, disabled, selected, joinAbove, joinBelow, hiddenByOwner, unavailable, actionsShown, actionsWidth, partControls, toggle, choose }) {
+  const { t } = useI18n();
   const underActions = actionsWidth && (actionsShown ? ROW_NAME_UNDER_ACTIONS.shown : ROW_NAME_UNDER_ACTIONS.hover);
   return <XbfPartMenu node={node} controls={partControls} disabled={disabled}>
     <TreeRowSurface dense active={selected} className={cn('group/row relative gap-0 pr-0', hiddenByOwner && 'opacity-50')}
@@ -89,7 +91,7 @@ function ModelingRow({ node, depth, open, branch, locked, disabled, selected, jo
       onMouseLeave={() => partControls.onHoverTreeNode?.('')} style={{paddingLeft:TREE_ROW_INSET_PX+depth*TREE_INDENT_PX, ...joinedCorners(joinAbove, joinBelow), ...(actionsWidth && {'--row-actions':actionsWidth})}}>
       <TreeRowGuides depth={depth} inset={TREE_ROW_INSET_PX}/>
       {branch && <Disclosure node={node} open={open} locked={locked} toggle={toggle}/>}
-      <TooltipHint content={node.label} overflowOnly><button type="button" aria-label={`Select ${node.label}`} aria-pressed={selected}
+      <TooltipHint content={node.label} overflowOnly><button type="button" aria-label={t("tree.select", { name: node.label })} aria-pressed={selected}
         disabled={disabled || unavailable || !(node.selectionId || node.memberSelectionIds?.length)}
         onClick={event=>{if(event.detail < 2)choose(node,event);}} onDoubleClick={event=>choose(node,event)}
         className={cn('flex h-full min-w-0 flex-1 items-center gap-1 rounded pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40', branch && 'pl-1', underActions)}>
@@ -105,6 +107,7 @@ const MemoModelingRow = memo(ModelingRow);
 
 // A search hit is the tree row without its place in the tree.
 function ModelingSearchRow({ match, index, availability, selected, joinAbove, joinBelow, actionsShown, actionsWidth, cursor, choose, disabled, partControls }) {
+  const { t } = useI18n();
   const {entry,indices}=match,{node}=entry;
   const Icon = icons[node.kind] || Box;
   const {hiddenByOwner,unavailable}=modelTreeSearchChain(index,match.at).reduce(
@@ -114,7 +117,7 @@ function ModelingSearchRow({ match, index, availability, selected, joinAbove, jo
     <TreeRowSurface dense active={selected} cursor={cursor} className={cn('group/row relative gap-0 pr-0', hiddenByOwner && 'opacity-50')}
       onMouseEnter={() => partControls.onHoverTreeNode?.(node.selectionId || '')}
       onMouseLeave={() => partControls.onHoverTreeNode?.('')} style={{...joinedCorners(joinAbove, joinBelow), ...(actionsWidth && {'--row-actions':actionsWidth})}}>
-      <TooltipHint content={`${entry.prefix}${node.label}`} overflowOnly><button type="button" aria-label={`Select ${node.label}`} aria-pressed={selected}
+      <TooltipHint content={`${entry.prefix}${node.label}`} overflowOnly><button type="button" aria-label={t("tree.select", { name: node.label })} aria-pressed={selected}
         disabled={disabled || unavailable || !node.selectionId}
         onClick={event=>{if(event.detail < 2)choose(node,event);}} onDoubleClick={event=>choose(node,event)}
         className={cn('flex h-full min-w-0 flex-1 items-center gap-1 rounded pr-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40', underActions)} style={{paddingLeft:TREE_ROW_INSET_PX}}>
@@ -271,25 +274,25 @@ function XbfModelTree({ tree: presented, active, disabled, mode='all', selectedI
       choose={choose} disabled={disabled} partControls={rowControls}/>;
   };
   // Headed by its filter, always there, then Show all while parts are hidden.
-  return <ToolPanel id="tree" label="Model tree" fit="tree" resizable collapsible={false} hidden={!active}
-    header={<TreeFilterInput label="Filter model" placeholder="Filter…" value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown} dense
+  return <ToolPanel id="tree" label={t("tree.modelTree")} fit="tree" resizable collapsible={false} hidden={!active}
+    header={<TreeFilterInput label={t("tree.filterModel")} placeholder={t("tree.filterPlaceholder")} value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown} dense
       className="px-0 shadow-none" trailing={<>
         {partControls.hiddenPartIds?.length > 0 && <Button disabled={disabled} type="button" variant="ghost" size="sm" className="h-5 shrink-0 px-1.5 text-tiny text-muted-foreground" onClick={partControls.showAllHiddenParts}>{t("tree.showAll")}</Button>}
       </>}/>}>
-    <div className="flex flex-col text-tiny" aria-label="Modeling tree">
-      <div ref={listRef} className="px-1 py-1" aria-label="Model tree area"
+    <div className="flex flex-col text-tiny" aria-label={t("tree.modelingTree")}>
+      <div ref={listRef} className="px-1 py-1" aria-label={t("tree.modelTreeArea")}
         onClick={event=>{if(!disabled && !event.target.closest('li,button,input,[role="menu"]'))onClearSelection?.();}}>
-        {isolatedLabels.length > 0 && <div role="status" aria-label="Isolation" className="mb-1 flex min-h-7 items-center gap-2 rounded-md bg-accent/60 px-2 text-tiny">
+        {isolatedLabels.length > 0 && <div role="status" aria-label={t("tree.isolation")} className="mb-1 flex min-h-7 items-center gap-2 rounded-md bg-accent/60 px-2 text-tiny">
           <Focus className="size-3 shrink-0 text-foreground" aria-hidden="true"/>
-          <TooltipHint content={isolatedLabels.join(', ')} overflowOnly><span className="min-w-0 flex-1 truncate">Isolated: {isolatedLabels.join(', ')}</span></TooltipHint>
+          <TooltipHint content={isolatedLabels.join(', ')} overflowOnly><span className="min-w-0 flex-1 truncate">{t("tree.isolated", { names: isolatedLabels.join(', ') })}</span></TooltipHint>
           <Button disabled={disabled} type="button" variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-tiny" onClick={partControls.onExitAllIsolate}>{t("tree.exitIsolation")}</Button>
         </div>}
-        {searching && <p role="status" className="px-2 py-1 text-micro text-muted-foreground">{found.total > found.matches.length ? `First ${found.matches.length} of ${found.total.toLocaleString()} matches` : `${found.total} ${found.total === 1 ? 'match' : 'matches'}`}</p>}
+        {searching && <p role="status" className="px-2 py-1 text-micro text-muted-foreground">{found.total > found.matches.length ? t("tree.firstMatches", { shown: found.matches.length, total: found.total.toLocaleString() }) : t(found.total === 1 ? "tree.match" : "tree.matches", { count: found.total })}</p>}
         {searching ? found.matches.length
-          ? <VirtualRows key="search" aria-label="Model search results" count={matches.length} rowHeight={rowHeight} pinned={searchPinned}
+          ? <VirtualRows key="search" aria-label={t("tree.searchResults")} count={matches.length} rowHeight={rowHeight} pinned={searchPinned}
             rowKey={at=>matches[at].entry.node.id} rowProps={at=>({className:'min-w-0','data-search-row':matches[at].entry.node.id})} renderRow={renderSearchRow}/>
-          : deferredQuery.trim() && <p className="px-3 py-6 text-center text-tiny text-muted-foreground">{`No part matches “${deferredQuery.trim()}”`}</p>
-        : <VirtualRows key="tree" aria-label="Model" count={rows.length} rowHeight={rowHeight} pinned={treePinned}
+          : deferredQuery.trim() && <p className="px-3 py-6 text-center text-tiny text-muted-foreground">{t("tree.noPartMatch", { query: deferredQuery.trim() })}</p>
+        : <VirtualRows key="tree" aria-label={t("tree.model")} count={rows.length} rowHeight={rowHeight} pinned={treePinned}
           rowKey={at=>rows[at].key} rowProps={at=>({className:'min-w-0','aria-level':rows[at].depth+1,'data-tree-part':rows[at].node.kind === 'part' ? rows[at].node.id : undefined})}
           renderRow={renderTreeRow} registerRow={registerRow}/>}
       </div>

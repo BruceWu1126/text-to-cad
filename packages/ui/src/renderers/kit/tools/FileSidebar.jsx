@@ -11,6 +11,7 @@ import { capturePointer, releasePointer } from "../../../lib/pointerCapture.js";
 import ResizeGrip from "./ResizeGrip.jsx";
 import { ToolStackContext } from "./ToolStack.jsx";
 import { useControlUsage } from "../../../usage/controls.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 import { FILE_SIDEBAR_MIN_WIDTH, TOOL_PANEL_WIDTH, fileSidebarSizeId, clampToolPanelHeight, clampToolPanelWidth, normalizeToolStack } from "./toolStackLayout.js";
 
 const KEY_NUDGE_PX = 16;
@@ -61,6 +62,7 @@ export const SIDEBAR_SLIDE_CLASS = "transition-[translate,opacity] duration-200 
  */
 export default function FileSidebar({ layout: stored, onLayoutChange, hidden = false,
   phone = false, style, children }) {
+  const { t } = useI18n();
   const layout = useMemo(() => normalizeToolStack(stored), [stored]);
   const room = useRef(null), bar = useRef(null), scroller = useRef(null), column = useRef(null);
   // The room's height, the most the bar may take, and the viewer's width, which bounds the bar's.
@@ -220,9 +222,9 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
   }), [reveal, shown, closeSection, tabbed, register, measured.viewer, layout, settle]);
   const tiles = ids.map(id => {
     const section = meta.current.get(id) || {};
-    const tile = section.fit === "tree" ? { label: section.title || "Tree", Icon: ListTree }
-      : id === "position" ? { label: "Position", Icon: PositionIcon }
-        : id === "animation" ? { label: section.title || "Animation", Icon: Clapperboard }
+    const tile = section.fit === "tree" ? { label: section.title || t("sidebar.tree"), Icon: ListTree }
+      : id === "position" ? { label: t("sidebar.position"), Icon: PositionIcon }
+        : id === "animation" ? { label: section.title || t("sidebar.animation"), Icon: Clapperboard }
         : { label: section.title || id, Icon: FileText };
     return { id, ...tile, changed: Boolean(section.changed) };
   });
@@ -271,7 +273,7 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     settle(sizeId, change);
   };
 
-  const aside = <aside ref={bar} aria-label="File" data-cad-file-sidebar="" data-open={open ? "" : undefined} inert={!open}
+  const aside = <aside ref={bar} aria-label={t("sidebar.file")} data-cad-file-sidebar="" data-open={open ? "" : undefined} inert={!open}
     className={cn("relative flex max-w-full flex-col overflow-hidden text-tiny", SIDEBAR_SLIDE_CLASS,
       "rounded-md", FILE_SIDEBAR_SURFACE_CLASS,
       open ? "pointer-events-auto" : "pointer-events-none -translate-x-[calc(100%+1rem)] opacity-0")}
@@ -281,14 +283,14 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     {/* A phone's panel is headed by its sections' tabs, each with its tile's icon, and the panel's
         one X at the row's right end (its sections' heads then have none). */}
     {tabbed ? <div className="flex shrink-0 items-center gap-1 border-b border-border/60 p-1" data-file-sidebar-tabs="">
-      <ToggleGroup type="single" value={shown ?? ""} onValueChange={id => { if (id) { controls.used(`sidebar_${id}`); setOpenId(id); } }} aria-label="Sidebar sections" className="min-w-0 flex-1">
+      <ToggleGroup type="single" value={shown ?? ""} onValueChange={id => { if (id) { controls.used(`sidebar_${id}`); setOpenId(id); } }} aria-label={t("sidebar.sections")} className="min-w-0 flex-1">
         {tiles.map(({ id, label, Icon, changed }) => <ToggleGroupItem key={id} value={id} aria-label={label} className="h-9" data-file-sidebar-tab={id}>
           {/* The dot at the icon's corner, not the wide tab's. */}
           <span className="relative inline-flex"><Icon className="size-4.5" aria-hidden="true" />
             {changed ? <ChangedDot className="-right-1 -top-0.5" /> : null}</span>
         </ToggleGroupItem>)}
       </ToggleGroup>
-      <button type="button" aria-label="Close sidebar" onClick={closeSection} data-file-sidebar-close=""
+      <button type="button" aria-label={t("sidebar.close")} onClick={closeSection} data-file-sidebar-close=""
         className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45">
         <X className="size-4" aria-hidden="true" />
       </button>
@@ -299,21 +301,21 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
         <ToolStackContext.Provider value={sections}>{children}</ToolStackContext.Provider>
       </div>
     </ScrollArea>
-    {phone ? null : <ResizeGrip corner="bottom-right" role="separator" tabIndex={0} aria-label="Resize file sidebar"
+    {phone ? null : <ResizeGrip corner="bottom-right" role="separator" tabIndex={0} aria-label={t("sidebar.resize")}
       data-file-sidebar-corner="" data-dragging={draft !== null ? "" : undefined}
       onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag} onKeyDown={keyDrag} />}
   </aside>;
   return <>
     <div hidden={hidden} className="pointer-events-none absolute z-20 flex flex-col items-start gap-2" style={style} data-file-sidebar-room="">
       {/* The sidebar's toolbar: the tool strip's surface, padding and tiles, on the strip's line. */}
-      {phone && tiles.length ? <div role="group" aria-label="File sidebar" data-file-sidebar-tools=""
+      {phone && tiles.length ? <div role="group" aria-label={t("sidebar.label")} data-file-sidebar-tools=""
         className={cn("pointer-events-auto inline-flex shrink-0 items-center rounded-md p-1", FLOATING_CHROME_SURFACE_CLASS)}>
-        <ToolbarButton label="Sidebar" tooltipSide="bottom" className={cn(TOUCH_STRIP_BUTTON_CLASS, "relative")} active={Boolean(open)} aria-pressed={Boolean(open)}
+        <ToolbarButton label={t("sidebar.toggle")} tooltipSide="bottom" className={cn(TOUCH_STRIP_BUTTON_CLASS, "relative")} active={Boolean(open)} aria-pressed={Boolean(open)}
           onClick={togglePanel} data-file-sidebar-toggle=""><Menu aria-hidden="true" />
           {/* Any section off its default, the panel's one tile says so too. */}
           {tiles.some(tile => tile.changed) ? <ChangedDot className="right-1.5 top-1.5" /> : null}</ToolbarButton>
       </div> : null}
-      {tiles.length && !phone ? <div role="group" aria-label="File sidebar" data-file-sidebar-tools=""
+      {tiles.length && !phone ? <div role="group" aria-label={t("sidebar.label")} data-file-sidebar-tools=""
         className={cn("pointer-events-auto inline-flex shrink-0 items-center gap-1 rounded-md p-1", FLOATING_CHROME_SURFACE_CLASS)}>
         {tiles.map(({ id, label, Icon, changed }) => <ToolbarButton key={id} label={label} tooltipSide="bottom" className={cn(STRIP_BUTTON_CLASS, changed && "relative")}
           active={open === id} aria-pressed={open === id} onClick={() => { if (open !== id) controls.used(`sidebar_${id}`); toggle(id); }} data-file-sidebar-tool={id} data-changed={changed ? "" : undefined}>

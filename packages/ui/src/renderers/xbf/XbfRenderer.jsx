@@ -42,6 +42,7 @@ import { readXbfView, xbfViewSignatures, xbfViewSlices } from "./xbfViewSlices.j
 import { goneFromEngine, useXbfScene } from "./useXbfScene.js";
 import { useXbfMotion } from "./useXbfMotion.js";
 import { useControlUsage } from "../../usage/controls.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 // A part menu's item as telemetry names it (`usage/controls.js`), by the action it runs.
 const MENU_CONTROLS = Object.freeze({
@@ -93,6 +94,7 @@ function subtreeIds(tree, ids) {
 }
 
 function XbfSurface({ view, data }) {
+  const { t } = useI18n();
   const host = useViewerHost();
   const document = useWorkspaceDocument({ view, data });
   const loaded = useXbfScene({ client: document.client, file: view.file.path });
@@ -113,10 +115,10 @@ function XbfSurface({ view, data }) {
   // the code it came from: a script edited since is the engine's business, not the page's.
   const loadAlert = useMemo(() => workspaceLoadAlert({
     // One the engine no longer holds is opened again (above), never said as a load that failed.
-    catalogError: document.catalogError, error: goneFromEngine(loaded.error) ? null : loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene)
-  }) || (loaded.failed ? buildFailedAlert(document.modelKey, loaded.failed, Boolean(scene)) : null)
-    || (loaded.empty ? noGeometryAlert(document.modelKey) : null),
-  [document.catalogError, loaded.error, loaded.failed, loaded.empty, document.modelKey, scene]);
+    catalogError: document.catalogError, error: goneFromEngine(loaded.error) ? null : loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene), t
+  }) || (loaded.failed ? buildFailedAlert(document.modelKey, loaded.failed, Boolean(scene), t) : null)
+    || (loaded.empty ? noGeometryAlert(document.modelKey, t) : null),
+  [document.catalogError, loaded.error, loaded.failed, loaded.empty, document.modelKey, scene, t]);
   const tree = useMemo(() => presentXbfTree(scene?.structure || null), [scene?.structure]);
   // The model's two readiness moments, as a STEP's are published (`window.__cadViewerLoad`): its
   // first scene, and the whole of it -- one moment here, every part is in the first scene.
@@ -642,7 +644,7 @@ function XbfSurface({ view, data }) {
     }
     menu ||= xbfModelMenu({ tree, assembly, expandedIds, hiddenCount: hiddenIds.length, zoomSelectionAvailable, shape,
       copyText: assembly ? "" : singleChip([tree.roots[0]?.selectionId].filter(Boolean)) });
-    return viewportMenuEntries(menu, { actions: partMenuActions });
+    return viewportMenuEntries(menu, { actions: partMenuActions, t });
   } : null;
 
   // ---- the strip --------------------------------------------------------------------------------
@@ -658,10 +660,10 @@ function XbfSurface({ view, data }) {
   [measureFilter, shell.idle]);
   const strip = [
     // Each button badged with what its tool picks alone (its chevron's menu), none for All.
-    shell.tools.own({ id: XBF_TOOL.SELECT, label: "Select", shortcut: TOOL_SHORTCUTS.select, menu: selectModeMenu,
+    shell.tools.own({ id: XBF_TOOL.SELECT, label: t("tool.select"), shortcut: TOOL_SHORTCUTS.select, menu: selectModeMenu,
       icon: <SelectIcon mode={pickModeOf(selectFilter, xbfSelectModes({ assembly, posable })).id} className="size-3.5" aria-hidden="true" /> }),
     ...shell.tools.drawing.map(tool => ({ ...tool, disabled: shell.idle })),
-    shell.tools.own({ id: XBF_TOOL.MEASURE, label: "Measure", shortcut: TOOL_SHORTCUTS.measure, menu: measureFilterMenu,
+    shell.tools.own({ id: XBF_TOOL.MEASURE, label: t("tool.measure"), shortcut: TOOL_SHORTCUTS.measure, menu: measureFilterMenu,
       icon: <MeasureIcon mode={pickModeOf(measureFilter, MEASURE_MODES).id} className="size-3.5" aria-hidden="true" />,
       onSelect: () => { if (shell.toolMode !== XBF_TOOL.MEASURE) shell.selectTool(XBF_TOOL.MEASURE); } }),
     ...effects.tools

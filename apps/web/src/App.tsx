@@ -8,7 +8,7 @@ import { cadApiUrl, createHttpPromptFiles, isEngineRefused, type CadClient, type
 import { useViewerAutoReload } from './host/useViewerAutoReload.js';
 import { useEngineReconnect } from './host/useEngineReconnect.js';
 import { useAnalyticsConsent } from '@text-to-cad/ui/consent';
-import { useLanguage } from '@text-to-cad/ui/i18n';
+import { english, translator, useLanguage } from '@text-to-cad/ui/i18n';
 import { UpdateButton, useUpdateNotice, type UpdateNotice } from '@text-to-cad/ui/update';
 import { createBrowserDownloads } from './host/downloads';
 import { browserClipboard, browserClipboardSupportsImages } from './host/clipboard';
@@ -53,7 +53,10 @@ export default function App({ client, server, tabStore, notice = null, language:
     follow: Boolean(import.meta.env?.DEV), onForeign: () => setForeign(true) });
   const downloads = useMemo(() => createBrowserDownloads(), []);
   const source = useMemo(() => createCadFileSource(client), [client]);
-  const promptContext = useMemo(() => createWebPromptContext(browserClipboard, browserClipboardSupportsImages()), []);
+  // What the clipboard port says to the person, in the view's language as it is when it speaks.
+  const sayRef = useRef<(key: string, params?: Record<string, unknown>) => string>(english);
+  const promptContext = useMemo(() => createWebPromptContext(browserClipboard, browserClipboardSupportsImages(),
+    (key, params) => sayRef.current(key, params)), []);
   // The file menu: the file's path to the clipboard, and Reveal in the file manager of the machine the
   // server runs on, labeled for its platform.
   const fileActions = useMemo(() => createCadFileActions({ platform: server.platform, clipboard: browserClipboard,
@@ -122,6 +125,7 @@ export default function App({ client, server, tabStore, notice = null, language:
   // (`main.tsx`), so the page's first paint is already in it.
   const { locale, language } = useLanguage(client.language, { preferred: navigator.languages ?? [navigator.language], initial: chosenLanguage });
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
+  sayRef.current = translator(locale);
   // The usage stats cadgen sends (its telemetry), the same as the CAD app's: nothing asks here (a
   // cadgen command says it once), and the app menu's switch changes it. The answer is the person's,
   // shared with the CAD app.

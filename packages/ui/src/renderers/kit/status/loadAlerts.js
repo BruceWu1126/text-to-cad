@@ -3,7 +3,11 @@
 // the transport classified it) the failure record.
 
 // The viewport's card shows one title, an explanation with a next step, and the
-// complete diagnostic on demand; `summary` is the alert's short name.
+// complete diagnostic on demand; `summary` is the alert's short name. Each is said in the
+// language of the `t` a renderer hands over (English unless it does); the diagnostic in
+// `details` stays English, as it is reported.
+import { english } from "../../../i18n/core.js";
+
 export function isViewerServiceFailure(failure, detail) {
   const kind = String(failure?.kind || "").toLowerCase();
   return ["service", "worker", "daemon", "broker", "status", "timeout"].includes(kind) || /\b(?:artifact|model) (?:worker|broker)\b|\bworker unavailable\b|\bservice unavailable\b|artifact request failed|lost its protocol|no cold retry|no unaccounted retry/i.test(detail);
@@ -11,14 +15,17 @@ export function isViewerServiceFailure(failure, detail) {
 
 // The client names each request's operation by a token (`@text-to-cad/core/client`'s `request`):
 // a sentence says it in words, the details keep the token. A token this kit has no words for (a
-// family's own read) is the file being loaded; an operation already in words is said as it is.
-const OPERATION_WORDS = Object.freeze({
-  "engine-document": "loading the model", catalog: "looking up the file", folder: "reading the folder",
-  search: "searching the folder", server: "reaching the viewer",
+// family's own read) is the file being loaded; an operation already in words is said as it is,
+// the kit's own two by their keys.
+const OPERATION_KEYS = Object.freeze({
+  "engine-document": "alert.op.loadingModel", catalog: "alert.op.lookingUpFile", folder: "alert.op.readingFolder",
+  search: "alert.op.searchingFolder", server: "alert.op.reachingViewer",
+  "preparing display assets": "alert.op.preparingAssets", "loading geometry": "alert.op.loadingGeometry",
 });
-const operationWords = operation => OPERATION_WORDS[operation] || (/\s/.test(operation) ? operation : "loading the file");
+const operationWords = (operation, t) => OPERATION_KEYS[operation] ? t(OPERATION_KEYS[operation])
+  : /\s/.test(operation) ? operation : t("alert.op.loadingFile");
 
-export function failureAlert(fileRef, error, failure, compile = false) {
+export function failureAlert(fileRef, error, failure, compile = false, t = english) {
   const detail = String(failure?.detail || error || "").trim();
   let kind = failure?.kind || (/^(Failed to fetch|Load failed|NetworkError.*|network failed)$/i.test(detail)
     ? "network" : compile ? "compile" : "mesh");
@@ -34,45 +41,47 @@ export function failureAlert(fileRef, error, failure, compile = false) {
   ].filter(Boolean).join("\n");
   const common = { severity: "error", kind, details: diagnostics };
   if (kind === "network") return {
-    ...common, summary: "Connection lost", title: "Can’t reach the viewer",
-    message: `The browser lost contact with the viewer while ${operationWords(operation)} for “${fileRef}”. Check that the viewer is running and this tab has the correct address, then reload.`,
+    ...common, summary: t("alert.network.summary"), title: t("alert.network.title"),
+    message: t("alert.network.message", { operation: operationWords(operation, t), file: fileRef }),
     ...(failure?.method === "POST" ? {
-      recovery: "The build may still be running on the server. Reloading checks its status before starting any work."
+      recovery: t("alert.network.recoveryPost")
     } : {}),
     reload: true
   };
   if (kind === "service") return {
-    ...common, summary: "Viewer service failed", title: "Couldn’t prepare the model",
+    ...common, summary: t("alert.service.summary"), title: t("alert.prepareFailed"),
     message: ["status", "timeout"].includes(failure?.kind)
-      ? "The viewer did not respond while preparing this model."
-      : "The viewer couldn’t finish processing this model.",
-    recovery: "Try again. If this continues, check the viewer’s terminal output.",
+      ? t("alert.service.noResponse")
+      : t("alert.service.unfinished"),
+    recovery: t("alert.service.recovery"),
     reload: true
   };
   if (kind === "http" || kind === "response") return {
-    ...common, summary: "Request failed", title: "The viewer couldn’t complete the request",
-    message: `${failure?.status ? `The server returned HTTP ${failure.status}` : "The server returned an unexpected response"} while ${operationWords(operation)} for “${fileRef}”.`,
+    ...common, summary: t("alert.request.summary"), title: t("alert.request.title"),
+    message: failure?.status
+      ? t("alert.request.status", { status: failure.status, operation: operationWords(operation, t), file: fileRef })
+      : t("alert.request.unexpected", { operation: operationWords(operation, t), file: fileRef }),
     reason: detail,
-    recovery: "Reload to try again. If this continues, check the viewer’s terminal output for the request shown in Details.",
+    recovery: t("alert.request.recovery"),
     reload: true
   };
   // The file refused to be read, so nothing is known about its contents: on Windows,
   // another program holding it, or saving or replacing it, arrives as a PermissionError.
   if (failure?.errorType === "PermissionError") return {
-    ...common, summary: "File unreadable", title: "Couldn’t read the model",
-    message: `“${fileRef}” could not be read.`,
+    ...common, summary: t("alert.unreadable.summary"), title: t("alert.unreadable.title"),
+    message: t("alert.unreadable.message", { file: fileRef }),
     reason: detail,
-    recovery: "Another program may have it open, or be saving, syncing or scanning it. Close it there or let that finish, then retry. If this continues, check that the folder can be read.",
+    recovery: t("alert.unreadable.recovery"),
     reload: true
   };
   return {
-    ...common, summary: compile || kind === "compile" ? "Compile failed" : "Mesh load failed",
-    title: compile || kind === "compile" ? "Couldn’t prepare the model" : "Couldn’t load the model",
-    message: `“${fileRef}” could not be ${compile || kind === "compile" ? "prepared for display" : "loaded"}.`,
-    reason: detail || "No diagnostic was returned by the viewer.",
+    ...common, summary: t(compile || kind === "compile" ? "alert.compile.summary" : "alert.load.summary"),
+    title: t(compile || kind === "compile" ? "alert.prepareFailed" : "alert.load.title"),
+    message: t(compile || kind === "compile" ? "alert.compile.message" : "alert.load.message", { file: fileRef }),
+    reason: detail || t("alert.noDiagnostic"),
     recovery: compile || kind === "compile"
-      ? "Check the reported error and the viewer’s terminal output. Correct or rebuild the source file, then reload."
-      : "Check that the file is complete and readable, then reload. The full loading error is available in Details.",
+      ? t("alert.compile.recovery")
+      : t("alert.load.recovery"),
     reload: true
   };
 }
@@ -85,9 +94,10 @@ export function failureAlert(fileRef, error, failure, compile = false) {
  * @param {string} fileRef
  * @param {{ model?: string, error?: string, progress?: { label?: string, detail?: string } | null }} failed
  * @param {boolean} hasModel  A version of the file is on screen.
+ * @param {(key: string, params?: Record<string, unknown>) => string} [t]
  */
-export function buildFailedAlert(fileRef, failed, hasModel) {
-  const error = String(failed?.error || "").trim() || "The build returned no diagnostic.";
+export function buildFailedAlert(fileRef, failed, hasModel, t = english) {
+  const error = String(failed?.error || "").trim() || t("alert.build.noDiagnostic");
   const stage = [failed?.progress?.label, failed?.progress?.detail].filter(Boolean).join(" · ");
   const details = [`File: ${fileRef}`, failed?.model && `Model: ${failed.model}`, stage && `Stage: ${stage}`,
     "Operation: building the model", error].filter(Boolean).join("\n");
@@ -95,22 +105,22 @@ export function buildFailedAlert(fileRef, failed, hasModel) {
   const raised = error.split("\n").map(line => line.trim()).filter(Boolean).at(-1);
   return {
     severity: "error", kind: "build", details, reason: raised,
-    summary: hasModel ? "Update failed" : "Build failed",
-    title: hasModel ? "Couldn’t update the model" : "Couldn’t build the model",
-    message: hasModel ? "The model’s latest build failed. You’re still viewing the previous version." : `“${fileRef}” could not be built.`,
-    recovery: "Correct the error in the model’s source: the view updates when a build succeeds.",
+    summary: t(hasModel ? "alert.update.summary" : "alert.build.summary"),
+    title: t(hasModel ? "alert.update.title" : "alert.build.title"),
+    message: hasModel ? t("alert.update.message") : t("alert.build.message", { file: fileRef }),
+    recovery: t("alert.build.recovery"),
     ...(hasModel ? { blocking: false } : {})
   };
 }
 
 /** The file is listed, loading raised nothing, and nothing came out of it. */
-export function noGeometryAlert(fileRef) {
+export function noGeometryAlert(fileRef, t = english) {
   return {
     severity: "error",
-    summary: "Mesh unavailable",
-    title: "No geometry to display",
-    message: `“${fileRef}” is listed in the file browser, but loading it produced no visible geometry.`,
-    recovery: "Check that the file contains a model and was saved completely, then reload.",
+    summary: t("alert.empty.summary"),
+    title: t("alert.empty.title"),
+    message: t("alert.empty.message", { file: fileRef }),
+    recovery: t("alert.empty.recovery"),
     reload: true
   };
 }

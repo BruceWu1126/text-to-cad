@@ -6,7 +6,7 @@ import { createDirectFetch, engineReach, probeEngine } from './host/direct';
 import type { Presentation } from './host/presentation';
 import { TUNNEL_ORIGIN } from './host/tunnel';
 import type { Launch, Server } from './host/server';
-import { Unreachable } from './Notice';
+import { Unreachable, noticeTranslator } from './Notice';
 
 /**
  * How this card reaches the engine:
@@ -46,7 +46,7 @@ function Unconnected({ bridge, launch, inline }: { bridge: Bridge; launch: Launc
     ? (url: string) => { void bridge.request('ui/open-link', { url }).catch(() => { window.open(url, '_blank', 'noopener,noreferrer'); }); return true; }
     : undefined;
   return <Card bridge={bridge} inline={inline} height={NOTICE_HEIGHT}>
-    <Unreachable page={pageOf(launch)} model={launch.page === 'viewer'} open={open} />
+    <Unreachable page={pageOf(launch)} model={launch.page === 'viewer'} open={open} t={noticeTranslator(bridge.hostContext.locale)} />
   </Card>;
 }
 

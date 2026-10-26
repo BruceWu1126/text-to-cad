@@ -27,6 +27,9 @@ node --test scripts/test/check-dependencies.test.mjs
 node scripts/test/check-dependencies.mjs
 node --test scripts/test/check-kit-boundaries.test.mjs
 node scripts/test/check-kit-boundaries.mjs
+# Every string the viewer and the CAD app show reads through the locale files (all three trees, every job).
+node --test scripts/test/check-ui-strings.test.mjs
+node scripts/test/check-ui-strings.mjs
 if [ "$SELECT" = core ] || [ "$SELECT" = all ]; then
   section "@text-to-cad/core tests"
   npm --prefix packages/core test

@@ -6,6 +6,7 @@ import { FLOATING_CHROME_SURFACE_CLASS } from "../../../../lib/floatingSurface.j
 import { ANNOTATION_STROKE_WIDTHS, AnnotationStylePickers, annotationColors } from "../../../../annotation/toolbar.jsx";
 import { fillMarkAt, interiorPoint, strokeSettingOf } from "../../../../annotation/geometry.js";
 import { annotationsOnScreen, annotationWorldPoints, projectAnnotations } from "./annotation3d.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 // How far the bar keeps from the ink it is about, and from the viewport's edges, in px.
 const GAP = 10;
@@ -52,6 +53,7 @@ const closedShape = item => item.kind === "stroke" && item.closed && !item.width
  *   viewerReadyTick?: number, onDelete(): void, disabled?: boolean }} props
  */
 export default function AnnotationSelectionBar({ annotation, colorScheme = "light", runtimeRef, viewerReadyTick = 0, onDelete, disabled = false }) {
+  const { t } = useI18n();
   const picked = new Set(annotation.selected);
   const items = annotation.items.filter(item => picked.has(item.id));
   const itemsRef = useRef(items);
@@ -123,17 +125,17 @@ export default function AnnotationSelectionBar({ annotation, colorScheme = "ligh
   const left = Math.max(EDGE, Math.min(box.width - EDGE - size.width, centre - size.width / 2));
   const above = box.top - GAP - size.height;
   const top = above >= EDGE ? above : Math.min(box.bottom + GAP, box.height - EDGE - size.height);
-  return <div ref={bar} role="toolbar" aria-label="Selected annotation"
+  return <div ref={bar} role="toolbar" aria-label={t("annotate.selected")}
     className={cn(FLOATING_CHROME_SURFACE_CLASS, "pointer-events-auto absolute z-20 rounded-md p-0.5", size.width ? null : "invisible")}
     style={{ left, top }} data-annotation-selection-bar="" onPointerDown={event => event.stopPropagation()}>
-    <AnnotationStylePickers label="Selected annotation style" className="flex items-center gap-0.5" disabled={disabled} color={items[0].color} colors={annotationColors(colorScheme)}
+    <AnnotationStylePickers label={t("annotate.selectedStyle")} className="flex items-center gap-0.5" disabled={disabled} color={items[0].color} colors={annotationColors(colorScheme)}
       width={strokes.length ? strokeSetting(strokes[0]) : null}
       onColor={color => annotation.restyle({ color })} onWidth={width => annotation.restyle({ width })}>
-      {closed.length ? <ToolbarButton tooltip={false} label="Fill" disabled={disabled} active={filled} aria-pressed={filled} onClick={toggleFill}>
+      {closed.length ? <ToolbarButton tooltip={false} label={t("annotate.fill")} disabled={disabled} active={filled} aria-pressed={filled} onClick={toggleFill}>
         <PaintBucket className="size-3" strokeWidth={2} aria-hidden="true" />
       </ToolbarButton> : null}
       <span role="separator" aria-orientation="vertical" className="mx-0.5 h-4 w-px bg-border" />
-      <ToolbarButton tooltip={false} label="Delete" disabled={disabled} onClick={onDelete}>
+      <ToolbarButton tooltip={false} label={t("annotate.delete")} disabled={disabled} onClick={onDelete}>
         <Trash2 className="size-3" strokeWidth={2} aria-hidden="true" />
       </ToolbarButton>
     </AnnotationStylePickers>

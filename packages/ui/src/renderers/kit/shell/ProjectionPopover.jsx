@@ -21,8 +21,8 @@ function ModeChoice({ value, Icon, children, ...props }) {
 }
 
 const PROJECTIONS = Object.freeze([
-  { value: "orthographic", label: "Orthographic", Icon: OrthographicProjectionIcon },
-  { value: "perspective", label: "Perspective", Icon: PerspectiveProjectionIcon },
+  { value: "orthographic", key: "projection.orthographic", label: "Orthographic", Icon: OrthographicProjectionIcon },
+  { value: "perspective", key: "projection.perspective", label: "Perspective", Icon: PerspectiveProjectionIcon },
 ]);
 
 /**
