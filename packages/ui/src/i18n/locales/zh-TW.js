@@ -89,7 +89,6 @@ export default {
   "home.loadingFiles": "正在載入檔案",
   "home.modelsAria": "CAD 模型",
   "home.fileUnavailable": "無法使用檔案",
-  "home.pinned": "已釘選",
   "home.actionsAria": "{name} 的動作",
   "home.menuOpen": "開啟",
   "home.pin": "釘選",

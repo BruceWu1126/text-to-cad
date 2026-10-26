@@ -101,7 +101,6 @@ export default {
   "home.loadingFiles": "Loading files",
   "home.modelsAria": "CAD models",
   "home.fileUnavailable": "File unavailable",
-  "home.pinned": "Pinned",
   "home.actionsAria": "Actions for {name}",
   "home.menuOpen": "Open",
   "home.pin": "Pin",

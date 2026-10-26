@@ -88,7 +88,6 @@ export default {
   "home.loadingFiles": "ファイルを読み込み中",
   "home.modelsAria": "CAD モデル",
   "home.fileUnavailable": "ファイルを利用できません",
-  "home.pinned": "ピン留め済み",
   "home.actionsAria": "{name} の操作",
   "home.menuOpen": "開く",
   "home.pin": "ピン留め",

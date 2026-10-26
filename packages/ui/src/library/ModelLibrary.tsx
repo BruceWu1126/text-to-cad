@@ -174,7 +174,7 @@ function Placeholders({ layout }: { layout: LibraryLayout }) {
     : <ul className="cad-library-grid" aria-label={t("home.filesAria")} aria-busy="true" data-loading="">{status}{[0, 1, 2, 3].map(index => <li key={index} className="cad-library-card" aria-hidden="true">
       <span className="cad-library-open">
         <span className="cad-library-thumbnail" />
-        <span className="cad-library-body"><span className="cad-library-placeholder" /><span className="cad-library-placeholder" data-short="" /></span>
+        <span className="cad-library-body"><span className="cad-library-text"><span className="cad-library-placeholder" /><span className="cad-library-placeholder" data-short="" /></span></span>
       </span>
     </li>)}</ul>;
 }
@@ -310,10 +310,12 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
     usage.used(action === "reveal" ? "home_reveal" : "home_copy_path");
     void Promise.resolve(fileActions?.perform?.[action]?.({ path, kind: "file" })).catch(fail);
   };
-  // A card's one menu: Open, what the host can do with it on disk, Pin or Unpin, then Delete. A
-  // pinned card shows its pin beside the menu, whatever the pointer does.
+  // A card's pin and its one menu (Open, what the host can do with it on disk, Pin or Unpin, then
+  // Delete), there while the pointer is on the card (Figma's star): the pin toggles, and a pinned
+  // card shows it, filled, whatever the pointer does.
   const actions = (card: LibraryCard<Model>) => { const item = card.item; return <div className="cad-library-actions" data-pinned={item.pinned || undefined}>
-    {item.pinned ? <Pin className="cad-library-pinned" role="img" aria-label={t("home.pinned")} fill="currentColor" /> : null}
+    <Button variant="ghost" size="icon-xs" className="cad-library-pin" aria-label={t(item.pinned ? "home.unpin" : "home.pin")} aria-pressed={item.pinned}
+      onClick={() => change(item.pinned ? "unpin" : "pin", item)}><Pin aria-hidden="true" fill={item.pinned ? "currentColor" : "none"} /></Button>
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon-xs" aria-label={t("home.actionsAria", { name: item.name })}><Ellipsis aria-hidden="true" /></Button>
@@ -357,7 +359,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
     const script = card.item.script;
     if (!card.folded.length || !script) return null;
     const expanded = unfolded.has(script);
-    return <div className="cad-library-folded">
+    return <div className="cad-library-folded" data-expanded={expanded || undefined}>
       <button type="button" className="cad-library-more" aria-expanded={expanded} onClick={() => unfold(script)}>
         <ChevronRight className="cad-library-chevron" aria-hidden="true" />{t("home.andMore", { n: card.folded.length })}
       </button>
@@ -386,9 +388,13 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
       <div className="cad-library-main">
         <button type="button" className="cad-library-open" disabled={item.missing} aria-label={t("home.openAria", { name: item.name })} aria-busy={opening === item.path || undefined} onClick={() => open(item)}>
           <Thumbnail item={item} load={load} seen={seen} opening={opening === item.path} />
+          {/* The caption: the kind's glyph at the left of the name over its age. */}
           <span className="cad-library-body">
-            {name(item)}
-            <span className="cad-library-status">{status(item)}</span>
+            <DocumentGlyph model={deletes(item)} path={item.path} className="cad-library-glyph" />
+            <span className="cad-library-text">
+              <span className="cad-library-label">{item.name}</span>
+              <span className="cad-library-status">{status(item)}</span>
+            </span>
           </span>
         </button>
         {actions(card)}

@@ -88,7 +88,6 @@ export default {
   "home.loadingFiles": "파일 불러오는 중",
   "home.modelsAria": "CAD 모델",
   "home.fileUnavailable": "파일을 사용할 수 없음",
-  "home.pinned": "고정됨",
   "home.actionsAria": "{name} 작업",
   "home.menuOpen": "열기",
   "home.pin": "고정",

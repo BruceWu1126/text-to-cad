@@ -68,9 +68,11 @@ it('opens and pins through the host, and with nothing yet says how a file gets h
   expect(inPlace.change).toHaveBeenLastCalledWith('pin', expect.objectContaining({ name: 'b.stl' }));
   const files = within(screen.getByRole('list', { name: 'Files' })).getAllByRole('listitem');
   expect(files.map(item => within(item).getAllByRole('button')[0].getAttribute('aria-label'))).toEqual(['Open b.stl', 'Open a.step']);
-  // A pinned card says so at rest; its menu offers Unpin.
-  expect(within(files[0]).getByRole('img', { name: 'Pinned' })).toBeTruthy();
-  expect(within(files[1]).queryByRole('img', { name: 'Pinned' })).toBeNull();
+  // Each card has its pin by its ⋯ (Figma's star), pressed while it is pinned; its menu offers Unpin.
+  expect(within(files[0]).getByRole('button', { name: 'Unpin' }).getAttribute('aria-pressed')).toBe('true');
+  expect(within(files[1]).getByRole('button', { name: 'Pin' }).getAttribute('aria-pressed')).toBe('false');
+  await act(async () => { fireEvent.click(within(files[1]).getByRole('button', { name: 'Pin' })); });
+  expect(inPlace.change).toHaveBeenLastCalledWith('pin', expect.objectContaining({ name: 'a.step' }));
   cleanup();
   render(<ModelLibrary library={library([model('b.stl', { pinned: true })])} />);
   await screen.findByRole('button', { name: 'Open b.stl' });
