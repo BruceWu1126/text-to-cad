@@ -83,6 +83,27 @@ TOKEN_NEEDED_PAGE = (
 ).encode('utf-8')
 
 
+# A CAD card whose host carries none of its calls back (``apps/mcp``'s direct transport) reads the
+# engine from its own sandbox's origin, with the day link its launch carries as a Bearer credential.
+# That one case is answered with the card's origin's CORS allowance (``EngineApp._card``): a link in
+# the Authorization header -- which a browser never attaches by itself, so only a page already holding
+# the link can send it -- and nothing that rides by itself or in a URL: not the cookie (no
+# Access-Control-Allow-Credentials is ever sent, so a cross-origin read never carries it), not a link
+# in the query, not the user's token (a native client's, which needs no CORS), and never ``/mcp``.
+# The bind stays loopback, and the Host and token gates run first.
+CARD_METHODS = ('GET', 'HEAD', 'POST')
+CARD_HEADERS = ('authorization', 'content-type', 'range', 'if-range', 'x-cadgen-viewer')
+_CARD_EXPOSED = 'content-length, content-range, etag'
+_PREFLIGHT_SECONDS = 600
+
+
+def _card_origin(request):
+    """The origin a cross-origin card's request names, or None: a request with no ``Origin`` is not a
+    page's from another origin, and ``/mcp`` is a client's alone (``cadgen.mcp.http`` refuses it)."""
+    origin = request.header('origin')
+    return origin if origin and request.path != '/mcp' else None
+
+
 def _navigation(request):
     """A browser's page load (a document, or HTML asked for) of a page, never a route of the engine."""
     return (request.header('sec-fetch-dest') == 'document' or 'text/html' in request.header('accept')) \
@@ -128,7 +149,8 @@ def document_route(server, request, response, page=False):
         return
     handler = DocumentResponse(request, page)
     server.route(handler, request.method)
-    # Deliberately no CORS headers: all application reads are same-origin or authenticated MCP.
+    # No CORS headers of the route's own: application reads are same-origin, authenticated MCP, or a
+    # card's link-bearing read, which the engine's gate alone allows (``EngineApp._card``).
     response.send_bytes(handler.status, handler.wfile.getvalue(),
                         handler.response_headers.get('content-type', 'application/octet-stream'),
                         list({**dict(RAW_FILE_HEADERS), **{key: value for key, value in handler.response_headers.items()
@@ -305,8 +327,8 @@ class EngineApp:
 
         # Any one credential suffices: a cookie the token never signed is not one, and never outranks
         # the link of the URL a launch just printed.
-        offered = {named(request.header('authorization').removeprefix('Bearer ')),
-                   named(request.query.get('token', ''))}
+        bearer = request.header('authorization').removeprefix('Bearer ')
+        offered = {named(bearer), named(request.query.get('token', ''))}
         session = saved if saved and standing(self.token, 'session', saved) == 'ok' else ''
         if 'ok' not in offered and not session:
             return self._refused(request, response, 'expired' in offered)
@@ -319,6 +341,9 @@ class EngineApp:
             if 'expired' in offered:
                 return self._refused(request, response, True)
             return response.send_json(403, {'error': 'cross-origin request refused'})
+        origin = _card_origin(request)
+        if origin and bearer and standing(self.token, 'link', bearer) == 'ok':
+            response.also = (*response.also, *self._card(origin))
         with self.lock:
             self.active_requests += 1
         self.server.touch()
@@ -328,6 +353,34 @@ class EngineApp:
             with self.lock:
                 self.active_requests -= 1
             self.server.touch()
+
+    @staticmethod
+    def _card(origin):
+        """The CORS allowance of a card's link-bearing request from ``origin``: that origin, echoed
+        (an opaque sandbox's is ``null``), the headers its reader needs, and no credentials."""
+        return (('access-control-allow-origin', origin), ('vary', 'Origin'),
+                ('access-control-expose-headers', _CARD_EXPOSED))
+
+    def preflight(self, request, response):
+        """An ``OPTIONS`` request (``handler``): the preflight of a card's link-bearing request, which
+        carries no credential itself (the browser sends none with it), answered for exactly that
+        request -- one of ``CARD_METHODS``, asking for headers among ``CARD_HEADERS`` and for
+        ``authorization`` among them -- from a local Host. It grants nothing: the request it clears is
+        still refused without a good link. Anything else is the 405 every other method gets."""
+        origin = _card_origin(request)
+        asked = {name.strip().lower() for name in request.header('access-control-request-headers').split(',') if name.strip()}
+        if not (host_is_allowed(request.header('host'), self.host) and origin
+                and request.header('access-control-request-method').upper() in CARD_METHODS
+                and 'authorization' in asked and asked <= set(CARD_HEADERS)):
+            return response.send_empty(405, [('allow', 'GET, HEAD, POST')])
+        headers = [('access-control-allow-origin', origin), ('vary', 'Origin'),
+                   ('access-control-allow-methods', ', '.join(CARD_METHODS)),
+                   ('access-control-allow-headers', ', '.join(CARD_HEADERS)),
+                   ('access-control-max-age', _PREFLIGHT_SECONDS)]
+        if request.header('access-control-request-private-network').lower() == 'true':
+            # A page of a public origin reaching loopback (Private Network Access): this one may.
+            headers.append(('access-control-allow-private-network', 'true'))
+        return response.send_empty(204, headers)
 
     def _session_cookie(self):
         return ('set-cookie', f'{self.cookie}={sign(self.token, "session", SESSION_SECONDS)}; Path=/; '
@@ -354,7 +407,7 @@ class EngineApp:
         if session and (_navigation(request) or int(session.partition('.')[0]) < time.time() + SESSION_SECONDS - 86400):
             # Each page load renews it, and any request once it is a day old, so a tab left open
             # keeps it too: 30 days from the last use.
-            response.also = (self._session_cookie(),)
+            response.also = (*response.also, self._session_cookie())
         if request.path == '/mcp' and self.session_factory is not None:
             return self.mcp().handle(request, response)
         if request.method == 'GET' and is_id(request.path[1:]) and self.server.holds(request.path[1:]):

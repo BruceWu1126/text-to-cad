@@ -272,7 +272,7 @@ def make_handler_class(app):
             if not self._validate_body_framing(response):
                 return
             try:
-                app.handle(request, response)
+                (app.preflight if request.raw_method == "OPTIONS" else app.handle)(request, response)
             except Exception:  # noqa: BLE001 - a handler fault must not kill the connection silently
                 if not response.written:
                     response.send_json(500, {"ok": False, "error": "Internal server error"})
@@ -297,6 +297,9 @@ def make_handler_class(app):
         def do_POST(self):  # noqa: N802
             self._dispatch()
 
+        def do_OPTIONS(self):  # noqa: N802 - reached only for an app that answers preflights
+            self._dispatch()
+
         def handle_one_request(self):
             # Everything other than GET/HEAD/POST answers 405 instead of
             # hanging. The Node server dropped handle()'s false return on the
@@ -317,7 +320,10 @@ def make_handler_class(app):
                     return
                 if not self.parse_request():
                     return
-                if self.command not in _ALLOWED_METHODS and not (self.command == "DELETE" and self.path == "/mcp"):
+                # OPTIONS reaches an app that answers preflights (``EngineApp.preflight``: a CAD
+                # card's link-bearing request, and nothing else); every other app 405s it as before.
+                preflight = self.command == "OPTIONS" and getattr(app, "preflight", None) is not None
+                if self.command not in _ALLOWED_METHODS and not preflight and not (self.command == "DELETE" and self.path == "/mcp"):
                     if "chunked" in (self.headers.get("transfer-encoding") or "").lower():
                         # Nothing here can frame a chunked body, so the only
                         # safe answer is to stop reusing the connection.

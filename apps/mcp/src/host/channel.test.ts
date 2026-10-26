@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBridge, HostError } from './bridge';
 import { createChannel, declaresOpenLinks, declaresServerTools, isHostRefusal } from './channel';
+import { createDirectFetch, engineReach, probeEngine } from './direct';
 import { createServer, ServerError } from './server';
 import { createTunnelFetch, TUNNEL_ORIGIN } from './tunnel';
 
@@ -64,5 +65,40 @@ describe('the channel to CAD\'s server', () => {
     const engine = createTunnelFetch(createServer({ callTool: async () => ({ isError: true, content: [{ type: 'text', text: 'This CAD view was opened before CAD restarted: close it and open CAD again.' }] }) }, 'app-capability', stale));
     await expect(engine(`${TUNNEL_ORIGIN}/__cad/server`)).rejects.toThrow('This CAD view was opened before CAD restarted');
     expect(stale.state).toBe('open');
+  });
+});
+
+describe('the engine reached directly', () => {
+  const reach = { origin: 'http://127.0.0.1:3245', link: '1893456000.mac' };
+
+  it('takes the engine and its day link from a launch that carries a page of that engine, else none', () => {
+    expect(engineReach({ browser: 'http://127.0.0.1:3245/abc?token=1893456000.mac', engine: 'http://127.0.0.1:3245' }))
+      .toEqual({ ...reach, page: 'http://127.0.0.1:3245/abc?token=1893456000.mac' });
+    expect(engineReach({ browser: 'http://127.0.0.1:3245/abc', engine: 'http://127.0.0.1:3245' })).toBeNull();
+    expect(engineReach({ browser: 'http://127.0.0.1:9999/abc?token=t', engine: 'http://127.0.0.1:3245' })).toBeNull();
+    expect(engineReach({})).toBeNull();
+  });
+
+  it('probes one authenticated read, and says no for a refusal, a stranger, or a fetch the sandbox blocks', async () => {
+    const answering = (body: unknown, status = 200) => async () => new Response(JSON.stringify(body), { status });
+    expect(await probeEngine(reach, answering({ app: 'cad-viewer' }) as any)).toBe(true);
+    expect(await probeEngine(reach, answering({ error: 'engine token required' }, 403) as any)).toBe(false);
+    expect(await probeEngine(reach, answering({ app: 'something-else' }) as any)).toBe(false);
+    expect(await probeEngine(reach, (async () => { throw new TypeError('Failed to fetch'); }) as any)).toBe(false);
+    // An engine that never answers: the card stops waiting.
+    expect(await probeEngine(reach, ((_url: string, init: RequestInit) => new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))))) as any, 5)).toBe(false);
+  });
+
+  it('sends a POST to the engine with its body, the guard header and the Bearer link, and fails in words of ours', async () => {
+    const sent: any[] = [];
+    const direct = createDirectFetch(reach, (async (url: string, init: RequestInit) => {
+      sent.push({ url, method: init.method, headers: Object.fromEntries(new Headers(init.headers)), body: new TextDecoder().decode(init.body as ArrayBuffer) });
+      return new Response('{}');
+    }) as any);
+    await direct(`${TUNNEL_ORIGIN}/__cad/recents?x=1`, { method: 'POST', headers: { 'x-cadgen-viewer': '1', 'x-cadgen-app': 'session', 'content-type': 'application/json' }, body: '{"a":1}' });
+    expect(sent).toEqual([{ url: 'http://127.0.0.1:3245/__cad/recents?x=1', method: 'POST', body: '{"a":1}',
+      headers: { authorization: 'Bearer 1893456000.mac', 'content-type': 'application/json', 'x-cadgen-viewer': '1' } }]);
+    const blocked = createDirectFetch(reach, (async () => { throw new TypeError('net::ERR_BLOCKED_BY_CSP'); }) as any);
+    await expect(blocked(`${TUNNEL_ORIGIN}/__cad/server`)).rejects.toThrow('The CAD engine could not be reached.');
   });
 });

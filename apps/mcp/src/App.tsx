@@ -161,9 +161,12 @@ function Superseded({ still }: { still: string | null }) {
 
 /**
  * One CAD view. Which page it shows comes from its launch and from what the agent or the user
- * opens next; nothing here asks where the view is.
+ * opens next; nothing here asks where the view is. `direct`: the engine's routes reached over HTTP rather than through the host
+ * (`host/direct.ts`), where the host carries no call back (`Connection.tsx`): every viewer request
+ * goes that way, and the view makes no sync, which only the host could carry -- the agent cannot read
+ * or capture it, and the client reads its catalog again on its own.
  */
-export default function App({ bridge, server, launch: initial, presentation = 'tabs' }: { bridge: Bridge; server: Server; launch: Launch; presentation?: Presentation }) {
+export default function App({ bridge, server, launch: initial, presentation = 'tabs', direct }: { bridge: Bridge; server: Server; launch: Launch; presentation?: Presentation; direct?: typeof fetch }) {
   const surface = initial.surface || initial.page;
   // The host's file handler shows the file it opened, and only that: what the agent shows goes to
   // its thread's tab, never here (the server refuses it too).
@@ -227,8 +230,8 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   // Everything else the view asks of the server travels as viewer requests over `cad_http`: its
   // model, the library, Open, Reveal, the person's settings and the update check. The client polls
   // nothing: the sync says when the file's catalog entry moved.
-  const tunnel = useMemo(() => createTunnelFetch(server), [server]);
-  const client = useMemo(() => createTunnelClient(tunnel, { pollIntervalMs: 0 }), [tunnel]);
+  const tunnel = useMemo(() => direct ?? createTunnelFetch(server), [server, direct]);
+  const client = useMemo(() => createTunnelClient(tunnel, direct ? {} : { pollIntervalMs: 0 }), [tunnel, direct]);
   useEffect(() => () => client.dispose(), [client]);
 
   useEffect(() => {
@@ -246,7 +249,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   }, [initial.order, initial.view, live, sync]);
 
   useEffect(() => {
-    if (superseded) return;
+    if (superseded || direct) return;
     const lifetime = new AbortController();
     sync.run(lifetime.signal);
     const stop = bridge.onTeardown(() => lifetime.abort());
@@ -260,7 +263,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
     window.addEventListener('pointerdown', touched, true);
     window.addEventListener('focus', touched);
     return () => { lifetime.abort(); stop(); window.removeEventListener('pointerdown', touched, true); window.removeEventListener('focus', touched); };
-  }, [bridge, sync, superseded]);
+  }, [bridge, sync, superseded, direct]);
 
   // The usage stats cadgen sends (its telemetry), the same as the browser viewer's: nothing asks here (a
   // cadgen command says it once), and the app menu's switch changes it.

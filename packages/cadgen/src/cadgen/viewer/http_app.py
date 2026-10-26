@@ -13,9 +13,12 @@ browser gates defend against cross-origin requests:
   whose params ride the query string is otherwise a no-preflight "simple
   request". A custom header forces a preflight instead.
 
-No ``Access-Control-*`` headers are served, deliberately: their absence is what
+No ``Access-Control-*`` headers are served here, deliberately: their absence is what
 makes the same-origin policy block cross-origin reads and what makes that
-preflight fail. Do not add them.
+preflight fail. Do not add them. The engine in front of this router makes one
+exception, outside it: a CAD card's request that carries a day link in its
+``Authorization`` header, and that request's preflight, are answered with the
+card's own origin and no credentials (``engine_app.EngineApp.preflight``).
 """
 
 from __future__ import annotations

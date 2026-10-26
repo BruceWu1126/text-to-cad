@@ -615,6 +615,24 @@ class InlineServerTest(_Session):
                            RequestContext(1, {"threadId": "t"}))["structuredContent"]["launch"]
         self.assertEqual((home["page"], "browser" in home, "engine" in home), ("home", False, False))
 
+    def test_an_inline_cards_sandbox_may_fetch_the_engine_s_origin_and_a_tab_s_is_served_as_it_was(self) -> None:
+        # An inline host is asked to let the card fetch the engine; a server given no engine adds nothing.
+        uri = self.server.handle("resources/list", {}, None)["resources"][0]["uri"]
+        server = Server(page=self.server.page, recents=self.server.recents, engine_origin="http://127.0.0.1:3245")
+        server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": RENDERS_APPS,
+                                                       "clientInfo": CLAUDE}), None)
+        for listed in (server.handle("resources/list", {}, None)["resources"][0],
+                       server.handle("resources/read", {"uri": uri}, None)["contents"][0]):
+            self.assertEqual(listed["_meta"]["ui"]["csp"]["connectDomains"], ["data:", "blob:", "http://127.0.0.1:3245"])
+        self.assertEqual(self.server.handle("resources/list", {}, None)["resources"][0]["_meta"]["ui"]["csp"]["connectDomains"],
+                         ["data:", "blob:"])
+        # A host that shows tabs is served what it was, engine or not: its card always has its channel.
+        tabs = Server(page=self.server.page, recents=self.server.recents, engine_origin="http://127.0.0.1:3245")
+        tabs.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": DECLARES_TABS,
+                                                     "clientInfo": OTHER_HOST}), None)
+        self.assertEqual(tabs.handle("resources/list", {}, None)["resources"][0]["_meta"]["ui"]["csp"]["connectDomains"],
+                         ["data:", "blob:"])
+
     def test_the_cards_open_in_browser_opens_the_page_from_this_process_through_a_redirect_file(self) -> None:
         from cadgen.mcp.browser import ViewerUnavailable
         from cadgen.viewer import browser_open
