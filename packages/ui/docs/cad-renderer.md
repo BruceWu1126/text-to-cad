@@ -1016,7 +1016,11 @@ order, whatever the tool:
 A part file with no mechanism has no sidebar. What is selected is Quick Edit's chips
 (`xbf/xbfChips.jsx`'s `useXbfSelectionChips`): a component
 or subassembly a chip of its own, faces and edges a chip for each kind on each part,
-each chip's card the key measurements.
+each chip's card the key measurements. A chip shows a part's name cut at sixteen characters
+with an ellipsis (`ReferenceChips.jsx`'s `capName`), the number or count after it whole, the
+whole name in its card's title (a chip with no card: in its hint). In a document of one part,
+which the page already names, a face or edge chip shows its kind's glyph, the kind and the number
+alone ("face 1", "6 faces"); its accessible name and its card's title still say the part.
 
 **Select's menu.** The chevron after Select's button (`SelectModeMenu` in
 `XbfSelectionModes.jsx`, over `kit/tools/select/SelectFilterMenu.jsx`) is one choice among an
@@ -1132,8 +1136,10 @@ unselectable. Selection reveals expand the required ancestors and scroll once
 per selection or explicit reveal command. Later expansion and manual scrolling
 must not pull the view back to that row.
 
-A chip's card is read-only: under the reference's name and id, its rows are its key
-measurements alone (`xbfChips.jsx`'s `xbfMeasurementRows`, the engine's facts of the element):
+A chip's card is read-only: under the reference's name (which copies the reference) and its ID —
+one monospace line, its middle cut past 28 characters (`elideMiddle`: "L bracket 80 x…~7f355a89aedf"),
+the whole reference as the engine resolves it its hint, and a click on it copying what the title
+copies — its rows are its key measurements alone (`xbfChips.jsx`'s `xbfMeasurementRows`, the engine's facts of the element):
 a face's area and a round face's radii, an edge's length, radii and an arc's sweep, a part's
 size, volume and mass, a subassembly's size, volume and mass — no type, centre, normal,
 component or source material row. A click on the chip copies its references (as Copy References

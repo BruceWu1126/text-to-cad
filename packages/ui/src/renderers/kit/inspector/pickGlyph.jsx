@@ -56,7 +56,8 @@ export function pickGlyphNode(document, kind, className = "", color = null) {
 /**
  * A pick's compact name: its part, then its kind's glyph and its number on that part ("base ◧5"),
  * or, for several of one kind, their count ("base ◧×5"). The words ("base · face 5") stay its
- * accessible name.
- * @typedef {{ name: string, kind: string, number?: string, count?: number }} CompactName
+ * accessible name. With no part (`name` left out: a document of one part, which the page names
+ * already), `words` after the glyph alone ("face 5", "5 faces").
+ * @typedef {{ name?: string, kind: string, number?: string, count?: number, words?: string }} CompactName
  */
 export const compactSuffix = compact => (compact.count ? `×${compact.count}` : String(compact.number || ""));

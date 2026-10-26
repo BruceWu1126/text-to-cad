@@ -127,3 +127,13 @@ it('a one-part STEP labelled with spaces gives a reference for its part, a named
     expect(parsePromptReference(line)?.target).toEqual({ kind: 'cad-selector', selectors: [line.slice(line.indexOf('#') + 1)] });
   }
 });
+
+it("a chip of a document of one part says its kind and number alone, the page naming the part; one of several parts says its part", () => {
+  const resource = at('/work/STEP/bracket.step');
+  const one = renderHook(() => useXbfSelectionChips({ scene: bracketScene, tree: presentXbfTree(bracketStructure), resource,
+    selectedIds: ['i0/face/7'], facts: new Map(), onRemove: () => {}, onHover: () => {} })).result.current.chips[0] as any;
+  expect([one.label, one.compact, one.text]).toEqual([`${LABEL} · face 7`, { kind: 'face', number: '7', words: 'face 7' }, undefined]);
+  const several = renderHook(() => useXbfSelectionChips({ scene, tree, resource: at('/work/XBF/kit.xbf'),
+    selectedIds: ['i2/face/1', 'i2/face/7'], facts: new Map(), onRemove: () => {}, onHover: () => {} })).result.current.chips[0] as any;
+  expect(several.compact).toEqual({ name: 'finger', kind: 'face', count: 2 });
+});
