@@ -4,10 +4,11 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { TreeFilterInput } from "@text-to-cad/ui/primitives/tree-filter";
-import { TREE_GLYPH_CLASS, TREE_GLYPH_STROKE, TREE_INDENT_PX, TREE_ROW_INSET_PX, TreeRowChevron, TreeRowGuides, TreeRowLabel, TreeRowSurface } from "@text-to-cad/ui/primitives/tree-row";
+import { TREE_GLYPH_STROKE, TREE_INDENT_PX, TREE_ROW_INSET_PX, TreeRowChevron, TreeRowGuides, TreeRowLabel, TreeRowSurface } from "@text-to-cad/ui/primitives/tree-row";
 import { cn } from "@text-to-cad/ui/utils";
 import { useI18n } from "@text-to-cad/ui/i18n";
 import { FileIcon, FolderIcon } from "./icons.jsx";
+import { DOCUMENT_ROW_GLYPH_CLASS } from "./DocumentGlyph.jsx";
 import { useControlUsage } from "../../usage/controls.js";
 
 // The wait after a keystroke before the filter searches; each keystroke cancels the search before it.
@@ -94,7 +95,7 @@ function Row({ kind, path, detail = "", name, depth = 0, active = false, expande
     aria-expanded={kind === "directory" ? expanded : undefined} onClick={onClick} onDoubleClick={onDoubleClick}>
     <TreeRowGuides depth={depth} inset={ROW_INSET_PX} />
     {kind === "directory" ? <TreeRowChevron expanded={expanded} />
-      : <FileIcon className={TREE_GLYPH_CLASS} path={path} strokeWidth={TREE_GLYPH_STROKE} />}
+      : <FileIcon className={DOCUMENT_ROW_GLYPH_CLASS} path={path} strokeWidth={TREE_GLYPH_STROKE} />}
     <TreeRowLabel>{detail ? <span className="text-muted-foreground">{detail}</span> : null}{name}</TreeRowLabel>
   </TreeRowSurface></TooltipHint>;
 }

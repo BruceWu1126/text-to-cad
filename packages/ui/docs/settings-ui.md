@@ -40,8 +40,10 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   host that shows the view alone (`chrome: "bare"`, the CAD app's file handler: below), and never in Preview, which draws its
   own bar in its place, in every host (see [Preview](#camera-animation-and-preview)). Left: the text-to-cad logo,
   named Menu, with no chevron: over the home the TEXTTOCAD
-  wordmark, 20px tall (about 117px wide), and over a document the "C", 16px in the row's 24px
-  button: a plain swap between the home and a page, with no animation. Its mark's left edge is
+  wordmark and over a document the "C", both 16px tall (one baseline and cap height: only the
+  width changes, the wordmark about 94px wide), in one box in the row's 24px button: going
+  between the home and a page the two crossfade in 150ms while the box's width follows, cut
+  straight under `prefers-reduced-motion` or the host's `reducedMotion`. Its mark's left edge is
   the page's 16px gutter, the Home grid's left edge, over the home and over a page alike (the
   row starts 12px in, the button's padding is 4px). The logo opens the
   **app menu** (see [Settings](#settings)) — a host with no home has it too — then, where the
@@ -58,7 +60,7 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   is the file menu: Copy path, and Reveal in Finder / Show in Explorer / Show in file
   manager, each only where the host can do it, and no ⋯ where it can do none. The name has
   no right-click menu and there are no crumbs. The left's controls sit edge to edge, spaced
-  by their own padding alone: the logo's 24px button (the C; the wordmark's is 125px), Back, Forward and the ⋯ in 20px ones,
+  by their own padding alone: the logo's 24px button (the C; the wordmark's is about 102px), Back, Forward and the ⋯ in 20px ones,
   and the name 4px in from its edges, so about 7px separate one glyph from the next. Right, only what a host or a file adds: first, the
   update — a blue download button, there only when the host
   found a newer release, whose menu says the step to it, how this host updates and what
@@ -156,13 +158,12 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   folders on the way to it), which holds each model's `documents/<id>/document.xbf` — in compact rows: one 24px
   line of 12px text each, its kind a small light glyph in one column 5px in from the row's
   left end and 4px before the name (a folder its disclosure chevron, with no folder icon; a
-  file its type's icon), as the file sidebar's trees draw theirs. A CAD file's icon is the
-  viewer's own file glyph (`fileGlyphs.jsx`, through `EntryIcon.jsx`): lucide's file outline on
-  its 24-unit grid and stroke, with what the file holds drawn small inside it, so a file reads
-  as a file at a glance — the same in the explorer, the Home, the name menu and the navbar:
-  STEP and xbf a cube, STL and 3MF a triangle cut into facets, GLB three axes, DXF a flat
-  polyline, a robot description (URDF, SRDF, SDF) two joints and their link. A model, built
-  from code, is lucide's plain cube (`Box`). A press on a subfolder opens it
+  file its glyph), as the file sidebar's trees draw theirs. Every CAD file, whatever its kind, has
+  one glyph, lucide's plain `File` (`EntryIcon.jsx`), and a model, built from code, lucide's `Box`
+  (`DocumentGlyph.jsx`), both 16px wherever documents are listed: the Home's tiles and table,
+  the explorer and the name menu (in a compact row drawn 2px past each side of the 12px glyph
+  column, so the names start where they do). The name beside it says which kind; a file still
+  loading is the spinner. A press on a subfolder opens it
   inline, under itself, its rows 10px further in and hung from a faint line under its
   chevron, read once when it first opens; another press closes it, and Right and Left do the
   same from the keyboard. A double-click opens it in the explorer's place, as a crumb does —

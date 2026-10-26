@@ -55,20 +55,27 @@ it('draws the navbar over every file, named by its name, and over the home with 
   expect(screen.queryByRole('menuitem', { name: 'Back to home' })).toBeNull();
 });
 
-it('heads the home with the TEXTTOCAD wordmark and a document with the C, a plain swap of the one menu button\'s mark', async () => {
+it('heads the home with the TEXTTOCAD wordmark and a document with the C, both in one button that crossfades between them', async () => {
   const homed = { ...host, links: viewerLinks({ version: '0.7.4' }), navigation: { openFile() {}, home() {} } };
-  const view = (file: string | null) => <FileViewer file={file} host={homed as any} renderers={[renderer]} state={{}} onStateChange={() => {}}
+  const view = (file: string | null, extra: object = {}) => <FileViewer file={file} host={{ ...homed, ...extra } as any} renderers={[renderer]} state={{}} onStateChange={() => {}}
     presentation={{ home: <p>home</p> } as any} />;
   const { rerender } = render(view(null));
   await screen.findByText('home');
-  const images = () => [...screen.getByRole('button', { name: 'Menu' }).querySelectorAll('img')].map(image => image.getAttribute('src'));
-  expect(images()).toEqual([expect.stringMatching(/texttocad/)]);
+  const logo = screen.getByRole('button', { name: 'Menu' });
+  // Both marks stand in the one box; which shows is the button's state (the CSS crossfades them).
+  const images = () => [...logo.querySelectorAll('.cad-navbar-logo-box img')].map(image => image.getAttribute('src'));
+  expect([logo.getAttribute('data-logo'), images()]).toEqual(['wordmark', [expect.stringMatching(/texttocad/), expect.stringMatching(/C(%20| )logo/)]]);
   rerender(view(FILE));
   await screen.findByText('shown');
-  expect(images()).toEqual([expect.stringMatching(/C(%20| )logo/)]);
+  expect(screen.getByRole('button', { name: 'Menu' })).toBe(logo);
+  expect(logo.getAttribute('data-logo')).toBe('mark');
   rerender(view(null));
   await screen.findByText('home');
-  expect(images()).toEqual([expect.stringMatching(/texttocad/)]);
+  expect(logo.getAttribute('data-logo')).toBe('wordmark');
+  // A host that asks for still motion cuts straight, as the platform's setting does in the CSS.
+  expect(logo.getAttribute('data-motion')).toBeNull();
+  rerender(view(null, { environment: { colorScheme: 'light', reducedMotion: true } }));
+  expect(screen.getByRole('button', { name: 'Menu' }).getAttribute('data-motion')).toBe('reduced');
 });
 
 it('draws no navbar where the host asks for the view alone (`chrome: "bare"`): over a file or the home, whatever it hands the navbar', async () => {

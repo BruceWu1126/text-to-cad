@@ -110,10 +110,19 @@
   }
 }
 
-/* The navbar's logo, the app menu's trigger (`ViewerNavbar.jsx`): the TEXTTOCAD wordmark over the home, 20px
- * tall (about 117px wide), and the C over a document, 16px in the row's 24px button: a plain swap. */
-.cad-navbar-wordmark { display: block; width: auto; max-width: none; height: 20px; user-select: none; -webkit-user-drag: none; }
-.cad-navbar-mark { display: block; width: 16px; height: 16px; user-select: none; -webkit-user-drag: none; }
+/* The navbar's logo, the app menu's trigger (`ViewerNavbar.jsx`): the TEXTTOCAD wordmark over the home and the C
+ * over a document, both 16px tall (one baseline and cap height: the marks share their vertical box), the
+ * wordmark 16 * 32.56 / 5.56 = about 94px wide. Both stand at the box's left: going between the home and a page
+ * they crossfade in 150ms while the box's width follows; where motion is reduced it cuts straight. */
+.cad-navbar-logo-box { position: relative; display: block; width: 16px; height: 16px; overflow: hidden; transition: width .15s ease; }
+.cad-navbar-logo[data-logo=wordmark] .cad-navbar-logo-box { width: calc(16px * 32.56 / 5.56); }
+.cad-navbar-wordmark, .cad-navbar-mark { position: absolute; top: 0; left: 0; height: 16px; max-width: none; transition: opacity .15s ease; user-select: none; -webkit-user-drag: none; }
+.cad-navbar-wordmark { width: auto; opacity: 0; }
+.cad-navbar-mark { width: 16px; }
+.cad-navbar-logo[data-logo=wordmark] .cad-navbar-wordmark { opacity: 1; }
+.cad-navbar-logo[data-logo=wordmark] .cad-navbar-mark { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .cad-navbar-logo-box, .cad-navbar-wordmark, .cad-navbar-mark { transition: none; } }
+.cad-navbar-logo[data-motion=reduced] :is(.cad-navbar-logo-box, .cad-navbar-wordmark, .cad-navbar-mark) { transition: none; }
 
 /* The host's home (`library/`): the models opened before, to open again, on the page's own
  * colour, the navbar's. One type scale: every text is text-ui (13px) -- the heading, the type filter,
@@ -164,7 +173,7 @@
 .cad-library-card .cad-library-label { font-weight: 500; line-height: 18px; color: var(--foreground); }
 .cad-library-name { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--foreground); }
 .cad-library-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A card's and a row's kind, 16px: a model's cube or a file's file glyph, the name menu's own. */
+/* A card's and a row's kind, 16px: a model's cube or a file's plain File, the name menu's own. */
 .cad-library-glyph { flex: none; width: 16px; height: 16px; color: var(--muted-foreground); }
 .cad-library-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-tiny, 0.6875rem); line-height: 14px; color: var(--muted-foreground); }
 .cad-library-card[data-missing] .cad-library-thumbnail, [data-missing] .cad-library-name, .cad-library-card[data-missing] .cad-library-body { opacity: .55; }

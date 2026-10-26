@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, ChevronDown, Ellipsis } from "lucide-react";
-import { useRef, useState } from "react";
+import { useContext, useRef, useState } from "react";
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@text-to-cad/ui/primitives/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@text-to-cad/ui/primitives/popover";
@@ -12,6 +12,7 @@ import wordmark from "../../assets/logo-texttocad.svg";
 import { NAVBAR_CONTROLS_CLASS, NAVBAR_ROW_CLASS } from "../../lib/navbarRow.js";
 import { FLOATING_SURFACE_CLASS } from "../../lib/floatingSurface.js";
 import { useViewerMobile } from "../responsive.js";
+import { ViewerHostContext } from "../../host/context.js";
 
 import { AppMenu } from "./AppMenu.jsx";
 import { entryMenu } from "./entry-menu.js";
@@ -55,16 +56,21 @@ const TAB_CONTROLS = Object.freeze({ models: "models", files: "explorer" });
 const NAV_ITEM_CLASS = "flex h-6 shrink-0 cursor-pointer items-center rounded-md outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground";
 
 /**
- * The text-to-cad logo, the app's menu: over the home the TEXTTOCAD wordmark, 20px tall; over a
- * document the C, the size of the row's other icon buttons. A plain swap, with no animation: the
- * one button shows the one or the other.
+ * The text-to-cad logo, the app's menu: over the home the TEXTTOCAD wordmark, over a document the
+ * C, both 16px tall, so they share one baseline and cap height and only the width changes. Both
+ * stand in one box: going between the home and a page, they crossfade in 150ms while the box's
+ * width follows (`cad-navbar-logo`), cut straight where motion is reduced (the platform's setting,
+ * in the CSS, or the host's `reducedMotion`).
  */
 function LogoMenu({ onHome, menu, home = false }) {
   const { t } = useI18n();
+  const still = useContext(ViewerHostContext)?.environment.reducedMotion === true;
   return <AppMenu onHome={onHome} {...menu} trigger={<button type="button" aria-label={t("navbar.menu")} className={cn(NAV_ITEM_CLASS, "cad-navbar-logo justify-start px-1")}
-    data-navbar-menu="" data-logo={home ? "wordmark" : "mark"}>
-    {home ? <img src={wordmark} alt="" className="cad-navbar-wordmark" draggable={false} />
-      : <img src={logo} alt="" className="cad-navbar-mark" draggable={false} />}
+    data-navbar-menu="" data-logo={home ? "wordmark" : "mark"} data-motion={still ? "reduced" : undefined}>
+    <span className="cad-navbar-logo-box" aria-hidden="true">
+      <img src={wordmark} alt="" className="cad-navbar-wordmark" draggable={false} />
+      <img src={logo} alt="" className="cad-navbar-mark" draggable={false} />
+    </span>
   </button>} />;
 }
 

@@ -7,9 +7,9 @@
  * filename beside it already does.
  *
  * The nine formats the CAD Viewer renders are the exception, and they are not
- * an exception to that rule: they go through the viewer's own `EntryIcon`, a
- * file glyph of its own each (`fileGlyphs.jsx`: lucide's file outline, a `.step`
- * with a cube inside, an `.stl` with facets), everywhere either app lists files. `@text-to-cad/core`'s `fileFormats` decides
+ * an exception to that rule: they go through the viewer's own `EntryIcon`, one
+ * plain lucide `File` for every one of them (the name says which kind),
+ * everywhere either app lists files. `@text-to-cad/core`'s `fileFormats` decides
  * which nine those are — one authority, reachable from both apps.
  */
 import {

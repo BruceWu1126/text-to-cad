@@ -479,7 +479,7 @@ every host, the navbar steps aside for Preview's own bar. Over the home the navb
 the logo and its menu (no Back to home), Back and Forward where the host hands a `history`,
 and the host's update and actions, each where it stands over a file; the home's type filter, search and
 layout switch stay in its control row, and its links are the app menu's. Left: the text-to-cad
-logo (the TEXTTOCAD wordmark over the home, the "C" over a document, a plain swap of one button),
+logo (the TEXTTOCAD wordmark over the home, the "C" over a document, both 16px tall in one button that crossfades between them),
 which opens the app menu (`AppMenu`, `file-viewer/navigation/AppMenu.jsx`), then Back and
 Forward where the host hands a `history`, then the open file's name, with no glyph, and its ⋯ menu. The
 logo, Back and Forward, the name and the ⋯ share one style (`NAV_ITEM_CLASS`):
