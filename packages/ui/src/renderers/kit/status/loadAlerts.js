@@ -10,12 +10,13 @@ export function isViewerServiceFailure(failure, detail) {
 }
 
 // The client names each request's operation by a token (`@text-to-cad/core/client`'s `request`):
-// a sentence says it in words, the details keep the token.
+// a sentence says it in words, the details keep the token. A token this kit has no words for (a
+// family's own read) is the file being loaded; an operation already in words is said as it is.
 const OPERATION_WORDS = Object.freeze({
-  "engine-document": "loading the model", catalog: "looking up the file", drawing: "loading the drawing",
-  robot: "loading the robot", folder: "reading the folder", search: "searching the folder", server: "reaching the viewer",
+  "engine-document": "loading the model", catalog: "looking up the file", folder: "reading the folder",
+  search: "searching the folder", server: "reaching the viewer",
 });
-const operationWords = operation => OPERATION_WORDS[operation] || operation;
+const operationWords = operation => OPERATION_WORDS[operation] || (/\s/.test(operation) ? operation : "loading the file");
 
 export function failureAlert(fileRef, error, failure, compile = false) {
   const detail = String(failure?.detail || error || "").trim();

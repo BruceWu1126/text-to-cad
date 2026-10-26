@@ -21,7 +21,7 @@ test("a request that failed says what it was doing in words, and keeps the clien
   assert.equal(lost.message, "The browser lost contact with the viewer while loading the model for “741015b2”. Check that the viewer is running and this tab has the correct address, then reload.");
   assert.ok(lost.details.includes("Operation: engine-document"));
   const refused = failureAlert("/m/a.dxf", "", { kind: "http", status: 502, operation: "drawing", detail: "bad gateway" });
-  assert.equal(refused.message, "The server returned HTTP 502 while loading the drawing for “/m/a.dxf”.");
+  assert.equal(refused.message, "The server returned HTTP 502 while loading the file for “/m/a.dxf”.");
   // An operation already in words is said as it is.
   assert.match(failureAlert("/m/a.step", "", { kind: "network", operation: "preparing display assets", detail: "Failed to fetch" }).message,
     /while preparing display assets for/);
