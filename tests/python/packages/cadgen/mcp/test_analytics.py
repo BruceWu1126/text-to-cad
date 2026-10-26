@@ -668,6 +668,20 @@ class SenderTest(_Tmp):
                          ({"name": "cadgen-viewer", "version": __version__}, "browser"))
         self.assertEqual([key for key in ("client", "presentation") if key in app], [])
 
+    def test_a_batch_names_the_version_its_installation_runs_as(self) -> None:
+        # A development install's own `<version>-dev.<time>` (what the `cadgen` command tells it, and its engine is
+        # named by): a send forced from one is told apart from the release's, which names its own.
+        from cadgen import __version__
+
+        choose(True, by="cli", path=self.path)
+        for named, version in (("0.8.0-dev.20261026120000", "0.8.0-dev.20261026120000"), ("", __version__)):
+            sent: list[dict] = []
+            with self.subTest(named=named), mock.patch.dict("os.environ", {"CADGEN_INSTALLATION_VERSION": named}):
+                recorder = Recorder(path=self.path, send=sent.append)
+                recorder.called("cad_show", True)
+                recorder.flush()
+                self.assertEqual([payload["version"] for payload in sent], [version])
+
     def test_what_commands_and_scripts_counted_goes_as_a_cli_batch_never_in_an_apps(self) -> None:
         """The spool holds what `python model.py` and `cadgen` commands counted: builds, the engine's health, a worker
         that died, a command's crash. The recorder that drains it -- the engine's for the CAD app's sessions, or
@@ -893,26 +907,58 @@ class NoticeTest(_Tmp):
         self.assertIn("notifiedAt", json.loads(self.path.read_text(encoding="utf-8"))["telemetry"])
 
     def test_its_off_command_runs_the_installation_that_said_it_when_pasted(self) -> None:
-        from cadgen import __version__
+        from cadgen._internal import installations
         from cadgen.analytics import off_command
 
+        uvx = "uvx --no-config --managed-python --python 3.13 --from"
         script = self.tmp / "bin" / ("cadgen.exe" if os.name == "nt" else "cadgen")
         script.parent.mkdir()
         script.write_text("#!/bin/sh\n", encoding="utf-8")
         script.chmod(0o755)
-        # uvx made it: the plugin's own pinned line, which reuses this installation.
-        with mock.patch("sys.prefix", str(self.tmp / "uv" / "archive-v0" / "abc")):
-            self.assertEqual(off_command(), "uvx --no-config --managed-python --python 3.13 "
-                                            f"--from cadgen=={__version__} cadgen telemetry off")
-        # The cadgen on PATH is the one that runs; one off PATH is named by its path.
-        with mock.patch("sys.argv", [str(script)]):
-            with mock.patch.dict("os.environ", {"PATH": str(script.parent)}):
-                self.assertEqual(off_command(), "cadgen telemetry off")
-            with mock.patch.dict("os.environ", {"PATH": str(self.tmp)}):
-                self.assertEqual(off_command(), f"{script.resolve()} telemetry off")
-        with mock.patch("sys.argv", ["/x/cadgen/cli/__main__.py"]), mock.patch("sys.executable", "/venv/bin/python"):
-            self.assertEqual(off_command(), "/venv/bin/python -m cadgen.cli telemetry off")
-        self.assertIn(f"Turn off: {off_command()} · {PRIVACY_URL}", notice_text())
+        launcher = self.tmp / "launcher"
+        env = {"CADGEN_STATE_DIR": str(self.tmp / "state"), "CADGEN_LAUNCHER_DIR": str(launcher),
+               "CADGEN_INSTALLATION_VERSION": "", "PATH": str(self.tmp / "nowhere")}
+        made = self.tmp / "uv" / "archive-v0" / "abc"  # an environment uvx made
+        record = made / "lib" / "site-packages" / "cadgen-0.8.0.dist-info"
+        record.mkdir(parents=True)
+        with mock.patch.dict("os.environ", env), mock.patch("sys.prefix", str(made)), \
+                mock.patch("sysconfig.get_path", return_value=str(record.parent)) as site:
+            # Installed from an index: the release's own requirement, which uvx reuses.
+            self.assertEqual(off_command(), f"{uvx} cadgen==0.8.0 cadgen telemetry off")
+            self.assertEqual(site.call_args.kwargs["vars"], {"base": str(made), "platbase": str(made)})
+            # From a wheel -- a development install's, whose number no index has: that wheel, while it is there.
+            wheel = self.tmp / "wheels" / "cadgen-0.8.0-py3-none-any.whl"
+            wheel.parent.mkdir()
+            wheel.write_bytes(b"")
+            (record / "direct_url.json").write_text(json.dumps({"url": wheel.as_uri(), "archive_info": {}}), encoding="utf-8")
+            self.assertEqual(off_command(), f"{uvx} {wheel} cadgen telemetry off")
+            # Registered (its CAD app's server started, or `cadgen doctor` ran): the `cadgen` command, by the version
+            # the record names -- by its path while it is not the `cadgen` on PATH.
+            python, console = made / "bin" / "python", made / "bin" / "cadgen"
+            for path in (python, console):
+                path.parent.mkdir(exist_ok=True)
+                path.write_text("", encoding="utf-8")
+            installations.register("0.8.0-dev.20261026120000", (str(console), str(python), str(made)))
+            self.assertEqual(off_command(), f"{uvx} {wheel} cadgen telemetry off", "no `cadgen` command to run it")
+            installations.write_proxy()
+            proxy = installations.proxy_path()
+            self.assertEqual(off_command(), f"{proxy} +0.8.0-dev.20261026120000 telemetry off")
+            with mock.patch.dict("os.environ", {"PATH": str(launcher)}):
+                self.assertEqual(off_command(), "cadgen +0.8.0-dev.20261026120000 telemetry off")
+            wheel.unlink()  # the wheel gone and nothing registered: this interpreter, as it runs now
+            installations.forget("0.8.0-dev.20261026120000")
+            with mock.patch("sys.argv", ["/x/cadgen/cli/__main__.py"]), mock.patch("sys.executable", "/venv/bin/python"):
+                self.assertEqual(off_command(), "/venv/bin/python -m cadgen.cli telemetry off")
+        with mock.patch.dict("os.environ", env):
+            # The cadgen on PATH is the one that runs; one off PATH is named by its path.
+            with mock.patch("sys.argv", [str(script)]):
+                with mock.patch.dict("os.environ", {"PATH": str(script.parent)}):
+                    self.assertEqual(off_command(), "cadgen telemetry off")
+                with mock.patch.dict("os.environ", {"PATH": str(self.tmp)}):
+                    self.assertEqual(off_command(), f"{script.resolve()} telemetry off")
+            with mock.patch("sys.argv", ["/x/cadgen/cli/__main__.py"]), mock.patch("sys.executable", "/venv/bin/python"):
+                self.assertEqual(off_command(), "/venv/bin/python -m cadgen.cli telemetry off")
+            self.assertIn(f"Turn off: {off_command()} · {PRIVACY_URL}", notice_text())
 
     def test_a_larger_default_is_said_again_before_it_is_sent(self) -> None:
         notify(io.StringIO(), path=self.path)

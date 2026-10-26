@@ -12,7 +12,8 @@ exits, each batch under an id of its own and stamped with the time it was made:
 - who, by random ids only: an install id made on this machine, an id for the sending process, and one
   for the batch, so a batch sent again is never counted twice;
 - what runs: which process (``app``, ``viewer``, or ``cli``: what ``cadgen`` commands and model scripts
-  counted, a batch of its own from whichever process sends it), cadgen's version, where it was
+  counted, a batch of its own from whichever process sends it), the version the installation runs as
+  (``installation_version``: a release's, or a development install's ``<version>-dev.<time>``), where it was
   installed from (its channel, ``cadgen/_internal/channel.py``: a plugin directory, the Cursor
   Marketplace, GitHub, a development install, or ``unknown``), the operating system and processor,
   and from the apps the agent app's name and version and how that app shows CAD (tabs, inline or
@@ -178,18 +179,29 @@ def notice_text() -> str:
 
 
 def off_command() -> str:
-    """``cadgen telemetry off`` as a command that runs this installation when pasted: the pinned ``uvx``
-    line the plugin's server runs (``launch.launch_command``) for an installation uvx made, which
-    that line reuses; ``cadgen`` where the ``cadgen`` on PATH is the script that runs now; else that
-    script by its path, or this interpreter with ``-m cadgen.cli``."""
+    """``cadgen telemetry off`` as a command that runs this installation when pasted, never one naming a
+    version it is not (a development wheel's is on no index): the ``cadgen`` command with the version this
+    installation is registered as (``cadgen +<version>``, ``_through_proxy``) where it is registered; else, for
+    an installation uvx made, the ``uvx`` line that makes it from what it was installed from (``_installed_from``:
+    the release's requirement, or the wheel); else ``cadgen`` where the ``cadgen`` on PATH is the script that runs
+    now, that script by its path, or this interpreter with ``-m cadgen.cli``."""
     import shlex
     import shutil
 
-    from cadgen._internal.launch import launch_command
+    from cadgen._internal.launch import LAUNCHER
 
     quote = _windows_quote if os.name == "nt" else shlex.quote
+    try:
+        proxied = _through_proxy(quote)
+    except Exception:  # noqa: BLE001 - records that cannot be read name no command: the next way does
+        LOG.debug("could not read this installation's record", exc_info=True)
+        proxied = None
+    if proxied is not None:
+        return f"{proxied} telemetry off"
     if "archive-v0" in Path(sys.prefix).parts:  # uv's cache: an installation of the exact requirement
-        return f"{launch_command('cadgen')} telemetry off"
+        source = _installed_from()
+        if source is not None:
+            return " ".join((*LAUNCHER, quote(source), "cadgen telemetry off"))
     script = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else None
     if script is not None and script.stem == "cadgen" and script.suffix.lower() in ("", ".exe") and script.is_file():
         found = shutil.which("cadgen")
@@ -197,6 +209,70 @@ def off_command() -> str:
             return "cadgen telemetry off"
         return f"{quote(str(script))} telemetry off"
     return f"{quote(sys.executable)} -m cadgen.cli telemetry off"
+
+
+def _through_proxy(quote: Callable[[str], str]) -> str | None:
+    """``cadgen +<version>``: the ``cadgen`` command (``cadgen._internal.installations``) running this installation
+    by the version its record names -- ``cadgen`` where that command is the one on PATH, else by its path. ``None``
+    where no record names this installation, or the command is not there."""
+    import shutil
+
+    from cadgen._internal import installations
+
+    record = installations.here()
+    proxy = installations.proxy_path()
+    if record is None or installations.proxy_status(proxy) not in (installations.OK, installations.NEWER,
+                                                                     installations.STALE):
+        return None
+    found = shutil.which("cadgen")
+    on_path = found is not None and os.path.normcase(os.path.realpath(found)) == os.path.normcase(os.path.realpath(proxy))
+    return f"{'cadgen' if on_path else quote(proxy)} +{record['version']}"
+
+
+def _installed_from() -> str | None:
+    """What uvx installed this environment from, as ``uvx --from`` takes it again: the wheel, folder or URL its
+    record of a direct install names (``direct_url.json``, PEP 610) while that is still there, else -- installed
+    from an index -- the release's requirement (``cadgen==<version>``). ``None`` when neither can be read."""
+    import sysconfig
+    from urllib.parse import urlparse
+    from urllib.request import url2pathname
+
+    site = Path(sysconfig.get_path("purelib", vars={"base": sys.prefix, "platbase": sys.prefix}))
+    try:
+        found = sorted((info.stat().st_mtime_ns, info) for info in site.glob("cadgen-*.dist-info"))
+    except OSError:
+        return None
+    if not found:
+        return None
+    info = found[-1][1]  # the last one written: the install that put cadgen there (``version.declared_version``)
+    try:
+        direct = json.loads((info / "direct_url.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return f"cadgen=={info.name[len('cadgen-'):-len('.dist-info')]}"
+    except (OSError, ValueError):
+        return None
+    url = direct.get("url") if isinstance(direct, dict) else None
+    if not isinstance(url, str) or "vcs_info" in direct:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme == "file":
+        path = url2pathname(parsed.path)  # unquoted, and a drive's ``/C:/...`` made ``C:\...``
+        return path if os.path.exists(path) else None
+    return url if parsed.scheme in ("http", "https") else None
+
+
+def installation_version() -> str:
+    """The version this installation runs as (``cadgen.engine.daemon.installation``): the one it is registered
+    as -- a development install's ``<version>-dev.<time>`` -- else its release's (``cadgen.__version__``)."""
+    try:
+        from cadgen.engine.daemon import installation
+
+        return installation()
+    except Exception:  # noqa: BLE001 - a version is only reported: nothing fails for want of one
+        LOG.debug("could not read the installation's version", exc_info=True)
+        from cadgen import __version__
+
+        return __version__
 
 
 def _windows_quote(text: str) -> str:
@@ -1311,6 +1387,7 @@ class Recorder:
         self._context: dict[str, Any] = {"process": process if process in PROCESSES else "app", "version": "unknown",
                                          "channel": "unknown", "platform": "other"}
         self._named: str | None = None  # the channel this process was told itself (``_channel``)
+        self._installation: str | None = None  # the version the installation runs as (``_version``)
         self._tally = _Tally()
         # The batch the receiver did not take, whole, and the answer it was made under: sent again, as it is,
         # before anything newer (``flush``). One at most: what is noted meanwhile waits in the tally.
@@ -1334,12 +1411,20 @@ class Recorder:
 
     @_guarded(lambda: None)
     def _describe(self) -> None:
-        from cadgen import __version__
         from cadgen._internal.channel import named
 
         self._named = named()
-        self._context.update(version=_token(__version__, 32) or "unknown", channel=self._channel(),
-                             platform=_platform_name(), arch=_token(_platform.machine().lower(), 16))
+        self._context.update(channel=self._channel(), platform=_platform_name(),
+                             arch=_token(_platform.machine().lower(), 16))
+
+    def _version(self) -> str:
+        """The version this installation runs as (``installation_version``: a development install's
+        ``<version>-dev.<time>`` too, so what it sends is told apart from the release's), read once, as the first
+        batch is made: at start it would wake the state folder's registry, which a CAD app's initialize never
+        needs."""
+        if self._installation is None:
+            self._installation = _token(installation_version(), 32) or "unknown"
+        return self._installation
 
     def _channel(self) -> str:
         """Where this install came from: what this process was told itself, else the channel its plugin's server wrote
@@ -1633,11 +1718,11 @@ class Recorder:
                 return None
         found = dict(UNAVAILABLE) if self._off else status(path=self.path, probe=False)
         decided = _answer((_read(settings) or {}) if found["sharing"] else {})  # which answer is in force (``_answer``)
-        where = self._channel()
+        where, version = self._channel(), self._version()
         with self._lock:
             tally, basis, choices = self._tally, self._basis, self._choices
             self._tally, self._basis = _Tally(), decided
-            context = {**self._context, "channel": where}
+            context = {**self._context, "version": version, "channel": where}
             # Noted under an earlier answer -- before a yes given in another process (this one's own clears
             # what it noted), before the person was told, or under one never read: never sent. Which answer,
             # not whether it came later: Windows' clock moves in 16 ms steps, so a yes and the batch it lands
