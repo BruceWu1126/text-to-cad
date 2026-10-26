@@ -1,5 +1,5 @@
 {
-  "about": "The models corpus_bench.py measures, smallest first, each with one edit whose `from` occurs exactly once in its file. `root` is relative to the repository; `cwd`, `pythonpath`, `xbf`, `needs` and the edit's `file` are relative to the model's root; `targets` to its `cwd`.",
+  "about": "The models corpus_bench.py measures, smallest first, each with one edit whose `from` occurs exactly once in its file. `root` is relative to the repository (`tom`'s is the checkout beside it, in its own repository); `cwd`, `pythonpath`, `xbf`, `needs` and the edit's `file` are relative to the model's root; `targets` to its `cwd`.",
   "models": [
     {
       "name": "l_bracket",
@@ -62,14 +62,14 @@
     },
     {
       "name": "tom",
-      "root": "models/tom",
+      "root": "../tom-cad",
       "cwd": ".",
       "pythonpath": ["src"],
       "targets": ["src/tom.py"],
       "xbf": "XBF/tom.xbf",
-      "needs": ["STEP/imported/parts"],
+      "needs": ["STEP/imported/recovered/tom_rev3/tom.step"],
       "edit": {"file": "src/lib/current_arm_parts.py", "from": "pattern_shift_x=-2.0", "to": "pattern_shift_x=-2.1"},
-      "note": "builds from tom/ with src on PYTHONPATH; reads the vendor STEP and Tom rev3's parts from the uncommitted STEP/imported (its src/README.md says how to put them there)"
+      "note": "the arm lives in its own repository, the checkout beside this one (a worktree has no sibling: give --config a copy of this file with the way up); builds from its root with src on PYTHONPATH and reads its pinned STEP/imported (Git LFS)"
     },
     {
       "name": "hypercar",

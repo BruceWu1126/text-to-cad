@@ -12,8 +12,9 @@ from one place; ``compare.py`` sets its rows beside the old engine's recorded nu
     .venv/bin/python scripts/bench/corpus_bench.py --model l_bracket     # one (repeat for more)
 
 A model (``corpus.json``, beside this script) is a project folder (``root``, relative to the
-repository), the folder its builds run from (``cwd``, relative to the project), the folders put
-on ``PYTHONPATH`` beside cadgen's (``pythonpath``), its ``targets`` (``script.py``, as ``python
+repository; ``../name`` is a checkout kept beside it), the folder its builds run from (``cwd``,
+relative to the project), the folders put on ``PYTHONPATH`` beside cadgen's (``pythonpath``),
+its ``targets`` (``script.py``, as ``python
 script.py`` builds it, or ``script.py::model`` for one model of a script), its document
 (``xbf``: where the batch saves the model its stem names, whose document the serve and
 snapshot steps read), one ``edit`` (``{file, from, to}``: ``from`` occurs exactly once in ``file``), the
@@ -108,8 +109,10 @@ PROBE = "import json, sys, cadgen; print(json.dumps({'cadgen': cadgen.__file__, 
 # --- the config ---------------------------------------------------------------------------------
 
 
-def _relative(value: Any) -> bool:
-    return isinstance(value, str) and bool(value) and not Path(value).is_absolute() and ".." not in Path(value).parts
+def _relative(value: Any, *, up: bool = False) -> bool:
+    """A non-empty relative path; one that climbs (``..``) only where ``up``."""
+    return (isinstance(value, str) and bool(value) and not Path(value).is_absolute()
+            and (up or ".." not in Path(value).parts))
 
 
 def _shape_problems(model: dict[str, Any], names: set[str]) -> list[str]:
@@ -123,9 +126,9 @@ def _shape_problems(model: dict[str, Any], names: set[str]) -> list[str]:
             found.append("a second model of this name")
         else:
             names.add(name)
-    for key, inside in (("root", "the repository"), ("cwd", "the project"), ("xbf", "the project")):
-        if key in model and not _relative(model[key]):
-            found.append(f"`{key}` is a relative path inside {inside}")
+    for key, where in (("root", "from the repository"), ("cwd", "inside the project"), ("xbf", "inside the project")):
+        if key in model and not _relative(model[key], up=key == "root"):
+            found.append(f"`{key}` is a relative path {where}")
     if isinstance(model.get("xbf"), str) and not model["xbf"].endswith(".xbf"):
         found.append("`xbf` names an .xbf")
     targets = model.get("targets")

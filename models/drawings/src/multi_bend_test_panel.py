@@ -19,8 +19,7 @@
 # material inside a bend radius becomes the curve and cannot stay flat.
 #
 # Not covered here, deliberately: a bend whose ends stop short of the edge and rely on relief
-# slits. The preview refuses those by design and names the shortfall; tom's link_bracket is the
-# fixture for that case.
+# slits. The preview refuses those by design and names the shortfall.
 
 from __future__ import annotations
 
