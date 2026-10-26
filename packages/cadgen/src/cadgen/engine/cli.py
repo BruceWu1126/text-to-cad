@@ -777,8 +777,10 @@ def status_text(answer: dict[str, Any]) -> str:
         if worker.get("busy") and frame:
             from cadgen.engine.progress import describe
 
-            # Where its build is: ``building tom.py::tom · Building geometry · 3/7 stages · 41s``.
-            doing = f"building {frame.get('model')} · {describe(frame)} · {doing}"
+            # Where its request is: ``building tom.py::tom · Building geometry · 3/7 stages · 41s`` (an
+            # export's or a snapshot's frame says its kind the same way: ``exporting``, ``drawing``).
+            verb = {"export": "exporting", "snapshot": "drawing"}.get(str(frame.get("kind")), "building")
+            doing = f"{verb} {frame.get('job')} · {describe(frame)} · {doing}"
         lines.append(f"  {'busy' if worker.get('busy') else 'idle'}  {name:<{width}}  {str(worker.get('pid')):>6}  "
                      f"{builds:>10}  {_gb(worker.get('rssMb')):>7}  {doing}")
     if standby:

@@ -47,13 +47,28 @@ test("a loader names its STAGE in `phase`; its own label never has to be recogni
   assert.equal(loadingProgress({ phase: "view", label: "Building anything at all", determinate: false }).label, "Preparing view");
 });
 
+test("the engine's progress event is named by its key, for every kind, counted where its stage has units", () => {
+  // One event for every job the engine runs (`cadgen/engine/progress.py`): the page reads its kind and
+  // stage and nothing of the engine's words, so the screen says each in the view's language.
+  const event = (kind, stage, done, total, detail = "") => ({ kind, stage, job: "hand.py::hand", outputs: [], detail, done, total, elapsedMs: 42 });
+  assert.deepEqual(loadingProgress(event("build", "body", 2, null, "finger")),
+    { label: "progress.build.body", detail: "finger", counts: "", percent: null, connectionLost: null }, "bodies cannot be counted ahead: no fraction");
+  assert.deepEqual(loadingProgress(event("build", "write", 1, 2, "hand.step")),
+    { label: "progress.build.write", detail: "hand.step", counts: "1/2", percent: 50, connectionLost: null });
+  assert.deepEqual(loadingProgress(event("import", "read", 0, null, "tom.step (48.2 MB)")),
+    { label: "progress.import.read", detail: "tom.step (48.2 MB)", counts: "", percent: null, connectionLost: null });
+  assert.deepEqual(loadingProgress(event("import", "collect", 120, 628)),
+    { label: "progress.import.collect", detail: "", counts: "120/628", percent: 19, connectionLost: null });
+  assert.equal(loadingProgress(event("export", "write", 0, 3, "arm.glb")).label, "progress.export.write");
+  assert.equal(loadingProgress(event("snapshot", "draw", 0, null)).label, "progress.snapshot.draw");
+  assert.deepEqual(loadingProgress(event("inspect-measure", "measure", 37, 256, "peg")),
+    { label: "progress.inspect-measure.measure", detail: "peg", counts: "37/256", percent: 14, connectionLost: null });
+  // The page's own words win while it is finding or preparing; a frame that only looks like an event is none.
+  assert.equal(loadingProgress(event("build", "body", 0, null), { finding: true }).label, "Finding file");
+  assert.equal(loadingProgress({ kind: "Build Model", stage: "body" }).label, "Opening model");
+});
+
 test("a file being imported reads as importing, and a cold open's meshing as meshing", () => {
-  // The engine's own frames of a STEP's import (`cadgen.engine.serve.Server.importing`): the reader
-  // parsing the file, its detail the file and its size, then its parts collected, counted.
-  assert.deepEqual(loadingProgress({ phase: "import", label: "Importing model", detail: "reading tom.step (48.2 MB)", done: 0, total: null, determinate: false }),
-    { label: "Importing model", detail: "reading tom.step (48.2 MB)", counts: "", percent: null, connectionLost: null });
-  assert.deepEqual(loadingProgress({ phase: "import", label: "Importing model", detail: "collecting parts", done: 120, total: 628, determinate: true }),
-    { label: "Importing model", detail: "collecting parts", counts: "120/628", percent: 19, connectionLost: null });
   // The import's build, as cadgen labels its phases: reading the file, collecting its parts
   // (counted), storing them.
   assert.equal(loadingProgress({ phase: "compile" }).label, "Importing model");

@@ -38,8 +38,9 @@ class _ImportingEngine:
 
 
 def _frame(detail: str, done: int = 0, total: int | None = None) -> dict:
-    return {"model": "part.step", "outputs": [], "phase": "import", "label": "Importing model", "detail": detail,
-            "done": done, "total": total, "determinate": total is not None, "elapsedMs": 0}
+    """An import's progress event (``cadgen.engine.progress``): the read, or the parts collected, counted."""
+    return {"kind": "import", "stage": "read" if total is None else "collect", "job": "part.step", "outputs": [],
+            "detail": detail, "done": done, "total": total, "elapsedMs": 0}
 
 
 class ImportStatusTest(unittest.TestCase):

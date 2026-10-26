@@ -69,6 +69,7 @@ def catalog():
                  "state": {"type": "string", "enum": ["queued", "running", "succeeded", "failed", "cancelled", "rejected"]},
                  "id": STRING, "epoch": STRING, "requestId": STRING, "operation": STRING,
                  "sequence": {"type": "integer"}, "stage": STRING, "cancellable": BOOL,
+                 "progress": {"type": "object", "description": "The engine's latest progress event for the operation: {kind, stage, job, outputs, detail, done, total, elapsedMs}; absent until it says one."},
                  "result": {"type": "object"}, "error": {"type": "string"}}},
              "annotations": {"readOnlyHint": name == "cad_inspect", "destructiveHint": name != "cad_inspect",
                              "idempotentHint": True, "openWorldHint": name != "cad_inspect"}}
@@ -335,9 +336,11 @@ class Operations(Jobs):
         job["kept"] = len(json.dumps(public).encode())
 
     def _perform(self, job, progress):
+        """The operation run through the engine's verb; where it is comes from the engine alone, as
+        progress events (``cadgen.engine.progress``) handed to ``progress``, never a word of this
+        module's own."""
         from cadgen.engine import api
         name, args = job["operation"], dict(job["arguments"])
-        progress({"label": name.removeprefix("cad_").capitalize() + " in progress"})
         if name == "cad_export":
             destinations = [absolute(path) for path in args.pop("destinations")]
             # Keep the one Python operation: all destinations are validated and share a document read.
@@ -353,14 +356,14 @@ class Operations(Jobs):
             if packet is not None:
                 packet = packet_paths(packet, args.get("source"))
                 job["writing"] = True
-                result = {"pictures": serial(api.snapshot(job=packet, **args))}
+                result = {"pictures": serial(api.snapshot(job=packet, **args, progress=progress))}
             else:
                 job["writing"] = True
-                result = {"pictures": [serial(api.snapshot(**args, out=absolute(output)))]}
+                result = {"pictures": [serial(api.snapshot(**args, out=absolute(output), progress=progress))]}
         elif name == "cad_inspect":
             if "ref" not in args and "query" not in args and "#" not in args["source"]:
                 args["query"] = "summary"  # what `cadgen inspect SOURCE` prints (``engine.cli``)
-            found = serial(api.inspect(**args))
+            found = serial(api.inspect(**args, progress=progress))
             if isinstance(found, dict) and isinstance(found.get("summary"), dict):
                 from cadgen.engine.cli import summary_text
 

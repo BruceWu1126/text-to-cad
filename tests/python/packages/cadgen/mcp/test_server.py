@@ -1247,6 +1247,8 @@ class ToolArgumentsTest(unittest.TestCase):
                                                       "waitMs": 10000})["structuredContent"]
             part = self.call(server, "cad_inspect", {"requestId": "inspect-a-part-0001", "source": f"{step}#COMPOUND",
                                                      "waitMs": 10000})["structuredContent"]
+        for call in asked:  # the engine is handed where to say its measurement's stages (``progress``)
+            self.assertTrue(callable(call.pop("progress", None)))
         self.assertEqual(asked, [{"source": str(step), "query": "summary"}, {"source": f"{step}#COMPOUND"}])
         inspection = whole["result"]["inspection"]
         self.assertEqual((inspection["summary"], inspection["text"]), (summary, summary_text(summary)))

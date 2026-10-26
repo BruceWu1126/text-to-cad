@@ -188,9 +188,6 @@ class ExportJobs(Jobs):
             return {"state": "ready", "stage": "Ready to save", "bytes": size,
                     "expiresAt": self.clock() + ARTIFACT_SECONDS}
 
-    def _progress(self, job, frame):
-        super()._progress(job, {**frame, "label": "Writing " + job["filename"]})
-
     def _finished(self, job):
         if job["state"] != "ready":
             self._remove(job)

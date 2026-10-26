@@ -311,10 +311,12 @@ class ServedStepTest(unittest.TestCase):
             done.set()
             listener.join()
         self.assertTrue(heard, "the import said where it was")
-        self.assertEqual([(frame["phase"], frame["label"], frame["model"]) for frame in heard[:1]],
-                         [("import", "Importing model", "shelf.step")])
-        self.assertTrue(heard[0]["detail"].startswith("reading shelf.step ("), heard[0])
-        self.assertEqual((heard[0]["determinate"], heard[0]["total"]), (False, None))
+        # The engine's one progress event (``progress.py``), of kind ``import``: the read first.
+        self.assertEqual([(frame["kind"], frame["stage"], frame["job"], frame["outputs"]) for frame in heard[:1]],
+                         [("import", "read", "shelf.step", [])])
+        self.assertTrue(heard[0]["detail"].startswith("shelf.step ("), heard[0])
+        self.assertEqual((heard[0]["done"], heard[0]["total"]), (0, None))
+        self.assertTrue(all(frame["stage"] in ("read", "collect") for frame in heard), heard)
         after = self.server.build_of(ident)
         self.assertEqual((after["building"], after["failed"]), (None, None), "nothing once the document is in")
         self.assertGreaterEqual(after["progress"], 2, "each stage, and the end, moved the count")

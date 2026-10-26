@@ -160,6 +160,34 @@ class SnapshotTest(unittest.TestCase):
         self.assertIn("display.exploded", done.stderr)
         self.assertEqual(out.read_bytes(), b"before")
 
+    def test_a_snapshot_says_its_stages_as_it_reaches_them_and_a_job_s_pictures_are_counted(self) -> None:
+        from cadgen.engine import snapshot as drawing
+
+        gl()
+        folder = Path(tempfile.mkdtemp(prefix="engine-stages-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        out = folder / "stand.png"
+        frames: list[dict] = []
+        # One picture: the engine's progress event (``progress.py``) of kind ``snapshot``, a stage at a time.
+        snapshot(self.document, out, size=(64, 48), daemon=False, progress=frames.append)
+        self.assertEqual([(frame["kind"], frame["stage"], frame["job"], frame["detail"], frame["total"], frame["outputs"])
+                          for frame in frames],
+                         [("snapshot", "scene", "stand.xbf", "stand.xbf", None, [str(out)]),
+                          ("snapshot", "draw", "stand.xbf", "", None, [str(out)]),
+                          ("snapshot", "write", "stand.xbf", "stand.png", None, [str(out)])])
+        # A job's pictures of one document: served and its scene made once, each picture drawn and
+        # written counted of them all.
+        frames.clear()
+        still = drawing.Still({}, None, False, False, (64, 48), None, None, None)
+        first, second = folder / "first.png", folder / "second.png"
+        drawing.draw_pictures([(self.document, first, still), (self.document, second, still)], daemon=False,
+                              progress=frames.append)
+        self.assertEqual([(frame["stage"], frame["detail"], frame["done"], frame["total"]) for frame in frames],
+                         [("scene", "stand.xbf", 0, None), ("draw", "", 0, 2), ("draw", "", 1, 2),
+                          ("write", "first.png", 0, 2), ("write", "second.png", 1, 2)])
+        self.assertEqual({frame["kind"] for frame in frames}, {"snapshot"})
+        self.assertEqual(frames[0]["outputs"], [str(first), str(second)])
+
     def test_a_failed_render_keeps_every_earlier_picture_and_a_job_moves_its_pictures_in_together(self) -> None:
         from unittest import mock
 

@@ -313,13 +313,13 @@ class ClientGoneTest(unittest.TestCase):
         return worker
 
     def test_the_worker_is_read_to_its_answer_when_its_client_is_gone(self) -> None:
-        lines = [{"log": "a"}, {"progress": {"phase": "names"}}, {"log": "b"}, {"done": {"reports": []}}]
+        lines = [{"log": "a"}, {"progress": {"kind": "build", "stage": "names"}}, {"log": "b"}, {"done": {"reports": []}}]
         worker = self.worker(b"".join((json.dumps(line) + "\n").encode() for line in lines), b"")
         worker._reader()
         self.assertEqual(worker.answers.get_nowait(), {"done": {"reports": []}})
         self.assertIsNone(worker.answers.get_nowait(), "the worker's end, after its answer")
         self.assertIsNone(worker.sink, "the gone client's sink dropped")
-        self.assertEqual(worker.progress, {"phase": "names"})
+        self.assertEqual(worker.progress, {"kind": "build", "stage": "names"})
 
     def test_its_stderr_is_read_to_the_end_when_its_client_is_gone(self) -> None:
         worker = self.worker(b"", b"a line the model printed\nanother\n")

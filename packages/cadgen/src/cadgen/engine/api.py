@@ -359,8 +359,7 @@ def _built(script: Path, functions: list[str] | None, *, verify: bool = False, p
     from cadgen.engine import progress as progressing
     from cadgen.engine.build import BuildError
 
-    bar = progressing.Bar() if progress is None else None
-    frames = bar.frame if bar is not None else (progress or None)
+    frames, bar = progressing.sink(progress)
     shown = log or (lambda _text: None)
     if bar is not None:
         shown = bar.around(shown)  # a line of the log goes above the bar
@@ -455,8 +454,20 @@ def export(source: Any, *destinations: Any,
     destinations read the document once. The file holds what the code built: no option selects a part or a state
     (``README``, the law of options). ``daemon=False`` does it in this process, cold. A GLB
     carries every configuration sequence the document defines, as a clip. A call the program's own
-    code makes (``python exports.py``) says each file, as ``cadgen export`` does."""
-    return _said(_exporting(source, destinations, log, daemon, progress), destinations)
+    code makes (``python exports.py``) says each file, as ``cadgen export`` does. Where the export is
+    goes, frame by frame, to ``progress`` (``progress.py``: its ``read`` of a file source, each
+    destination's ``write``), as ``_built`` takes it: by default a bar on stderr when it is a
+    terminal and nowhere when it is not, ``False`` nowhere, a callable each frame."""
+    from cadgen.engine import progress as progressing
+
+    frames, bar = progressing.sink(progress)
+    if bar is not None:
+        log = bar.around(log or (lambda _text: None))  # a line of the log goes above the bar
+    try:
+        return _said(_exporting(source, destinations, log, daemon, frames), destinations)
+    finally:
+        if bar is not None:
+            bar.close()
 
 
 def _said(written: list[Written], destinations: tuple) -> list[Written]:
@@ -511,15 +522,20 @@ def _called(source: Any, daemon: bool) -> Any:
 
 def _exported(order: dict[str, Any], spec: dict[str, Any], shown: Callable[[str], None], daemon: bool,
               progress: Callable[[dict], None] | None = None) -> dict:
-    """An ``export`` request answered by the worker that holds the document (``worker._export``)."""
+    """An ``export`` request answered by the worker that holds the document (``worker._export``), or
+    in this process (``daemon=False``); its progress frames to ``progress`` where one is given
+    (``progress.py``: the worker's over its pipe, this process's as its own job)."""
     if daemon:
         done = _ask(order, lambda message: shown(message["log"]), progress)["done"]
     else:
+        from cadgen.engine import progress as progressing
         from cadgen.engine.build import BuildError
-        from cadgen.engine.worker import _export
+        from cadgen.engine.worker import _export, job_progress
 
+        said = job_progress(progress or (lambda _frame: None), order)
         try:
-            done = _export(order, shown)
+            with progressing.building(said):
+                done = _export(order, shown)
         except BuildError as error:
             raise EngineError(str(error)) from None
     _heard("reports", done.get("reports"))
@@ -532,7 +548,7 @@ def _exported(order: dict[str, Any], spec: dict[str, Any], shown: Callable[[str]
 def snapshot(source: Any = None, out: Any = None, *, job: Any = None, display: Any = None, camera: Any = None,
              grid: bool = False, preview: bool = False, pose: Any = None, width: int | None = None,
              height: int | None = None, size_profile: str | None = None, daemon: bool = True, annotation: Any = None,
-             measurements: Any = None) -> Drawn | list[Drawn]:
+             measurements: Any = None, progress: Any = None) -> Drawn | list[Drawn]:
     """Draw a document (``.xbf``, ``.step``, or a document id: the one the engine holds) or a mesh
     file (``.glb``, ``.stl``, ``.3mf``) into ``out`` (a ``.png``) as the viewer draws it: one
     picture, a ``Drawn``. A ``Model`` is called first, as the program's own call of it builds it:
@@ -550,13 +566,34 @@ def snapshot(source: Any = None, out: Any = None, *, job: Any = None, display: A
     and isolated parts, pose, the packet's ink and dimensions -- at its output settings, into each
     of its outputs (``snapshot.job_pictures``). ``source`` is then drawn in place of every job's
     input; a flag given overrides every job. Every request is checked before anything renders, and
-    a picture that fails writes none of the job's, leaving every output as it was."""
+    a picture that fails writes none of the job's, leaving every output as it was.
+
+    Where each picture is goes, frame by frame, to ``progress`` (``progress.py``: ``scene`` while the
+    document is served, meshed and its scene made, ``draw`` while the frame is drawn, ``write`` as
+    the picture is written), as ``export`` takes it: by default a bar on stderr when it is a
+    terminal and nowhere when it is not, ``False`` nowhere, a callable each frame."""
+    from cadgen.engine import progress as progressing
+
+    frames, bar = progressing.sink(progress)
+    try:
+        return _pictured(source, out, job=job, display=display, camera=camera, grid=grid, preview=preview, pose=pose,
+                         width=width, height=height, size_profile=size_profile, daemon=daemon, annotation=annotation,
+                         measurements=measurements, progress=frames)
+    finally:
+        if bar is not None:
+            bar.close()
+
+
+def _pictured(source: Any, out: Any, *, job: Any, display: Any, camera: Any, grid: bool, preview: bool, pose: Any,
+              width: int | None, height: int | None, size_profile: str | None, daemon: bool, annotation: Any,
+              measurements: Any, progress: Callable[[dict], None] | None) -> Drawn | list[Drawn]:
+    """``snapshot``, its frames to ``progress`` (a callable, or None for nowhere)."""
     if job is not None:
         if out is not None:
             raise TypeError("snapshot() takes out or job, not both: a job's outputs name its pictures")
         return _job(job, source, display=display, camera=camera, grid=grid, preview=preview, pose=pose, width=width,
                     height=height, size_profile=size_profile, daemon=daemon, annotation=annotation,
-                    measurements=measurements)
+                    measurements=measurements, progress=progress)
     if source is None or out is None:
         raise TypeError(f"snapshot() missing required argument: {'source' if source is None else 'out'!r}")
     from cadgen.engine import snapshot as drawing
@@ -564,12 +601,12 @@ def snapshot(source: Any = None, out: Any = None, *, job: Any = None, display: A
     out = drawing.picture_path(out, source)
     return _snapshot(source, out, display=display, camera=camera, grid=grid, preview=preview, pose=pose,
                      width=width, height=height, size_profile=size_profile, daemon=daemon, annotation=annotation,
-                     measurements=measurements)
+                     measurements=measurements, progress=progress)
 
 
 def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, preview: bool, pose: Any,
               width: int | None, height: int | None, size_profile: str | None, daemon: bool, annotation: Any,
-              measurements: Any) -> Drawn:
+              measurements: Any, progress: Callable[[dict], None] | None = None) -> Drawn:
     from cadgen.engine import snapshot as drawing
     from cadgen.engine.ids import is_id
     from cadgen.engine.model import Model
@@ -589,7 +626,7 @@ def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, 
                 "measurements": drawing.parse_measurements(measurements)}
         order = {"op": "export", "source": spec, "destinations": [], "draw": draw,
                  "cwd": str(source.cwd) if isinstance(source, Document) else os.getcwd()}
-        found = _exported(order, spec, lambda _text: None, daemon)["drawn"]
+        found = _exported(order, spec, lambda _text: None, daemon, progress)["drawn"]
         if "id" in spec:
             found["document"] = spec["id"]  # what was drawn, by the id it was named by
         return Drawn(out, found["width"], found["height"], found)
@@ -598,13 +635,14 @@ def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, 
                              size=None if width is None and height is None and size_profile is None else size,
                              daemon=daemon, pose=drawing.parse_pose(pose) if isinstance(pose, str) else pose,
                              annotation=drawing.parse_annotation(annotation),
-                             measurements=drawing.parse_measurements(measurements), annotation_source=annotation)
+                             measurements=drawing.parse_measurements(measurements), annotation_source=annotation,
+                             progress=progress)
     return Drawn(out, found["width"], found["height"], found)
 
 
 def _job(job: Any, source: Any, *, display: Any, camera: Any, grid: bool, preview: bool, pose: Any,
          width: int | None, height: int | None, size_profile: str | None, daemon: bool, annotation: Any,
-         measurements: Any) -> list[Drawn]:
+         measurements: Any, progress: Callable[[dict], None] | None = None) -> list[Drawn]:
     """``snapshot(job=...)``: every picture the job names (see ``snapshot``)."""
     from cadgen.engine import snapshot as drawing
 
@@ -613,7 +651,7 @@ def _job(job: Any, source: Any, *, display: Any, camera: Any, grid: bool, previe
                                     width=width, height=height, size_profile=size_profile, annotation=annotation,
                                     measurements=measurements)
     return [Drawn(Path(found["output"]), found["width"], found["height"], found)
-            for found in drawing.draw_pictures(pictures, daemon=daemon)]
+            for found in drawing.draw_pictures(pictures, daemon=daemon, progress=progress)]
 
 
 def _document(source: Any, verb: str, named: str | None = None) -> Path | str:
@@ -646,7 +684,7 @@ def serve(source: Any, port: int = 0, three: str | None = None) -> Served:
     return Served(answer["url"], answer["port"])
 
 
-def inspect(source: Any, ref: str | None = None, *, query: str | None = None) -> Facts | list[Facts]:
+def inspect(source: Any, ref: str | None = None, *, query: str | None = None, progress: Any = None) -> Facts | list[Facts]:
     """What a ref names in a document (``refs``: ``hand/finger.2/face 7``, ``base/f:...``, a
     copied ``/abs/kit.xbf#...`` line) and what made it. An element answers what the kernel
     measures of it -- its points placed where its occurrence stands, in the document's frame --
@@ -661,7 +699,23 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
     ``query="geometry"`` requires a ref, and ``query="closure"`` accepts none.
     ``query="summary"`` (``cadgen inspect DOC`` with no ref) is ``{"summary", "closure"}``:
     what the document holds at a glance (``_summary``), and its closure, as the engine holds it; of
-    a GLB, ``{"mesh"}``: its nodes, meshes and animations, from its JSON alone (``_mesh``)."""
+    a GLB, ``{"mesh"}``: its nodes, meshes and animations, from its JSON alone (``_mesh``). The one
+    inspection that takes a while is the summary's measurement, a part at a time: where it is goes,
+    frame by frame, to ``progress`` (``progress.py``: ``inspect-measure``, ``measure``, counted), as
+    ``export`` takes it -- by default a bar on stderr when it is a terminal and nowhere when it is
+    not, ``False`` nowhere, a callable each frame."""
+    from cadgen.engine import progress as progressing
+
+    frames, bar = progressing.sink(progress)
+    try:
+        return _inspected(source, ref, query, frames)
+    finally:
+        if bar is not None:
+            bar.close()
+
+
+def _inspected(source: Any, ref: str | None, query: str | None, progress: Callable[[dict], None] | None) -> Facts | list[Facts]:
+    """``inspect``, its summary's frames to ``progress`` (a callable, or None for nowhere)."""
     from cadgen.engine import refs
     from cadgen.engine.cli import weighed
 
@@ -720,7 +774,7 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
 
     structure = get("")
     if query == "summary":
-        return {"summary": _summary(structure, path, get, ident), "closure": structure.get("closure")}
+        return {"summary": _summary(structure, path, get, ident, progress), "closure": structure.get("closure")}
     if ref is None:
         if not structure.get("closure"):
             raise EngineError(f"{source} holds no build closure")
@@ -833,7 +887,8 @@ def couplings_of(kinematics: dict[str, Any]) -> list[dict[str, Any]]:
     return found
 
 
-def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], Any], ident: str) -> dict[str, Any]:
+def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], Any], ident: str,
+             progress: Callable[[dict], None] | None = None) -> dict[str, Any]:
     """What a served document holds, at a glance (``cadgen inspect DOC``): its name and id; its
     state -- a model's (``live``, ``held``, ...: ``ModelDocuments.state``), where the engine holds
     it and whether its cache has it, or ``file`` for a file's document; its parts (occurrences,
@@ -855,8 +910,15 @@ def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], A
         state = {"state": "file", "path": str(path) if isinstance(path, Path) else structure.get("path")}
     prototypes, instances = structure.get("prototypes") or [], structure.get("instances") or []
     measured: dict[str, dict[str, Any]] = {}
-    for prototype in prototypes:
+    # Each part measured by the engine, counted as it goes (``progress.py``: ``inspect-measure``).
+    from cadgen.engine.progress import Progress
+
+    said = Progress(progress or (lambda _frame: None), kind="inspect-measure", job=str(structure.get("name") or ident))
+    said.stage("measure", count=[0, len(prototypes)])
+    for index, prototype in enumerate(prototypes, 1):
         measured[prototype["key"]] = get(f"/part/{prototype['key']}/volume")
+        said.counted(index, len(prototypes), detail=str(prototype.get("name") or ""))
+    said.close()
     low, high, volume = [math.inf] * 3, [-math.inf] * 3, 0.0
     materials: dict[str, dict[str, Any]] = {}
     unweighed: list[str] = []

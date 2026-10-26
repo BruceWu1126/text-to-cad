@@ -75,9 +75,14 @@ class Jobs:
         self.changed.notify_all()
 
     def _progress(self, job, frame):
+        """The engine's latest progress event for the job (``cadgen.engine.progress``): kept whole as
+        ``progress``, its stage's words as ``stage``, and the sequence moved, so a status asked
+        ``afterSequence`` wakes with it."""
+        from cadgen.engine.progress import words
+
         with self.changed:
             if not job["cancel"]:
-                self._change(job, progress=frame, stage=frame.get("label", "Working"))
+                self._change(job, progress=frame, stage=words(frame) or "Working")
 
     def _execute(self, job):
         admitted = False

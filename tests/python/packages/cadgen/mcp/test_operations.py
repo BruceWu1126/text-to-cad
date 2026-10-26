@@ -49,6 +49,60 @@ class OperationsTest(unittest.TestCase):
         jobs.clock = lambda: result['finishedAt'] + 86401
         self.assertEqual(jobs.call('cad_inspect', args)['status'], 410)
 
+    def test_status_carries_the_engines_latest_progress_event_and_wakes_after_sequence(self):
+        # Where an operation is comes from the engine alone, as its one progress event
+        # (``cadgen.engine.progress``): the status keeps the latest whole in ``progress``, says its stage's
+        # words in ``stage``, and a status asked ``afterSequence`` wakes with the next one.
+        from cadgen.engine.progress import event
+
+        jobs = Operations()
+        read, write = (event("export", "read", job="arm.xbf", outputs=["/tmp/arm.step"], detail="arm.xbf"),
+                       event("export", "write", job="arm.xbf", outputs=["/tmp/arm.step"], detail="arm.step", done=0, total=1, elapsed_ms=40))
+        said, release, written, finish = threading.Event(), threading.Event(), threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        self.addCleanup(finish.set)
+
+        def export(source, *destinations, progress=None, **_args):
+            progress(read)
+            said.set()
+            release.wait(10)
+            progress(write)
+            written.set()
+            finish.wait(10)  # held at its second event, so the status read is of that event
+            return []
+        args = {'requestId': 'export-request-0001', 'source': str(Path('/tmp/arm.xbf').resolve()),
+                'destinations': [str(Path('/tmp/arm.step').resolve())]}
+        with patch('cadgen.engine.api.export', export):
+            started = jobs.call('cad_export', args)
+            self.assertTrue(said.wait(10))
+            follow = {'action': 'status', 'operationId': started['id'], 'epoch': started['epoch']}
+            status = jobs.call('cad_export', follow)
+            self.assertEqual((status['state'], status['progress'], status['stage']), ('running', read, 'Reading the document'))
+            waiting = []
+            asked = threading.Thread(target=lambda: waiting.append(jobs.call('cad_export', {**follow, 'afterSequence': status['sequence'], 'waitMs': 10000})))
+            asked.start()
+            release.set()
+            asked.join(10)
+            self.assertFalse(asked.is_alive(), 'the status asked after its sequence woke with the next event')
+            self.assertTrue(written.wait(10))
+            self.assertEqual((waiting[0]['state'], waiting[0]['progress'], waiting[0]['stage']), ('running', write, 'Writing files'))
+            self.assertGreater(waiting[0]['sequence'], status['sequence'])
+            finish.set()
+            result = self.finish(jobs, started)
+        self.assertEqual((result['state'], result['stage'], result['progress']), ('succeeded', 'Complete', write))
+
+    def test_a_snapshot_and_an_inspection_hand_the_engine_their_progress_taker(self):
+        from cadgen.engine.api import Drawn
+
+        jobs = Operations()
+        source, out = str(Path('/tmp/part.xbf').resolve()), str(Path('/tmp/part.png').resolve())
+        with patch('cadgen.engine.api.snapshot', return_value=Drawn(Path(out), 4, 3, {})) as snapshot, \
+                patch('cadgen.engine.api.inspect', return_value={}) as inspect:
+            self.finish(jobs, jobs.call('cad_snapshot', {'requestId': 'snapshot-request-02', 'source': source, 'output': out}))
+            self.finish(jobs, jobs.call('cad_inspect', {'requestId': 'inspect-request-002', 'source': source, 'query': 'closure'}))
+        self.assertTrue(callable(snapshot.call_args.kwargs['progress']))
+        self.assertTrue(callable(inspect.call_args.kwargs['progress']))
+
     def test_closed_inputs_and_explicit_paths(self):
         jobs = Operations()
         invalid = jobs.call('cad_inspect', {'requestId': 'request-0000000001', 'source': 'relative.xbf', 'build': True})
@@ -144,7 +198,9 @@ class OperationsTest(unittest.TestCase):
             with patch('cadgen.engine.api.snapshot', return_value=[Drawn(root / 'view.png', 40, 30, {})]) as snapshot:
                 result = self.finish(jobs, jobs.call('cad_snapshot', {'requestId': 'snapshot-request-01', 'packet': json.dumps(packet)}))
             self.assertEqual(result['state'], 'succeeded')
-            snapshot.assert_called_once_with(job=packet)
+            snapshot.assert_called_once()
+            self.assertEqual(snapshot.call_args.kwargs['job'], packet)
+            self.assertTrue(callable(snapshot.call_args.kwargs['progress']), 'the engine is handed where to say its stages')
             self.assertEqual(result['result']['pictures'][0]['path'], str(root / 'view.png'))
 
     def test_failure_reports_possible_outputs_and_long_result_is_explicit(self):

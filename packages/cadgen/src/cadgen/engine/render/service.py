@@ -435,17 +435,33 @@ def draw_here(document: Path, still: Any, *, source: Any = None) -> tuple[bytes,
     return drawn
 
 
+def _drawn(held: Any, stills: list[Any]) -> list[tuple[bytes, dict[str, Any]]]:
+    """Each still drawn from what ``held`` holds, the snapshot's ``draw`` stage said before each
+    (``progress.say``: counted when there are several)."""
+    from cadgen.engine.progress import say
+
+    drawn = []
+    for index, still in enumerate(stills):
+        say("draw", count=[index, len(stills)] if len(stills) > 1 else None)
+        drawn.append(held.draw(still))
+    return drawn
+
+
 def draw_here_each(document: Path, stills: list[Any], *, source: Any = None) -> list[tuple[bytes, dict[str, Any]]]:
     """``draw_here`` for several stills of one document (a job's pictures of it): served, read and
-    meshed once, each still drawn from what was held."""
+    meshed once, each still drawn from what was held. Where it is goes to this process's job
+    (``progress.say``): ``scene`` while the document is served, meshed and held, ``draw`` as each
+    still is drawn."""
+    from cadgen.engine.progress import say
     from cadgen.engine.serve import MESHES, Server
 
     started = time.perf_counter()
+    say("scene", detail=document.name)
     if source is None and foreign(document):
         held = holder(document)
         try:
             opened = held.open()
-            drawn = [held.draw(still) for still in stills]
+            drawn = _drawn(held, stills)
         finally:
             held.close()
         for _data, report in drawn:
@@ -471,7 +487,7 @@ def draw_here_each(document: Path, stills: list[Any], *, source: Any = None) -> 
     try:
         timings = {"serveMs": round((served - started) * 1000), "meshMs": round((time.perf_counter() - served) * 1000)}
         held.hold(structure, buffers)
-        drawn = [held.draw(still) for still in stills]
+        drawn = _drawn(held, stills)
     finally:
         held.close()
     for _data, report in drawn:
@@ -721,12 +737,15 @@ class Renders:
         render.meshed = {key: meshed.get(key) for key in ("parts", "meshed", "seconds", "triangles", "mode")}
         return timings
 
-    def _file(self, path: Path, still: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
+    def _file(self, path: Path, still: dict[str, Any], progress: Any = None) -> tuple[bytes, dict[str, Any]]:
         """A picture of a file no document (``foreign``): its render process, which reads it with
-        its reader, opened again whenever a file it read has changed, asked for a frame."""
+        its reader, opened again whenever a file it read has changed, asked for a frame. ``progress``
+        as ``draw`` takes it."""
         from cadgen.engine.formats import stale
 
         timings: dict[str, int] = {}
+        if progress is not None:
+            progress.stage("scene", detail=path.name)
         for attempt in (1, 2):
             render = self._process(f"file:{path}", path)
             try:
@@ -741,6 +760,8 @@ class Renders:
                         opened = answer["opened"]
                         render.version, render.files, render.held = "opened", opened["files"], opened
                         timings.update(openMs=round((time.perf_counter() - clock) * 1000), readMs=opened["readMs"])
+                    if progress is not None:
+                        progress.stage("draw")
                     answer, data = render.ask({"op": "frame", "still": still})
             except Gone:
                 if attempt == 2:
@@ -759,13 +780,17 @@ class Renders:
         report["timings"] = {**timings, **report.get("timings", {})}
         return data, report
 
-    def draw(self, path: Path, still: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
+    def draw(self, path: Path, still: dict[str, Any], progress: Any = None) -> tuple[bytes, dict[str, Any]]:
         """A picture of the served document at ``path``: its render process started, or patched
         to the version served, and asked for a frame. Raises ``Refused`` by name. A file no
-        document is read and drawn by a render process of its own (``_file``)."""
+        document is read and drawn by a render process of its own (``_file``). ``progress``, a
+        ``progress.Progress`` of kind ``snapshot``, is told the stages as they begin: ``scene`` while
+        the document is served, meshed and held by its process, ``draw`` while the frame is drawn."""
         if foreign(Path(path)):
-            return self._file(Path(path).resolve(), still)
+            return self._file(Path(path).resolve(), still, progress)
         started = time.perf_counter()
+        if progress is not None:
+            progress.stage("scene", detail=Path(path).name)
         ident = self.server.add(Path(path))
         doc = self.server.document(ident)
         timings = {"serveMs": round((time.perf_counter() - started) * 1000)}
@@ -774,6 +799,8 @@ class Renders:
             try:
                 with render.lock:
                     timings.update(self._sync(render, doc))
+                    if progress is not None:
+                        progress.stage("draw")
                     answer, data = render.ask({"op": "frame", "still": still})
             except Gone:
                 if attempt == 2:

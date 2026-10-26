@@ -1,8 +1,8 @@
-// A stage reports a real fraction (`done`/`total`, flagged `determinate`) or nothing.
+import { isProgressEvent, progressFraction, progressKey } from "./progressEvent.js";
+
+// A stage reports a real fraction (`done` of a `total` above zero) or nothing.
 function stageFraction(progress) {
-  const determinate = Boolean(progress?.determinate) && progress.total > 0;
-  return { determinate, counts: determinate ? `${progress.done}/${progress.total}` : "",
-    percent: determinate ? Math.round((progress.done / progress.total) * 100) : null };
+  return progressFraction(progress);
 }
 
 // A file cadgen is importing: the compile that reads its bytes, whose phases cadgen labels
@@ -11,14 +11,21 @@ function importing(hint) {
   return /\bcompil|\bimport/.test(hint);
 }
 
-// The phases a cadgen build reports (the engine's `progress.PHASES`, and the ones it reported before
-// them); the page emits none of them.
+// The phases a cadgen build once reported before the engine's progress event (below); the page emits
+// none of them.
 const BUILD_PHASES = new Set(["load", "body", "names", "document", "write", "generate", "package", "components", "finalize", "mesh"]);
 
 // Internal phases stay diagnostic data. The screen describes the user's wait. "Reading model" is
 // only ever an actual read of a model the store holds; a wait with nothing more specific to say is
-// "Opening model".
+// "Opening model". The engine's own progress event (`progressEvent.js`: a build's, an import's, an
+// export's, a snapshot's or a measurement's stage) is named by its key, `progress.<kind>.<stage>`,
+// which the screen says in the view's language (`statusLabels.js`), with its count where it has one.
 export function loadingProgress(progress, { finding = false, preparing = false } = {}) {
+  if (!finding && !preparing && isProgressEvent(progress)) {
+    const frame = stageFraction(progress);
+    return { label: progressKey(progress), detail: String(progress.detail || ""), counts: frame.counts, percent: frame.percent,
+      connectionLost: progress.connectionLost || null };
+  }
   const phase = String(progress?.phase || "").toLowerCase();
   const hint = `${phase} ${progress?.label || ""}`.toLowerCase();
   const label = finding ? "Finding file"
