@@ -115,21 +115,21 @@
 .cad-navbar-mark { display: block; width: 16px; height: 16px; max-width: none; user-select: none; -webkit-user-drag: none; }
 
 /* The host's home (`library/`): the models opened before, to open again, on the page's own
- * colour, the navbar's. One type scale: every text is text-ui (13px) -- the heading, the type filter,
- * the search, the names, the table -- but a tile's age, text-tiny (11px) and muted; a tile's and a
- * row's glyph is 16px; the control row's controls are 24px tall. Across the page on its 16px gutter, a grid of four tiles a row at 1280px, or a
- * list of rows. */
+ * colour, the navbar's. One type scale: every text is text-ui (13px) -- the type filter, the search,
+ * the names, the table -- but the heading, Recent, 17px and weight 600 (the one larger text), and a
+ * tile's age, text-tiny (11px) and muted; a tile's and a row's glyph is 16px; the control row's
+ * controls are 24px tall. A centred column, 1128px wide at most on 24px gutters of its own, 44px
+ * under the navbar: a grid of three tiles a row at full width, or a list of rows. */
 .cad-library { width: 100%; height: 100%; background: var(--background); }
 /* Below the last row: 40px, or room to scroll it clear of a host's composer floating over the bottom
    (`--cad-host-bottom-inset`), whichever is more. Added together, a library that fits would still scroll. */
-/* The page's 16px gutter is the navbar's: the wordmark's left edge (and the C's, on a page) is the grid's. */
-.cad-library-content { box-sizing: border-box; width: 100%; margin: 0; padding: 16px 16px max(40px, calc(var(--cad-host-bottom-inset, 0px) + 16px)); container-type: inline-size; }
+.cad-library-content { box-sizing: border-box; width: 100%; max-width: 1128px; margin: 0 auto; padding: 44px 24px max(40px, calc(var(--cad-host-bottom-inset, 0px) + 16px)); container-type: inline-size; }
 /* The control row, the page's first line (Figma's Recents): every control 24px tall. At the left "Recent",
    a plain small heading (no tab: no fill, no box); at the right the type filter, the search and the
    grid/list switch, 8px apart. */
-.cad-library-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
+.cad-library-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
 .cad-library-heading { display: inline-flex; align-items: center; height: 24px; margin: 0; padding: 0;
-  font-size: var(--text-ui); line-height: 1; font-weight: 500; color: var(--foreground); }
+  font-size: 1.0625rem; line-height: 1; font-weight: 600; letter-spacing: -0.01em; color: var(--foreground); }
 .cad-library-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .cad-library-kind { color: var(--foreground); }
 .cad-library-kind > svg { color: var(--muted-foreground); }
@@ -144,7 +144,7 @@
 /* Figma's tiles: at least 240px a column (four across a 1280px window), 24px apart both ways. A tile is
    transparent on the page in both themes, its 1px border the border token and its 12px radius the same
    at rest and under the pointer, with no shadow; its picture on its own muted fill. */
-.cad-library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); align-items: start; gap: 24px; margin: 0; padding: 0; list-style: none; }
+.cad-library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); align-items: start; gap: 24px; margin: 0; padding: 0; list-style: none; }
 .cad-library-card, .cad-library-row { position: relative; min-width: 0; }
 .cad-library-main { position: relative; min-width: 0; }
 .cad-library-card { overflow: hidden; border: 1px solid var(--border); border-radius: calc(var(--radius) + 2px); background: transparent; }
@@ -160,9 +160,10 @@
 .cad-library-thumbnail > svg { width: 24px; height: 24px; opacity: .7; }
 .cad-library-card .cad-library-thumbnail { width: 100%; aspect-ratio: 330 / 185; }
 /* The caption, 12px by 16px: the kind's glyph in a 24px column, then the name (text-ui, 500) over its age. */
-.cad-library-body { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 16px; }
-.cad-library-text { display: flex; flex: 1 1 auto; flex-direction: column; gap: 2px; min-width: 0; }
-.cad-library-card .cad-library-glyph { box-sizing: content-box; width: 16px; height: 16px; padding: 0 4px; }
+/* A tile's caption is compact: 8px by 12px around the glyph, 8px before the name, the age right under it. */
+.cad-library-body { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 12px; }
+.cad-library-text { display: flex; flex: 1 1 auto; flex-direction: column; gap: 1px; min-width: 0; }
+.cad-library-card .cad-library-glyph { box-sizing: content-box; width: 16px; height: 16px; padding: 0 2px; }
 .cad-library-card .cad-library-label { font-weight: 500; line-height: 18px; color: var(--foreground); }
 .cad-library-name { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--foreground); }
 .cad-library-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

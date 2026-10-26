@@ -85,11 +85,12 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   buttons, sizes and places as over a file. Under it,
   the page, after Figma's Recents, with no hero (no wordmark, tagline or links: GitHub and
   Discord are the app menu's, X its footer's "Made by"; no light/dark button: Theme is the
-  menu's). The Home is **one type scale**: every text `text-ui` (13px) — the heading, the
-  type filter, the search, the names, the table — but a tile's age, `text-tiny` (11px) and
+  menu's). The Home is **one type scale**: every text `text-ui` (13px) — the
+  type filter, the search, the names, the table — but the heading, **Recent**, the one larger text
+  (17px, weight 600), and a tile's age, `text-tiny` (11px) and
   muted; a tile's and a row's glyph is 16px (`src/designSystem.test.js` holds it). It starts
   with **one control row**, every control 24px tall with 13px text: at the
-  left **Recent**, a plain small heading (`text-ui`, weight 500, no fill or padding box: no tab); at the right,
+  left **Recent**, a plain heading on the row's 24px line (no fill or padding box: no tab); at the right,
   8px apart, the **type filter**, a stock DropdownMenu whose ghost `xs` trigger names what it
   shows ("All ▾") and whose radio items are All, Models and Files, there only where models and
   files are both listed; the **search**, a stock Input 24px tall and 200px wide ("Search"); and
@@ -98,12 +99,13 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   `xs` button (24px) with the folder icon and "Open", which opens the desktop's own chooser
   (`POST /__cad/pick`) and shows the file picked. Then the
   documents opened or built before, pinned first, then by last activity. The home is the
-  library and Open alone: no folder of a launch. It spans the page on the navbar's 16px gutter, the
-  wordmark's left edge its own. In the grid, a **tile** is transparent on the
+  library and Open alone: no folder of a launch. It is a **centred column**, 1128px wide at most,
+  on 24px gutters of its own (not the navbar's 16px, which the logo keeps), 44px under the navbar,
+  its control row 20px over the tiles: a library page's generous spacing. In the grid, a **tile** is transparent on the
   page in both themes, a 1px `border`, a 12px radius and no shadow, the same under the pointer;
-  columns at least 240px (four across a 1280px window), 24px apart. Its picture sits on the
-  `muted` fill at 330:185, contained (its placeholder cube 24px); its caption (12px by 16px) is its kind's 16px glyph in a 24px
-  column, then its name (`text-ui`, weight 500) over its last activity with no verb ("2h ago",
+  columns at least 280px (three across the full column, two at a narrower window), 24px apart. Its picture sits on the
+  `muted` fill at 330:185, contained (its placeholder cube 24px); its caption is compact (8px by 12px): its kind's 16px glyph in a 20px
+  column, 8px before its name (`text-ui`, weight 500) over its last activity with no verb ("2h ago",
   `text-tiny`, muted). In the list, a **table**, one type in every cell (`text-ui`, 13px): a
   32px header row of muted labels (Name, Updated, Opened) over 40px rows, each its glyph and
   name, then its `updated` and `opened` ages, muted, in two 160px columns (Opened dropped under a 560px page), transparent with the

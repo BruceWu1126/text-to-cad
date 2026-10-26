@@ -50,16 +50,17 @@ test("every scroll region in the viewer's chrome is the ScrollArea primitive, ne
 });
 
 // The Home (`library/`) is one type scale (docs/settings-ui.md): every text text-ui, 13px -- the
-// heading, the type filter, the search, the names, the table, its header included -- but a tile's
-// age, text-tiny and muted; a tile's and a row's glyph 16px.
-test("the Home is one type scale: text-ui throughout but a tile's age, and 16px glyphs", () => {
+// type filter, the search, the names, the table, its header included -- but the heading, Recent, the
+// one larger text (17px, the owner's exception), and a tile's age, text-tiny and muted; a tile's and
+// a row's glyph 16px.
+test("the Home is one type scale: text-ui throughout but the heading and a tile's age, and 16px glyphs", () => {
   const css = readFileSync(join(root, "styles/globals.css"), "utf8");
   const sizes = [...css.matchAll(/([^{}]*\.cad-library[^{}]*)\{([^}]*)\}/g)].flatMap(([, selector, body]) => {
     const size = body.match(/font-size:\s*([^;]+);/)?.[1].trim();
     return size ? [[selector.trim().replace(/\s+/g, " "), size]] : [];
   });
   assert.deepEqual(sizes, [
-    [".cad-library-heading", "var(--text-ui)"],
+    [".cad-library-heading", "1.0625rem"],
     [".cad-library-status", "var(--text-tiny, 0.6875rem)"],
     [".cad-library-columns", "var(--text-ui)"],
     [".cad-library-row .cad-library-status", "var(--text-ui)"],
@@ -71,10 +72,12 @@ test("the Home is one type scale: text-ui throughout but a tile's age, and 16px 
 });
 
 // The logo stands on the page's gutter (docs/settings-ui.md): the navbar's 12px start and the logo
-// button's 4px padding put its mark 16px in, the Home grid's left edge, over the home and a page.
-test("the navbar's logo and the Home's grid share the 16px gutter", () => {
+// button's 4px padding put its mark 16px in, over the home and a page. The Home itself is a centred
+// column of its own, 1128px at most on 24px gutters, 44px under the navbar, its tiles 280px at least.
+test("the navbar's logo stands 16px in, and the Home is a centred 1128px column on its own gutters", () => {
   const css = readFileSync(join(root, "styles/globals.css"), "utf8");
-  assert.match(css, /\.cad-library-content \{[^}]*margin: 0; padding: 16px 16px /);
+  assert.match(css, /\.cad-library-content \{[^}]*max-width: 1128px; margin: 0 auto; padding: 44px 24px /);
+  assert.match(css, /\.cad-library-grid \{[^}]*minmax\(280px, 1fr\)/);
   const navbar = readFileSync(join(root, "file-viewer/navigation/ViewerNavbar.jsx"), "utf8");
   assert.match(navbar, /cn\(NAVBAR_ROW_CLASS, "pl-3 /);
   assert.match(navbar, /"cad-navbar-logo justify-start px-1"/);

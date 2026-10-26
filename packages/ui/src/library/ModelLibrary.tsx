@@ -152,8 +152,9 @@ function Placeholders({ layout }: { layout: LibraryLayout }) {
 /**
  * The host's home: the models opened before, from every view, to open again. The viewer's navbar
  * is over it (its logo's app menu, the host's update and Full size, as over a file); the host's
- * links are that menu's. The page starts with its control row, one line of 24px controls: at the
- * left "Recent", a plain small heading; at the right the type filter ("All ▾": All, Models, Files),
+ * links are that menu's. The page is a centred column (1128px at most, on its own 24px gutters). It
+ * starts with its control row, one line of 24px controls: at the
+ * left "Recent", the page's heading (the Home's one larger text); at the right the type filter ("All ▾": All, Models, Files),
  * there where models and files are both listed, the search, the grid/list switch and, where the host
  * has a chooser, Open, all there with no models yet too. Then the documents, pinned first, as cards (a picture over the kind's
  * glyph, the name and how long ago it was last opened or updated, with no verb) or as rows, every
