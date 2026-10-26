@@ -788,8 +788,11 @@ started them, however it ends.
 A worker is an interpreter; a run is the script in its caller's environment. A build goes to its
 script's live worker whatever the caller's environment but for what shapes the interpreter's
 import system (`daemon.RESTARTS`): `PYTHONPATH`, `PYTHONHOME`, `PYTHONSAFEPATH`,
-`PYTHONNOUSERSITE`, `PYTHONUSERBASE` and `PYTHONPLATLIBDIR`. A build with another value of any of
-them replaces the worker (retired `environment`), and its memo goes with it. Everything else the
+`PYTHONNOUSERSITE`, `PYTHONUSERBASE` and `PYTHONPLATLIBDIR`. A relative `PYTHONPATH` entry is the
+caller's, as Python reads it for `python SCRIPT`: made absolute against the caller's working folder
+before the engine is handed it (`client.environment`), since a worker stands in the script's folder.
+A build with another value of any of them replaces the worker (retired `environment`), and its
+memo goes with it. Everything else the
 run adopts (`worker.adopt`): before the body runs, the caller's environment replaces the worker's
 `os.environ`, keeping only those variables and what the worker set for itself
 (`CADGEN_ENGINE_WORKER`, and the daemon's bytecode setting, `daemon.BYTECODE`). `PATH` and `VIRTUAL_ENV` are adopted, not

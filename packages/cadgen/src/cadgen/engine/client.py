@@ -121,10 +121,25 @@ def _not_started(code: int) -> ConnectionError:
 _PER_PROCESS_TELEMETRY = ("DO_NOT_TRACK", "CADGEN_TELEMETRY")
 
 
+def environment() -> dict[str, str]:
+    """This process's environment as the engine is handed it: ``os.environ``, every relative
+    ``PYTHONPATH`` entry made absolute against this process's working folder, as Python resolves it
+    for ``python SCRIPT`` (``site`` makes ``sys.path`` absolute at startup). The engine's processes
+    stand in folders of their own (a script's, the engine's), where ``PYTHONPATH=src`` would name
+    another folder, or none."""
+    env = dict(os.environ)
+    path = env.get("PYTHONPATH")
+    if path:
+        cwd = os.getcwd()
+        env["PYTHONPATH"] = os.pathsep.join(item if not item or os.path.isabs(item) else os.path.join(cwd, item)
+                                            for item in path.split(os.pathsep))
+    return env
+
+
 def _start() -> subprocess.Popen:
     """A daemon started, detached: its process, whose ``pid`` says whether the daemon that answers
     is the one this process started (``_told_started``)."""
-    env = {name: value for name, value in os.environ.items() if name not in _PER_PROCESS_TELEMETRY}
+    env = {name: value for name, value in environment().items() if name not in _PER_PROCESS_TELEMETRY}
     root = _daemon.engine_root()
     path = env.get("PYTHONPATH", "")
     if root not in path.split(os.pathsep):

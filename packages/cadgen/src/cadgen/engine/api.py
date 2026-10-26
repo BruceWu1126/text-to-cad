@@ -291,9 +291,9 @@ def hand_over(shape: Any, name: Any, *, key: str | None = None, animations: Any 
 
 def _ask(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] | None = None,
          on_progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
-    from cadgen.engine.client import request
+    from cadgen.engine.client import environment, request
 
-    answer = request({**message, "env": dict(os.environ)}, on_log or (lambda _message: None), on_progress=on_progress)
+    answer = request({**message, "env": environment()}, on_log or (lambda _message: None), on_progress=on_progress)
     if answer is None:
         raise EngineError("no engine daemon")
     _heard("worker", answer.get("worker"))

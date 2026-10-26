@@ -378,6 +378,34 @@ class HandleTest(unittest.TestCase):
         self.assertEqual(self.cli("stop").returncode, 0)
         self.assertEqual(self.run_python("nested.py", cwd=project)["caller"], found["inside"])
 
+    def test_a_relative_pythonpath_names_a_folder_of_the_caller_s_working_folder(self) -> None:
+        # ``PYTHONPATH=src python src/sub/model.py`` finds ``src/dims.py`` as Python does: from the
+        # folder the command ran in, never from the script's own folder, where the engine builds it.
+        project = self.project("relative", {})
+        (project / "src" / "sub").mkdir(parents=True)
+        (project / "src" / "dims.py").write_text("WIDTH = 7\n", encoding="utf-8")
+        (project / "src" / "sub" / "model.py").write_text(textwrap.dedent("""
+            import json
+
+            import build123d as bd
+            from cadgen import model
+
+            from dims import WIDTH
+
+
+            @model
+            def plate():
+                return bd.Box(WIDTH, 2, 1)
+
+
+            if __name__ == "__main__":
+                print("RESULT " + json.dumps(round(plate().shape.bounding_box().size.X, 6)))
+        """), encoding="utf-8")
+        env = {**self.env, "PYTHONPATH": os.pathsep.join(("src", str(SRC)))}
+        done = engine_daemon.run([sys.executable, "src/sub/model.py"], cwd=project, env=env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout.rsplit("RESULT ", 1)[1]), 7.0)
+
 UNREACHED = """
 import sys
 
