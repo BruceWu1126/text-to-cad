@@ -419,10 +419,17 @@ async function settledCameraFrame(page, { projection = null, stage, timeout = 60
   // must be loaded, and the camera at rest by the controller's own account
   // (`settling`: no gesture, transition, held key or damping still moves it),
   // for every framing assertion. The frame the poll runs in was drawn at rest.
+  // And the camera is framed for the box the canvas has on screen: leaving Preview brings the
+  // navbar back a commit after the tools view returns, and the viewport answers that resize (its
+  // refit of the orthographic half-height) in its ResizeObserver, which runs after this frame's
+  // animation callbacks -- so a poll can see the new box with the camera still framed for Preview's
+  // taller one. Its projection's aspect is the viewport's once the resize is handled.
   const ready = await page.waitForFunction(({ want }) => {
     const canvas = document.querySelector("canvas");
     const camera = window.__cadCamera?.();
+    const box = canvas ? canvas.clientWidth / canvas.clientHeight : NaN;
     if (!canvas || !camera || camera.settling !== false || (want && camera.projection !== want)
+      || !(Math.abs(Number(camera.aspect) - box) <= 1e-6 * box)
       || canvas.closest("[aria-busy]")?.getAttribute("aria-busy") !== "false"
       || getComputedStyle(canvas).visibility !== "visible"
       || document.querySelector("[data-viewer-transition]")
