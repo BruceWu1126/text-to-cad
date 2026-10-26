@@ -72,7 +72,7 @@ export function createCadFileSource(client: Pick<CadWorkspaceService, 'resolveEn
 
 /**
  * The file menu's host actions for a file on this machine: its path to the clipboard, and the
- * file shown in the desktop's file manager where the host can reveal one.
+ * file shown in the system's file manager where the host can reveal one.
  */
 export function createCadFileActions({ platform, clipboard, reveal }: {
   platform?: string; clipboard: Pick<ClipboardPort, 'writeText'>; reveal?: (path: string) => Promise<void>;

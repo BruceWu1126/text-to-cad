@@ -444,7 +444,7 @@ export function scenePhotographicLighting({ renderMode = false, renderConfigurat
  * The surface LOOK a family's scene wears (`lib/viewer/sceneContract.js`) for resolved
  * scene settings: the finish (the theme's in Inspect, the studio's under photographic
  * Render), the Surfaces section's colour mode, style and opacity, and whether Render keeps
- * what the file authored. The viewer's viewport and the snapshot CLI's headless stage both
+ * what the file authored. The viewer's viewport and the parity page's headless stage both
  * resolve a look HERE, from the same `resolveViewSceneSettings` output, so one setting is
  * one look wherever a scene is drawn.
  *

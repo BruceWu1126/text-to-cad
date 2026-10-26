@@ -55,7 +55,7 @@ function boundsOf(THREE, root) {
  * the scene places them in CAD space, wears the look its host resolves, and owns
  * the document from here on (`dispose()` releases its geometry, materials and
  * textures). The ONE builder of a GLB's scene: the viewer's GLB renderer and the
- * snapshot CLI's headless stage both call it, so neither can draw a GLB the other
+ * parity page's headless stage both call it, so neither can draw a GLB the other
  * does not.
  *
  * @param {typeof import("three")} THREE

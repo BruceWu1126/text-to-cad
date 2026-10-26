@@ -296,10 +296,9 @@ it, the file sidebar, Quick Edit at the top-right.
 - **Quick Edit** carries the picks and the ink; its views are the window on screen as a
   plan-view camera (`planCamera`: looking straight down, `up` +Y, `orthographicHalfHeight` the
   window's half height), each with its label, which the ink's marks name. `cadgen snapshot --job
-  PACKET` draws each view's window with the ink on the sheet, and a packet's `measurements`
-  (`PromptFiles.create` takes them) as Measure draws its dimensions; `--annotation PACKET
-  --camera authored` the view the ink was last drawn in. The viewer's own Quick Edit puts no
-  measurement in its packet: they are the person's.
+  PACKET` draws each view's window with the ink on the sheet, and `--annotation PACKET
+  --camera authored` the view the ink was last drawn in. Quick Edit puts no measurement in its
+  packet: they are the person's.
 
 - **The picture comes from the BACKEND.** `client.drawing(file)` is
   `GET /__cad/drawing` (`apps/web/docs/backend.md`), asked again while the server

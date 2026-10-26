@@ -359,8 +359,8 @@ text goes through the clipboard port's `writeText`, which takes pending text: a
 `ClipboardItem` holding the promise, so the write starts inside the gesture, or the
 text itself once it arrives where the browser takes no pending item. At the press,
 the server prepares a packet through the host's `promptFiles` (`createHttpPromptFiles`,
-over `/__cad/prompt-files`), with shared annotation and measurements, the current
-view and distinct drawn views. Up to 1024 bytes of compact UTF-8 JSON goes directly
+over `/__cad/prompt-files`), with the shared annotation, the current view and distinct
+drawn views (Measure's measurements are the person's: a packet carries none). Up to 1024 bytes of compact UTF-8 JSON goes directly
 into the prompt; larger packets are written as `.snapshot.json` and named by absolute path.
 No snapshot is written while drawing or typing, and no image is rendered.
 

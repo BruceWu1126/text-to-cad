@@ -326,8 +326,8 @@ function roundedBounds(bounds) {
 // The parts inventory of a family scene (a GLB, an STL, a 3MF, a robot, an engine document):
 // what it drew.
 //
-// This is the ONLY output whose size grows with the model -- everything else in the CLI
-// surface is constant (a 600-part assembly logs the same ~100 bytes a single part does).
+// This is the ONLY output whose size grows with the model -- everything else a job answers is
+// constant (a 600-part assembly logs the same ~100 bytes a single part does).
 // So it is the one payload where redundancy is measured in tens of thousands of tokens:
 // on a 600-part rover the previous shape was 294 KB, of which `id`, `occurrenceId` and
 // `ref` were the same string three times over (identical in 600/600 parts), `label`
@@ -391,7 +391,7 @@ export function renderJobContext(meshData, job = {}) {
   const sceneScale = resolveRenderSceneScale(job);
   const sourceKind = String(job.resolved?.kind || job.kind || "").trim().toLowerCase();
   const sceneSettings = resolveViewSceneSettings({
-    // Appearance is `display.appearance`; the CLI default is Light.
+    // Appearance is `display.appearance`; a job's default is Light.
     appearance: "light",
     camera: job.camera || null,
     display: job.display ?? {},

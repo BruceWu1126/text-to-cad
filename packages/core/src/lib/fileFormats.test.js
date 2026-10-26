@@ -31,7 +31,7 @@ test("the mesh format predicate stays narrow", () => {
   assert.equal(isMeshRenderFormat(RENDER_FORMAT.URDF), false);
 });
 
-test("meshAssetKeyForEntry chooses native mesh keys and STEP GLB sidecars", () => {
+test("meshAssetKeyForEntry chooses a mesh file's own key, and glb for any other 3D entry", () => {
   assert.equal(meshAssetKeyForEntry({ kind: "stl" }), "stl");
   assert.equal(meshAssetKeyForEntry({ kind: "3mf" }), "3mf");
   assert.equal(meshAssetKeyForEntry({ kind: "glb" }), "glb");

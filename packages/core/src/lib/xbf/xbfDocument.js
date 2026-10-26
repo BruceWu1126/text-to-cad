@@ -2,7 +2,7 @@
 // engine that serves it (`cadgen serve`, `cadgen/engine/serve.py`): its structure as JSON
 // (prototypes with their names, geometry keys, colours and element names by ordinal; instances
 // with world matrices; the tree; the version) and one XBM2 buffer per prototype, read as views
-// over the fetched bytes (`xbm.js`). The viewer's xbf renderer and the snapshot's headless stage
+// over the fetched bytes (`xbm.js`). The viewer's xbf renderer and the parity page's headless stage
 // both load through here, so they draw the same bytes. The viewer's page reads the engine through
 // its own server (`/__cad/api/...`, `cadgen/viewer/documents.py`), with the fetch its client
 // sends every request with (the CAD app's goes over its tunnel); the snapshot's stage reads the

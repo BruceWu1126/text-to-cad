@@ -141,7 +141,7 @@ export function createMeshScene(THREE, objects, { units = UNITLESS_SCENE_UNITS }
 /**
  * An STL's or a 3MF's scene from its decode (`loadRenderMeshByUrl`), or null when the
  * file holds no triangles. The ONE builder of a mesh file's scene: the viewer's mesh
- * renderer and the snapshot CLI's headless stage both call it, so neither can draw an
+ * renderer and the parity page's headless stage both call it, so neither can draw an
  * STL or a 3MF the other does not.
  *
  * @param {typeof import("three")} THREE

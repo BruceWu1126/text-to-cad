@@ -1,8 +1,8 @@
-// The snapshot CLI's headless stage draws a GLB, an STL, a 3MF and a robot with the scene
+// The parity page's headless stage draws a GLB, an STL, a 3MF and a robot with the scene
 // its VIEWER renderer draws: the same loader, the same builder, the same look, the same
 // pose. These hold the seams where a second path would creep back in: which builder a job
-// reaches, how the scene is dressed, what sizes the ground, who owns which buffers, how a
-// robot is posed, and that a family scene never takes a CAD model's steps.
+// reaches, how the scene is dressed, what sizes the ground, who owns which buffers and how a
+// robot is posed.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -65,7 +65,7 @@ function materialState(object3D) {
   return rows;
 }
 
-test("every file family the snapshot CLI draws reaches its viewer builder; a STEP model and a drawing do not", async () => {
+test("every file family the parity page draws reaches its viewer builder; a STEP model and a drawing do not", async () => {
   for (const kind of ["glb", "stl", "3mf", "urdf", "srdf", "sdf"]) assert.ok(headlessSceneFamily(job(kind)), kind);
   for (const kind of ["step", "stp", "dxf", ""]) assert.equal(headlessSceneFamily(job(kind)), null, kind || "(none)");
   assert.equal(headlessSceneFamily(job("stl")), headlessSceneFamily(job("3mf")), "STL and 3MF are one family: the mesh renderer's");

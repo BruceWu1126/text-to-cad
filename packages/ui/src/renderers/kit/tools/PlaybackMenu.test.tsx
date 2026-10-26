@@ -49,7 +49,7 @@ it("has the routine's Speed, Loop and Autoplay in Playback settings, and nothing
 });
 
 it('has no animation for a file without routines, loading or failed', () => {
-  for (const runtime of [null, { clips: [] }, { clips: [], status: 'loading' }, { clips: [], error: 'sidecar failed' }]) {
+  for (const runtime of [null, { clips: [] }, { clips: [], status: 'loading' }, { clips: [], error: 'the clips could not be read' }]) {
     expect(animationControlsHaveContent(runtime)).toBe(false);
   }
   expect(animationControlsHaveContent(routine())).toBe(true);

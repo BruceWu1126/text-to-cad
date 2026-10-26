@@ -42,7 +42,7 @@ const DOCUMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 /**
  * The CAD Viewer's page: one document at a time, by the id its URL's path names (`/<id>`: a model's,
  * or a file's, which the server registers when it is opened), or the home (`/`): the models opened
- * before. A file opened by its path (Select File) is asked for its id first, and shown by it. The browser's own history is the way back:
+ * before. A file opened by its path (from Files, or the home's Open) is asked for its id first, and shown by it. The browser's own history is the way back:
  * showing a document or the home is a new entry.
  */
 export default function App({ client, server, tabStore, notice = null, language: chosenLanguage = null }: { client: CadClient; server: CadServerInfo; tabStore: TabStore; notice?: UpdateNotice | null; language?: string | null }) {

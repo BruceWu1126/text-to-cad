@@ -7,9 +7,9 @@ The descriptions are committed as they are (``arm.urdf``, the ``arm.srdf`` paire
 ``lonely.srdf``, with no URDF beside it). This script reads each one with cadgen
 (``cadgen.robot_payload``) and writes:
 
-* ``<name>.robot.json``: the payload, with every visual's mesh named by the URL the browser
-  test's server answers for it (``/meshes/<file>`` for a link mesh file, ``/primitives/<hash>.glb``
-  for a shape cadgen meshed);
+* ``<name>.<kind>.robot.json`` (``arm.urdf.robot.json``): the payload, with every visual's mesh
+  named by the URL the browser test's server answers for it (``/meshes/<file>`` for a link mesh
+  file, ``/primitives/<hash>.glb`` for a shape cadgen meshed);
 * ``primitives/<hash>.glb``: those meshes, named by the sha256 of their bytes as the payload names them;
 * ``refusals.json``: the sentence cadgen refuses each refused description with, which the
   test's server answers as a 400, as the viewer's route does.

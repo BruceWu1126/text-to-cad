@@ -367,7 +367,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
 
   // The controls at the top — the strip, a wrapped one, and the tool's row under it — are measured
   // into variables, so a tool change or a resize moves what hangs below them without redrawing the
-  // model or touching a saved size: on a desktop, the column's sides, which the sidebar's panel and the
+  // model or touching a saved size: on a wide view, the column's sides, which the sidebar's panel and the
   // top-right corner (Quick Edit) keep clear of (`--cad-file-sidebar-max-width`, `--cad-top-right-left`).
   const topControls = useRef(null);
   useLayoutEffect(() => {

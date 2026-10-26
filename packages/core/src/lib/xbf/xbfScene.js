@@ -1,6 +1,6 @@
 // A cadgen engine document's scene (`../viewer/sceneContract.js`): the ONE builder of an
-// `.xbf`'s scene. The viewer's xbf renderer (`@text-to-cad/ui` renderers/xbf) and the snapshot
-// CLI's headless stage (`common/headlessScene.js`) both call it, so neither can draw a document
+// `.xbf`'s scene. The viewer's xbf renderer (`@text-to-cad/ui` renderers/xbf) and the parity
+// page's headless stage (`common/headlessScene.js`) both call it, so neither can draw a document
 // the other does not.
 //
 // It is drawn from what the engine serves and nothing else (`xbfDocument.js`):

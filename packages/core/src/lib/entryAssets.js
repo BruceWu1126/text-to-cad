@@ -70,11 +70,6 @@ export function entryAssetHash(entry, key) {
   return normalizeString(entryAsset(entry, key)?.hash);
 }
 
-export function entryAssetBytes(entry, key) {
-  const bytes = Number(entryAsset(entry, key)?.bytes);
-  return Number.isFinite(bytes) && bytes >= 0 ? bytes : 0;
-}
-
 export function entryMeshAssetUrl(entry) {
   return entryAssetUrl(entry, meshAssetKeyForEntry(entry));
 }
@@ -83,54 +78,10 @@ export function entryMeshAssetHash(entry) {
   return entryAssetHash(entry, meshAssetKeyForEntry(entry));
 }
 
-export function entryMeshAssetBytes(entry) {
-  return entryAssetBytes(entry, meshAssetKeyForEntry(entry));
-}
-
 export function entryUrdfAssetHash(entry) {
   return [
     entryAssetHash(entry, "urdf"),
     entryAssetHash(entry, "srdf"),
     entryAssetHash(entry, "sdf")
   ].filter(Boolean).join(":");
-}
-
-export function entryMeshAssetSignature(entry) {
-  const mesh = String(
-    entry?.kind === "assembly"
-      ? entryAssetHash(entry, "glb")
-      : entryMeshAssetHash(entry)
-  );
-  const appearance = entrySourceFormat(entry) === RENDER_FORMAT.STEP
-    ? normalizeString(entry?.appearanceHash)
-    : "";
-  return appearance ? `${mesh}:${appearance}` : mesh;
-}
-
-export function entryReferenceAssetSignature(entry) {
-  return normalizeString(entry?.hash);
-}
-
-export function entryHasMesh(entry) {
-  if (entrySourceFormat(entry) === RENDER_FORMAT.STEP) {
-    return Boolean(
-      entryAssetUrl(entry, "glb") &&
-      entryAssetHash(entry, "glb")
-    );
-  }
-  const meshKey = meshAssetKeyForEntry(entry);
-  return Boolean(entryAssetUrl(entry, meshKey) && entryAssetHash(entry, meshKey));
-}
-
-export function entryHasReferences(entry) {
-  return entrySourceFormat(entry) === RENDER_FORMAT.STEP && entryHasMesh(entry);
-}
-
-export function entryPoseUrl(entry) {
-  // The sidecar URL of a STEP model with kinematics: it versions the articulation
-  // cadgen resolved from that sidecar, which travels inline on the entry
-  // (`articulation`).
-  return entrySourceFormat(entry) === RENDER_FORMAT.STEP
-    ? normalizeString(entry?.poseUrl)
-    : "";
 }
