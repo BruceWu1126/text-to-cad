@@ -101,7 +101,7 @@ class CopyOnWriteTest(MemoCase):
         box = bd.Solid.make_box(1, 1, 1)
         builder = BRep_Builder()
         for edge in box.edges():  # what ShapeFix_Shape fixes in the shape it is given, in place
-            builder.SameParameter(TopoDS.Edge_s(edge.wrapped), False)
+            builder.SameParameter(TopoDS.Edge(edge.wrapped), False)
         first = box.moved(bd.Location((5, 0, 0)))
         second = box.moved(bd.Location((10, 0, 0)))
         fixer = ShapeFix_Shape(first.wrapped)
@@ -113,7 +113,7 @@ class CopyOnWriteTest(MemoCase):
         from OCP.BRep import BRep_Tool
         from OCP.TopoDS import TopoDS
 
-        return {BRep_Tool.SameParameter_s(TopoDS.Edge_s(edge.wrapped)) for edge in shape.edges()}
+        return {BRep_Tool.SameParameter_s(TopoDS.Edge(edge.wrapped)) for edge in shape.edges()}
 
     def test_a_maker_that_changes_its_input_in_place_is_given_a_copy_of_a_placed_shape(self) -> None:
         before = memo.stats()["copied_on_write"]
@@ -208,12 +208,15 @@ MODEL = """
 from pathlib import Path
 
 import build123d as bd
-from cadgen.engine import Material, paint, read_step, xbf
+from cadgen.engine import paint, read_step, xbf
+from bd_materials import FinishedMaterial
+from bd_materials.core import RangeMaterial
+from threejs_materials import PbrProperties
 
 BOUGHT = Path(__file__).parent / "bought.step"
 PAIR = Path(__file__).parent / "pair.step"
-RED = Material("Red", 1000, color=(1, 0, 0))
-BLUE = Material("Blue", 1000, color=(0, 0, 1))
+RED = FinishedMaterial(RangeMaterial(name='Red', density=1000), pbr=PbrProperties.create('Red', color="#010000"))
+BLUE = FinishedMaterial(RangeMaterial(name='Blue', density=1000), pbr=PbrProperties.create('Blue', color="#000001"))
 
 
 def screw():

@@ -91,6 +91,29 @@ class HitTest(MemoCase):
         self.assertEqual(hot["hits"], 0)
         self.assertIsNot(box2, box)
 
+    def test_a_restored_result_owns_its_native_materials_and_face_paints(self) -> None:
+        import build123d as bd
+        from bd_materials import metals
+
+        from cadgen.engine import paint
+
+        shape = bd.Box(2, 3, 4)
+        shape.material = metals.aluminum()
+        shape.material.pbr = shape.material.pbr.override(roughness=0.25)
+        face = metals.copper()
+        face.pbr = face.pbr.override(roughness=0.35)
+        paint(shape, shape.faces()[0], face)
+        saved = memo._ShapeState(shape)
+
+        for _ in range(2):
+            shape.material.pbr = shape.material.pbr.override(roughness=0.9)
+            for material in shape.__dict__[memo.FACE_MATERIALS].values():
+                material.pbr.values.roughness = 0.8
+            self.assertIs(saved.restore(), shape)
+            self.assertEqual(shape.material.pbr.values.roughness, 0.25)
+            self.assertEqual([material.pbr.values.roughness for material in
+                              shape.__dict__[memo.FACE_MATERIALS].values()], [0.35])
+
 
 class BooleanTest(MemoCase):
     def test_a_boolean_leaves_its_inputs_and_writes_its_own_pcurves(self) -> None:
@@ -100,12 +123,12 @@ class BooleanTest(MemoCase):
         from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
         from OCP.TopExp import TopExp
         from OCP.TopoDS import TopoDS
-        from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape, TopTools_IndexedMapOfShape
+        from OCP.collections import IndexedDataMap_TopoDS_Shape_List_TopoDS_Shape_TopTools_ShapeMapHasher, IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher
 
         from cadgen.engine.kernel.history import listed
 
         def edges(shape):
-            found = TopTools_IndexedMapOfShape()
+            found = IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher()
             TopExp.MapShapes_s(shape.wrapped, TopAbs_EDGE, found)
             return [found.FindKey(ordinal) for ordinal in range(1, found.Extent() + 1)]
 
@@ -121,11 +144,11 @@ class BooleanTest(MemoCase):
                          "the boolean writes into no edge it was given")
         made = [edge for edge in edges(result) if edge.TShape() not in given]
         self.assertTrue(made)
-        ancestors = TopTools_IndexedDataMapOfShapeListOfShape()
+        ancestors = IndexedDataMap_TopoDS_Shape_List_TopoDS_Shape_TopTools_ShapeMapHasher()
         TopExp.MapShapesAndAncestors_s(result.wrapped, TopAbs_EDGE, TopAbs_FACE, ancestors)
         for edge in made:
             faces = {face.TShape(): face for face in listed(ancestors.FindFromKey(edge))}
-            planes = sum(isinstance(BRep_Tool.Surface_s(TopoDS.Face_s(face)), Geom_Plane) for face in faces.values())
+            planes = sum(isinstance(BRep_Tool.Surface_s(TopoDS.Face(face)), Geom_Plane) for face in faces.values())
             self.assertGreater(planes, 0)
             self.assertGreaterEqual(edge.TShape().Curves().Extent(), 1 + planes, "its curve on each plane it bounds")
 
@@ -562,7 +585,7 @@ class VertexTest(MemoCase):
         import build123d as bd
 
         def model():
-            return bd.Vertex(1, 2, 3).moved(bd.Location((5, 0, 0), (0, 0, 1), 30)).center().to_tuple()
+            return tuple(bd.Vertex(1, 2, 3).moved(bd.Location((5, 0, 0), (0, 0, 1), 30)).center())
 
         cold, _, _ = _run(model)
         warm, hot, run = _run(model)

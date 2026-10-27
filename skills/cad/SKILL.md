@@ -37,11 +37,11 @@ Use the corresponding robot-description skill for URDF, SRDF or SDF.
 Run cadgen through the `cadgen` command its installation writes, so this skill's commands
 share one installation, and its engine server, with the CAD app's:
 
-- `cadgen` below means `cadgen +0.8.0` (`~/.local/bin/cadgen +0.8.0` where `~/.local/bin` is not on your PATH)
-- `python` below means `cadgen +0.8.0 run`
+- `cadgen` below means `cadgen +0.8.1` (`~/.local/bin/cadgen +0.8.1` where `~/.local/bin` is not on your PATH)
+- `python` below means `cadgen +0.8.1 run`
 
-If `cadgen` is not on your PATH, or it says 0.8.0 is not installed, run
-`uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen doctor` once,
+If `cadgen` is not on your PATH, or it says 0.8.1 is not installed, run
+`uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.1 cadgen doctor` once,
 outside any sandbox or with its permission: it installs cadgen, registers it, writes the
 `cadgen` command and starts the engine. With the CAD app's server running, nothing else
 needs the sandbox's permission: it starts the engine and holds it. Without it, a sandboxed
@@ -56,7 +56,7 @@ host's server start timeout (Claude Code: 30 s by default, raised by setting `MC
 milliseconds; Codex: the plugin asks for 300 s); a restart resumes the download.
 
 A project venv can put its own `cadgen` ahead of the launcher on PATH, even when
-`~/.local/bin` is on PATH. Run `~/.local/bin/cadgen +0.8.0 doctor` to diagnose that
+`~/.local/bin` is on PATH. Run `~/.local/bin/cadgen +0.8.1 doctor` to diagnose that
 case and use that full launcher path for commands until PATH is corrected.
 
 One engine serves the installation: the first run starts it, every run and every
@@ -154,7 +154,8 @@ is the script's folder; two explicit names in it must differ.
   the kernel loads on first use, in the worker. `from build123d import Box`, or a
   module-level `bd.Color(...)` or `bd.Align` default, loads it at that line instead.
 - **Colours are sRGB**, as a person picks them: `part.color = "#4a6fa5"`, or 0-255
-  integers. Materials are values on the part: `part.material = materials.aluminium_6061`
+  integers. Import `metals` from `bd_materials`; assign a native material with
+  `part.material = metals.aluminum()`
   ([colour and materials](references/build123d-modeling.md#colour-and-materials)).
 - **Inputs** are `read_step`, `read_xbf` and `read_mesh` in the body, and any file its
   Python opens, each tracked by its bytes. The clock, environment variables and
