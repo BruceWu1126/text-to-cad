@@ -4,8 +4,8 @@ A model is a parameterless function that returns a build123d shape. It becomes a
 through exactly one of two declarations: bare ``@model`` (a document with no file), or one or
 more file decorators -- ``@xbf``, ``@step``, ``@glb``, ``@stl``, ``@threemf`` and ``@dxf`` (the
 drawing of a planar result: a sketch, a face, wires or edges) -- a document with those files;
-``@model`` stacked with a file decorator is refused. Its identity is ``script.py::function``: the
-function's name is the model's name, and renaming the function renames it. Every file decorator
+``@model`` stacked with a file decorator is refused. By default its id uses ``script.py::function``.
+An explicit ``name=`` uses the script folder and that name instead, independent of the declaring file. Every file decorator
 requires its output path: ``@xbf("XBF/part.xbf")`` or ``@step(out="part.step")``. Relative paths
 are relative to the script. Everything else is the model's code: its material, colours, joints,
 the pose its joints are connected at (the pose every file shows), its mechanism states, couplings
@@ -15,7 +15,7 @@ are kept in the order the decorators are written, top to bottom, and the xbf, wh
 always written first.
 
 The decorated function is a ``Model``: the function, its id (``.id``: ``ids.model_id`` of its
-script and function, or ``ids.key_id`` of the ``key=`` its declaration gives) and the debug seam
+script and function, or its folder and explicit ``name=``) and the debug seam
 ``.build(verify=, profile=)``. Decoration only declares: imports and definitions never build or
 exit the caller. A call builds the model through the engine and returns its document's handle
 (``api.Document``: ``.id``, ``.url``, ``.name``, ``.shape``, ``.export``, ``.snapshot``), never a
@@ -46,7 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from cadgen.engine.ids import canonical, check_key, key_id, model_id
+from cadgen.engine.ids import canonical, check_name, model_id
 
 __all__ = ["KINDS", "Memo", "Model", "Output", "Target", "configuration_sequence", "dxf", "glb", "mechanism_state", "memo",
            "model", "paint", "read_step", "read_xbf", "step", "stl", "threemf", "xbf", "models_in"]
@@ -157,18 +157,35 @@ class Model:
                              f"REPL), build the shape and hand it over: model(shape, name={self.name!r})")
         self.script = Path(canonical(filename))
         self.outputs: list[Output] = []
-        # The ``key=`` its declaration gives (``ids.key_id``), else None: its id is derived.
-        self.key: str | None = None
+        # The name within the script folder; None keeps the script/function id.
+        self.explicit_name: str | None = None
         self._bare = False  # declared by ``@model``
         self.__xbf_model__ = True
         _MODELS[f"{self.script}::{self.name}"] = self
 
     @property
     def id(self) -> str:
-        """This model's document id, worked out here, never asked of the engine: ``ids.key_id`` of
-        its ``key=``, else ``ids.model_id`` of its script and function -- the same in any process
-        that knows them."""
-        return key_id(self.key) if self.key is not None else model_id(self.script, self.name)
+        """The script/function id by default, or the folder/name id of an explicit name."""
+        return model_id(self.script, self.name, self.explicit_name)
+
+    @property
+    def fingerprint(self) -> str | None:
+        """SHA-256 of its script's bytes (``identity.fingerprint``), read once a build per script
+        (``_FINGERPRINTS``) and only when a report or a re-attachment asks: never at declaration."""
+        script = str(self.script)
+        if script not in _FINGERPRINTS:
+            from cadgen.engine.identity import fingerprint
+
+            _FINGERPRINTS[script] = fingerprint(self.script)
+        return _FINGERPRINTS[script]
+
+    @property
+    def source(self) -> dict[str, Any]:
+        """What a build's report says of this model's declaration: its script and function, its
+        first line, its explicit name, its script's fingerprint and its module."""
+        return {"script": str(self.script), "name": self.name,
+                "line": self.function.__code__.co_firstlineno, "explicit_name": self.explicit_name,
+                "fingerprint": self.fingerprint, "module": self.function.__module__}
 
     def declared(self, by: str) -> "Model":
         """One declaration more on this function: ``model`` (bare ``@model``) or a file kind. A
@@ -182,16 +199,26 @@ class Model:
             self._bare = True
         return self
 
-    def keyed(self, key: Any) -> "Model":
-        """The ``key=`` a declaration gives: its id becomes ``ids.key_id(key)``, global; one key per
-        model, and in this process one declaration per key (``claim``)."""
-        if key is None:
+    def named(self, name: str | None) -> "Model":
+        """The explicit ``name=`` a declaration gives: this model's name in its script's folder, its
+        id the folder's and the name's. One declaration per name in a folder: in this process
+        (``claim``), and against the file the registry's record of it points at
+        (``identity.claimed``); refused naming both ``file:line``."""
+        if name is None:
             return self
-        check_key(key)
-        if self.key is not None and self.key != key:
-            raise TypeError(f"model {self.name!r} declares two keys, {self.key!r} and {key!r}")
-        claim(key, self.address)
-        self.key = key
+        check_name(name)
+        if self.explicit_name is not None and self.explicit_name != name:
+            raise TypeError(f"model {self.name!r} declares two names, {self.explicit_name!r} and {name!r}")
+        line = self.function.__code__.co_firstlineno
+        claim(str(self.script.parent), name, str(self.script), self.name, line)
+        from cadgen.engine import registry
+
+        held = registry.current()
+        if held is not None:
+            from cadgen.engine.identity import claimed
+
+            claimed(held, {"script": str(self.script), "name": self.name, "line": line}, name)
+        self.explicit_name = name
         return self
 
     @property
@@ -341,61 +368,58 @@ def as_package_module(main: Any) -> None:
 # gone when the worker is. A shape handed over (``model(shape, name=...)``) is a third, ``shape``: its
 # document is the bytes handed over, held and cached as a drained document is, with nothing to run.
 
-# Each key a declaration in this process gives, and the declaration (``script::function``, or a
-# shape's ``scope::name``) that gave it: one key names one document. A build forgets them before
-# it loads the script, as it forgets the models (``_MODELS``).
-_KEYS: dict[str, str] = {}
+# Each explicit name a declaration in this process gives, by its namespace (the script's folder),
+# and the declaration that gave it: its script, its function and its first line. A build forgets
+# them before it loads the script, as it forgets the models (``_MODELS``).
+_NAMES: dict[tuple[str, str], tuple[str, str, int]] = {}
+# Each script's fingerprint (``Model.fingerprint``), read once a build: forgotten with ``_NAMES``.
+_FINGERPRINTS: dict[str, str | None] = {}
 
 
-def claim(key: str, declaration: str) -> None:
-    """``declaration`` takes ``key``; refused, naming the other, when another declaration of this
-    process has it (the engine refuses one its records hold: ``models.Models.claimed``)."""
-    other = _KEYS.setdefault(key, declaration)
-    if other != declaration:
-        raise ValueError(f"key {key!r} is claimed by two declarations, {other} and {declaration}: one key names "
-                         "one document; give one of them another key")
+def claim(namespace: str, name: str, script: str, function: str, line: int) -> None:
+    """``script``'s function ``function`` takes the explicit name ``name`` in ``namespace``; refused,
+    naming both ``file:line``, when another declaration of this process has it -- another function,
+    in this file or another. The same function declared again (a module loaded again, its line
+    moved) keeps it."""
+    other = _NAMES.setdefault((namespace, name), (script, function, line))
+    if other[:2] != (script, function):
+        raise ValueError(f"name {name!r} in namespace {namespace} is claimed by {other[0]}:{other[2]} and "
+                         f"{script}:{line}; give one declaration another name")
+    _NAMES[(namespace, name)] = (script, function, line)
 
 
-def _no_shape_options(name: Any, animations: Any) -> None:
-    if name is not None:
-        raise TypeError("a model decorator takes no name=: the function's name is the model's name (rename the "
-                        "function to rename it); name= names a shape handed over, model(shape, name=...)")
+def _no_animations(animations: Any) -> None:
     if animations is not None:
         raise TypeError("a model decorator takes no animations=: a model's body declares its animations "
                         "(animation(...)); animations= goes with a shape handed over, model(shape, name=...)")
 
 
-def model(target: Any = None, /, *, key: str | None = None, name: str | None = None,
-          animations: Any = None) -> Any:
-    """Declare a model without an output file: ``@model``, or ``@model(key="arm")`` for an id of its
-    key's (``ids.key_id``). A call builds its document. ``model(shape, name="arm")`` instead hands a shape
-    over: a document made of it, held by the engine as a built one is, its handle returned
-    (``api.hand_over``); ``key=`` and ``animations=[...]`` (the ``animation()`` builders of the GLB's
-    choreography) go with it."""
+def model(target: Any = None, /, *, name: str | None = None, animations: Any = None) -> Any:
+    """Declare a model, optionally named within its script folder, or hand over a named shape."""
     if target is None:
-        _no_shape_options(name, animations)
-        if key is not None:
-            check_key(key)
-        return lambda function: model(function, key=key)
+        _no_animations(animations)
+        if name is not None:
+            check_name(name)
+        return lambda function: model(function, name=name)
     if isinstance(target, Model) or inspect.isfunction(target):
-        _no_shape_options(name, animations)
+        _no_animations(animations)
         found = target if isinstance(target, Model) else Model(target)
-        return found.declared("model").keyed(key)
+        return found.declared("model").named(name)
     from cadgen.engine import api
 
     caller = sys._getframe(1)
     while caller.f_back is not None and caller.f_code.co_filename == __file__:
-        caller = caller.f_back  # ``cadgen.model(...)``: the module's own ``__call__`` is not the caller
-    return api.hand_over(target, name, key=key, animations=animations, frame=caller)
+        caller = caller.f_back
+    return api.hand_over(target, name, animations=animations, frame=caller)
 
 
 def _decorator(kind: str) -> Callable[..., Any]:
-    def decorate(out: Any, *, key: str | None = None) -> Any:
+    def decorate(out: Any, *, name: str | None = None) -> Any:
         if out is None:
             raise TypeError(f"@{kind} requires an output path")
         check_output(kind, out, f"@{kind}(out=...)")
-        if key is not None:
-            check_key(key)
+        if name is not None:
+            check_name(name)
 
         def apply(target: Any) -> Model:
             model = target if isinstance(target, Model) else Model(target)
@@ -403,14 +427,14 @@ def _decorator(kind: str) -> Callable[..., Any]:
             if any(output.kind == kind for output in model.outputs):
                 raise TypeError(f"model {model.name!r} declares @{kind} twice")
             model.outputs.insert(0, Output(kind, os.fspath(out)))
-            return model.keyed(key)
+            return model.named(name)
 
         return apply
 
     decorate.__name__ = kind
     decorate.__qualname__ = kind
-    decorate.__doc__ = (f"Declare an explicit output: @{kind}(out='path{SUFFIXES[kind]}'), its document's id "
-                        "given by key=. The output path is required; decoration builds nothing.")
+    decorate.__doc__ = (f"Declare an explicit output: @{kind}(out='path{SUFFIXES[kind]}'), optionally named "
+                        "within the script folder by name=. The output path is required; decoration builds nothing.")
     return decorate
 
 

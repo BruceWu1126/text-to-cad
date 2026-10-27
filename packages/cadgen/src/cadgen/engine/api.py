@@ -251,15 +251,14 @@ def _handed_bytes(shape: Any, name: str, animations: Any) -> bytes:
     return document.to_bytes(doc, [part.shape for part in tree.parts])
 
 
-def hand_over(shape: Any, name: Any, *, key: str | None = None, animations: Any = None, frame: Any = None) -> Document:
+def hand_over(shape: Any, name: Any, *, animations: Any = None, frame: Any = None) -> Document:
     """``model(shape, name=...)``: a document made of a shape this program holds -- from a script or a
     REPL, no function, no body -- handed to the engine, which holds it as a drained document is (in
     memory, and in its cache), serves its page and exports it, and records that a program it did not
     run showed it: there is no command that builds it again. Its id is ``ids.derived_id`` of the
-    calling script (``frame``'s file), or the working folder where there is none, and ``name``; or
-    ``ids.key_id`` of ``key``. The handle's ``shape`` is ``shape`` itself."""
+    calling script (``frame``'s file), or the working folder where there is none, and ``name``. The handle's ``shape`` is ``shape`` itself."""
     from cadgen.engine import model as declaring
-    from cadgen.engine.ids import canonical, check_key, check_name, derived_id, key_id
+    from cadgen.engine.ids import canonical, check_name, derived_id
 
     if getattr(declaring._CONTEXT, "build", None) is not None:
         raise TypeError("model(shape, name=...) hands a shape over from a script or a REPL; a model's body returns "
@@ -269,14 +268,12 @@ def hand_over(shape: Any, name: Any, *, key: str | None = None, animations: Any 
     check_name(name)
     filename = frame.f_code.co_filename if frame is not None else ""
     scope = canonical(filename if filename and os.path.isfile(filename) else os.getcwd())
-    if key is not None:
-        declaring.claim(check_key(key), f"{scope}::{name}")
-    ident = key_id(key) if key is not None else derived_id(scope, name)
+    ident = derived_id(scope, name)
     data = _handed_bytes(shape, name, animations)
-    answer = _ask({"op": "shape", "id": ident, "name": name, "scope": scope, "key": key, "program": _program(),
+    answer = _ask({"op": "shape", "id": ident, "name": name, "scope": scope, "program": _program(),
                    "cwd": os.getcwd(), "xbf": base64.b64encode(data).decode("ascii")})
     report = {"ok": True, "model": name, "id": ident, "url": (answer.get("done") or {}).get("url"),
-              "source": {"script": scope, "name": name}, "kind": "shape", "key": key, "bytes": len(data)}
+              "source": {"script": scope, "name": name}, "kind": "shape", "bytes": len(data)}
     if frame is not None and frame.f_globals.get("__name__") == "__main__":
         print(f"{name}: handed over ({len(data) / 1e6:.1f} MB)")
         print(f"  id: {ident}")

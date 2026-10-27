@@ -818,6 +818,12 @@ def status_text(answer: dict[str, Any]) -> str:
                      + (f" · last save failed: {failures[0]['error']}" if failures else ""))
     elif cache:
         lines.append("cache off: no cache folder")
+    identity = answer.get("identity")
+    if identity:
+        # What this engine's start brought to namespace/name identity (``identity.migrate``).
+        skipped = identity.get("skipped") or []
+        lines.append(f"identity migration at start: filled {identity.get('filled', 0)}, moved {identity.get('moved', 0)}, "
+                     f"skipped {len(skipped)}" + (f" ({skipped[0]}{', ...' if len(skipped) > 1 else ''})" if skipped else ""))
     models = answer.get("models") or []
     if models:
         # Each model document, its state, and for one not held the command that builds it again.

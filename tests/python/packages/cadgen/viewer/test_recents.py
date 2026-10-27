@@ -39,7 +39,7 @@ class RecentStoreTest(unittest.TestCase):
         self.assertIsNone(entries[0].public()["pictured"])
         self.assertEqual(len(Registry(self.tmp).list()), 2, "one record per file; the removed one's folder went")
         self.assertEqual(set(Registry(self.tmp).list()[0]) - {"pinned", "preview"},
-                         {"schema", "id", "kind", "root", "home", "opened", "created"}, "its path, and when it was opened, first and last")
+                         {"schema", "id", "kind", "root", "home", "opened", "created", "namespace", "name"}, "its path, and when it was opened, first and last")
 
     def test_a_picture_no_record_shows_goes_once_no_writer_can_still_name_it(self) -> None:
         # Each rebuilt revision a view pictures adds a PNG; replaced ones must not pile up.

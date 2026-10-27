@@ -47,8 +47,10 @@ key it holds is the model's (``build._previous``), with nothing run.
 Kept: nothing removes a cache file on its own -- no size cap, no least recently used, no age. A
 document's file goes only with the document, when a person deletes it (its record and its file
 together, ``registry.Registry.delete``), or when its bytes do not read (``models.Models.unreadable``:
-its next build writes it again). The memory budget is another thing (``serve.Server.trim``): a
-document that leaves memory for it is read again from here. A save that fails is logged and listed in
+its next build writes it again). It moves only with its record (``identity.repoint``: a moved
+script's record re-attached, a ``key::`` record migrated), landed at the new id before the old goes.
+The memory budget is another thing (``serve.Server.trim``): a document that leaves memory for it is
+read again from here. A save that fails is logged and listed in
 ``cadgen status``, never raised to anyone: with the cache folder read-only, or not writable at all,
 the engine does everything it did, and saves nothing.
 """

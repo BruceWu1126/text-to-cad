@@ -1601,6 +1601,9 @@ class Daemon:
         self.pool.pressed = self.pressure.under
         self.workers_lock = threading.Lock()  # each worker's ``held``
         self.born = time.time()
+        # What the startup identity migration did (``identity.migrate``), which ``status`` says when it
+        # did anything: a started engine's stderr is no one's.
+        self.identity: dict[str, Any] | None = None
         self.last = time.monotonic()
         self.busy = 0
         self.busy_lock = threading.Lock()
@@ -2001,6 +2004,19 @@ class Daemon:
     def _handle(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
         self.touch()
         op = request.get("op")
+        if op == "reattach":
+            # A worker's models with nothing to take up, before it reads their cache (``build._reattach``).
+            sources = request.get("models")
+            if not isinstance(sources, list) or not all(
+                    isinstance(row, dict) and isinstance(row.get("script"), str) and isinstance(row.get("name"), str)
+                    for row in sources):
+                send(refused(ValueError("reattach takes models: [{script, name, ...}]")))
+                return
+            try:
+                send({"ok": True, "lines": self.models.reattach(sources, request.get("pid"))})
+            except (OSError, ValueError) as error:
+                send(refused(error))
+            return
         if op == "models":
             send({"ok": True, "models": self.models.listing()})
             return
@@ -2295,6 +2311,7 @@ class Daemon:
                                                              "memory": self.server.memory()},
                 "models": self.models.listing(),
                 "cache": self.models.cache.status(),
+                "identity": self.identity if self.identity and any(self.identity.values()) else None,
                 "renders": [] if self.renders is None else self.renders.status(),
                 "sessions": (self.server.http.app.sessions() if self.server is not None
                              and hasattr(self.server.http, "app") else [])}
@@ -2682,6 +2699,16 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
     # Before it can be reached: a cached document of the closure before this engine's is moved to
     # it in place, once, so no build meets one (``cache.Cache.migrate``).
     daemon.models.cache.migrate()
+    # And the records from before namespace/name identity brought to it, once (``identity.migrate``:
+    # JSON and file names, no XBF, independent of the closure's pass). It never keeps the engine
+    # from starting.
+    from cadgen.engine.identity import migrate
+
+    try:
+        daemon.identity = migrate(daemon.models.registry())
+    except Exception as error:  # noqa: BLE001
+        daemon.identity = {"filled": 0, "moved": 0, "skipped": [f"the pass failed: {type(error).__name__}: {error}"]}
+        print(f"cadgen: identity migration failed: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
     daemon.stand()
     if foreground:
         try:

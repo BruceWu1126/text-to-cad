@@ -289,9 +289,13 @@ def rig():
 Every model a run builds is one document in the engine, with one id: a UUID derived
 from the script's path and the function's name, the same in every process
 (`bracket.id` in Python, and the handle's `.id`). Two scripts may use the same function
-name. `@model(key="bracket")` (or `key=` on a file decorator) gives the document an id of
-its key's instead, the same wherever the script moves; two declarations claiming one key
-are refused, naming the other. The page is
+name. `@model(name="bracket")` (or `name=` on a file decorator) derives the id from the
+script's folder and that name, independent of which file in the folder declares it; two explicit
+names in one folder are refused with both declaration locations. A model's name is its identity
+within its namespace, the function's name by default, `name=` gives it another. In 0.8 the namespace
+is the script's folder, with no project detection. Moving a named model to another file of its folder
+keeps its id: run the file it left with `cadgen run` (or delete it) first, since until then the engine
+knows that file by its last run, and refuses the new file's declaration naming both. The page is
 `/<id>` on the engine's address; `cadgen export`, `snapshot` and `inspect`, and the
 CAD app's tools, take the id and read the document as the engine holds it. No command
 imports, runs or builds a script: editing the script changes nothing until Python runs
@@ -325,7 +329,7 @@ it again.
   shape) is handed over: `model(shape, name="plate")` makes a document of it, held,
   cached, served on its page and exported like any other, and returns the same handle,
   whose `.shape` is the shape passed. Its id comes from the calling script (or the working
-  folder) and the name, or from `key=`. Joints, mechanism states and sequences on the
+  folder) and the name. Joints, mechanism states and sequences on the
   shape go with it; a GLB's animations are passed as `animations=[...]`. Nothing builds
   it again: its record says a program the engine did not run showed it, so run that
   program again. A decorated function in no saved file is refused, with these words.

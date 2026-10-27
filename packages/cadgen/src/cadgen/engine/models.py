@@ -14,9 +14,10 @@ What outlives the process is the registry's (``registry``): each ``model`` and `
 is recorded there as it is registered (``record``, ``hand_over``), synchronously, so after a restart
 its id is known -- ``held`` from its cache file, or ``unsaved`` with the command that builds it
 again (none for a shape) when the cache holds no file of it, or
-``detached`` once its script is gone -- and nothing is run to bring it back. A ``key=`` claims its id
-for one declaration: another declaration's build or hand-over
-of that key is refused, naming the one that holds it (``claimed``). A served
+``detached`` once its script is gone -- and nothing is run to bring it back. An explicit ``name=`` claims its id
+for one declaration within its script folder: another declaration is refused, naming both
+locations (``identity.claimed``), until the claiming file is gone or a run of it declares the name
+no more (``identity.released``). A served
 document's generation (``version``, what a page shows and the viewer's export compares) is a token
 of its build's own, never a counter that starts again, so an id and a generation never name two
 documents across a restart; a run of the same closure in the worker holding the last build keeps it
@@ -89,6 +90,7 @@ class Models:
         self.daemon = daemon
         self.records: dict[str, dict[str, Any]] = {}
         self.lock = threading.RLock()
+        self.identity_lock = threading.RLock()
         from cadgen.engine.cache import Cache
 
         self.cache = Cache(self)
@@ -99,6 +101,9 @@ class Models:
         if not isinstance(reports, list):
             return
         program = answer.get("program")
+        # Per script of the run: the explicit names it declares now, and those its models' records
+        # say it declared before (None: no record says), to give up what it declares no more.
+        declared: dict[str, tuple[list[str], set[str] | None]] = {}
         for root in reports:
             if not root.get("ok") and root.get("id") and self.held(root["id"]) is not None:
                 root["previous"] = True  # the failed run's line says its previous good build is served
@@ -109,9 +114,19 @@ class Models:
                 recorded = revision(report)
                 facts, before = self.facts(ident, report, recorded)
                 try:
-                    self.claimed(ident, source, report.get("key"))
-                    self.record(report, recorded, facts)
-                except ValueError as error:  # a key another declaration holds: the build is refused, by name
+                    if source.get("explicit_name") is not None:
+                        from cadgen.engine.identity import claimed
+
+                        held = self.registry()
+                        if held is not None:
+                            claimed(held, source, source["explicit_name"])
+                    had = self.record(report, recorded, facts)
+                    if isinstance(source.get("declares"), list):
+                        _now, was = declared.get(source["script"], (source["declares"], None))
+                        if isinstance(had.get("declares"), list):
+                            was = (was or set()) | set(had["declares"])
+                        declared[source["script"]] = (source["declares"], was)
+                except ValueError as error:  # a name another declaration holds: the build is refused, by name
                     report["ok"], report["error"] = False, f"{source['name']}: {error}"
                     root["ok"] = False
                     root.setdefault("error", report["error"])
@@ -142,6 +157,51 @@ class Models:
                 if (report.get("cache") or {}).get("unreadable"):
                     self.cache.remove(ident)  # this build found its cache file broken: the idle save writes it again
                 self.cache.touch(ident)
+        held = self.registry() if declared else None
+        if held is not None:
+            from cadgen.engine.identity import claims, released
+
+            for script, (now, was) in declared.items():
+                # What the script's records said it declared, else -- none of this run's models had a
+                # record saying it -- the claims the registry holds of it, read once.
+                released(held, script, (was if was is not None else claims(held, script)) - set(now))
+
+    def reattach(self, sources: list[dict[str, Any]], pid: int | None = None) -> list[str]:
+        """A worker's models with nothing to take up (``build._reattach``: each its ``source``), each
+        re-attached to the record of its script moved (``identity.reattach``) before the worker reads
+        its cache: a document this engine holds live and has not saved yet is saved first, from the
+        bytes the server holds or the worker that holds it (never the asking worker, ``pid``, busy
+        building), so its cache file moves with its record; what the book holds of an old id is
+        dropped. The lines that say what was re-attached."""
+        from cadgen.engine.identity import reattach
+
+        held = self.registry()
+        if held is None:
+            return []
+        lines: list[str] = []
+
+        def save(record):
+            row = self.row(record["id"])
+            if row is None or self.cache.current(record["id"], row["revision"]):
+                return
+            try:
+                data = self.held_bytes(record["id"], row["version"])
+                worker = row.get("worker")
+                if data is None and worker is not None and worker.pid != pid:
+                    _structure, _shapes, data = self.load(record["id"], worker, whole=True)
+                if data:
+                    self.cache._write(record["id"], row["revision"], data)
+            except Exception as error:  # noqa: BLE001 - its record moves all the same, with what its cache holds
+                self.cache.failed(record["id"], f"{type(error).__name__}: {error}")
+
+        with self.identity_lock:
+            moved = [(old, new) for old, new in reattach(held, sources, before=save, log=lines.append) if old != new]
+            for old, _new in moved:
+                self.forget(old)
+            if moved:
+                with self.cache.lock:
+                    self.cache.indexed = False  # the moved cache files: indexed again when next asked
+        return lines
 
     def facts(self, ident: str, report: dict[str, Any], recorded: str) -> tuple[dict | None, dict | None]:
         """A build's facts (``delta.facts``) and the last build's, of document ``ident``: the
@@ -168,43 +228,14 @@ class Models:
 
         return registry.current()
 
-    def claimed(self, ident: str, source: dict[str, Any], key: str | None) -> None:
-        """``key`` (the id ``ident`` its declaration gives) taken by ``source``'s declaration
-        (``script::name``); refused, naming the other, while another declaration whose script (or a
-        shape's scope) is still there holds it -- in this process's book or in the registry. A
-        declaration whose script is gone (moved) gives its key up. Nothing for a derived id: its
-        declaration is in it."""
-        if not key:
-            return
-        from cadgen.engine import registry as registering
-        from cadgen.engine.ids import canonical
-
-        mine = f"{canonical(source['script'])}::{source['name']}"
-        with self.lock:
-            row = self.records.get(ident)
-        other = None
-        if row is not None:
-            other = (row["source"]["script"], row["source"]["name"])
-        else:
-            held = self.registry()
-            record = held.get(ident) if held is not None else None
-            if record is not None and record.get("kind") in ("model", "shape"):
-                other = (str(registering.home(held, record)), record.get("entry") or "")
-        if other is None or not os.path.exists(other[0]):
-            return
-        theirs = f"{canonical(other[0])}::{other[1]}"
-        if theirs != mine:
-            raise ValueError(f"key {key!r} is claimed by {theirs}, so {mine} cannot take it: one key names one "
-                             "document; give one of them another key")
-
-    def record(self, report: dict[str, Any], recorded: str, facts: dict[str, Any] | None = None) -> None:
-        """The registry's record of a document a build made (``registry``), written when it changed.
-        Nothing with no registry."""
+    def record(self, report: dict[str, Any], recorded: str, facts: dict[str, Any] | None = None) -> dict[str, Any]:
+        """The registry's record of a document a build made (``registry``), written when it changed;
+        the record it had (``{}``: none). Nothing with no registry."""
         from cadgen.engine import registry as registering
 
         held = self.registry()
         if held is None:
-            return
+            return {}
         ident, source = report["id"], report["source"]
         script = Path(source["script"])
         old = held.get(ident) or {}
@@ -217,28 +248,35 @@ class Models:
         # its document's own (``previous``); which files it declared is no one's: they are exports.
         found: dict[str, Any] = {
             "id": ident, "kind": "model", "root": root, "home": registering.relative(script, root),
-            "entry": source["name"], "revision": recorded,
+            "entry": source["name"], "namespace": root, "name": source.get("explicit_name") or source["name"],
+            "revision": recorded, "fingerprint": source.get("fingerprint"), "module": source.get("module"),
             "built": old["built"] if old.get("revision") == recorded and old.get("built") else time.time()}
         if not old:
             found["created"] = found["built"]
         elif "created" in old:
             found["created"] = old["created"]
-        if report.get("key"):
-            found["key"] = report["key"]
+        if source.get("explicit_name") is not None:
+            found["line"] = source["line"]  # its claim of the name in its folder (``identity.claimed``)
+        if isinstance(source.get("declares"), list):
+            found["declares"] = source["declares"]  # the explicit names its script declared at this run
         if facts is not None:
             found["facts"] = facts
-        for key in ("opened", "pinned", "preview", "cache"):  # the home's and the cache's, kept across builds
+        for key in ("opened", "pinned", "preview", "cache", "relocated"):  # the home's and the cache's, kept across builds
             if key in old:
                 found[key] = old[key]
+        if not (report.get("cache") or {}).get("used"):
+            found.pop("relocated", None)  # a fresh document has paths at its new home
         held.put(found)
+        return old
 
     def hand_over(self, request: dict[str, Any]) -> dict[str, Any]:
         """A shape a program handed over (``api.hand_over``): its document's bytes read through the
         documents worker -- checked, and made the structure the server serves -- then held as a
         drained document is (``server.keep``, and the cache), its page registered, and recorded as a
         ``kind: "shape"``, with the ``program`` that handed it over where there is one: the engine did
-        not run it, so nothing builds it again. Refused (``ValueError``) for a key another declaration holds, or bytes that
-        are no document. The answer carries its page."""
+        not run it, so nothing builds it again. Refused (``ValueError``) for bytes that are no
+        document, and under the id of a model a script declares (``identity.handed``). The answer
+        carries its page."""
         import hashlib
 
         from cadgen.engine import registry as registering
@@ -247,8 +285,12 @@ class Models:
         ident, name, scope = str(request.get("id")), str(request.get("name")), str(request.get("scope"))
         if not is_id(ident):
             raise ValueError(f"{ident!r} is not a document id")
+        held = self.registry()
+        if held is not None:
+            from cadgen.engine.identity import handed
+
+            handed(held, ident, scope, name)  # one id is one document: a model's is not a shape's
         source = {"script": scope, "name": name}
-        self.claimed(ident, source, request.get("key"))
         data = base64.b64decode(request.get("xbf") or "")
         replies: list[dict[str, Any]] = []
         self.daemon._call({"source": {"document": ident, "held": ident}, "cwd": request.get("cwd")},
@@ -282,15 +324,14 @@ class Models:
             previous = held.get(ident) or {}
             found: dict[str, Any] = {
                 "id": ident, "kind": "shape", "root": root,
-                "home": registering.relative(scope, root), "entry": name, "revision": recorded,
+                "home": registering.relative(scope, root), "entry": name, "namespace": root, "name": name,
+                "revision": recorded,
                 "built": previous["built"] if previous.get("revision") == recorded and previous.get("built")
                 else time.time()}
             if not previous:  # first handed over now; an older record keeps what it has (``record``)
                 found["created"] = found["built"]
             elif "created" in previous:
                 found["created"] = previous["created"]
-            if request.get("key"):
-                found["key"] = request["key"]
             if program:
                 found["program"] = registering.relative(program, root)  # what its words name (``shown``)
             for key in ("opened", "pinned", "preview", "cache"):

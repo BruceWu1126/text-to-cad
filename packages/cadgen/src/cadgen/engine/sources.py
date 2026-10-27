@@ -726,7 +726,7 @@ class Symbols:
         reasons += sorted(f"always runs: {pair[1]}" for pair in pairs if pair[0] == "unkeyable")
         return hashlib.sha256("\n".join(rows).encode()).hexdigest(), reasons
 
-    def modules(self, function: Any) -> tuple[dict[str, str], bool]:
+    def modules(self, function: Any, *, aliases: dict[str, str] | None = None) -> tuple[dict[str, str], bool]:
         """A body's closure by file: per first-party module file the script's load imported
         or the body reaches, a digest of what the body reaches in it -- its functions' code
         objects (no lines, no docstrings), its classes, the values its bindings hold -- and,
@@ -749,7 +749,14 @@ class Symbols:
             if pair[0] == "unkeyable":
                 unkeyable = True
             file = self._module_file(owners.get(pair)) or root
-            buckets.setdefault(file, []).append(repr(pair))
+            # A script renamed after its exact bytes matched its record: compare the symbol's
+            # module qualifier under its former spelling. Values and code digests stay exact.
+            symbol = pair[0]
+            for current, former in (aliases or {}).items():
+                if symbol.startswith((current + ":", current + ".")):
+                    symbol = former + symbol[len(current):]
+                    break
+            buckets.setdefault(file, []).append(repr((symbol, *pair[1:])))
         for target in sorted(fallbacks):
             for file, file_digest in closure_files(target[1], target[0], self.resolved).items():
                 buckets.setdefault(str(file), []).append(f"bytes {file_digest}")

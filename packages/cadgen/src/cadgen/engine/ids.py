@@ -8,9 +8,8 @@ An id is a lower-case canonical UUID string, made by one formula (``derived_id``
 (``model_id``), an opened file's path and no name (``file_id``: inside the engine only -- a file's
 public name stays its path), a shape handed over (``model(shape, name=...)``) the calling script, or
 the working folder where there is none, and the name it is given. Any process that knows the scope
-and the name knows the id without asking the engine. A ``key`` given at the declaration replaces the
-derived id with ``key_id``: ``uuid5(NAMESPACE, "key::" + key)``, global and readable, the same
-wherever the declaration moves. Whether a text is an id is ``is_id``; what an id names is the
+and the name knows the id without asking the engine. An explicit ``name=`` uses the script's
+folder as its scope instead: a name within that namespace, independent of the declaring file. Whether a text is an id is ``is_id``; what an id names is the
 engine's to say, never the uuid's version.
 
 ``canonical`` is the one spelling of a path the engine and the viewer key by: ``realpath``,
@@ -32,7 +31,7 @@ import sys
 import uuid
 from typing import Any
 
-__all__ = ["NAMESPACE", "canonical", "check_key", "check_name", "derived_id", "file_id", "is_id", "key_id", "model_id"]
+__all__ = ["NAMESPACE", "canonical", "check_name", "derived_id", "file_id", "is_id", "model_id"]
 
 # cadgen's namespace for derived ids: written once, never changed.
 NAMESPACE = uuid.UUID("ad198b15-841c-4d1f-81be-6aa78d2737c0")
@@ -119,13 +118,13 @@ def file_id(path: str | os.PathLike) -> str:
     return derived_id(path)
 
 
-def model_id(script: str | os.PathLike, function: str) -> str:
-    """A model's document id: its script's canonical path and its function's name."""
-    return derived_id(script, function)
+def model_id(script: str | os.PathLike, function: str, name: str | None = None) -> str:
+    """A model's id: script/function by default, folder/explicit name when given."""
+    return derived_id(os.path.dirname(canonical(script)), check_name(name)) if name is not None else derived_id(script, function)
 
 
 def check_name(name: object, what: str = "name") -> str:
-    """A document's name (a shape's ``name=``) or a ``key=`` as a declaration gives it: readable -- a
+    """A document's name as a declaration gives it: readable -- a
     non-empty string with no surrounding space and no control character -- and with no ``::``, the
     formula's separator, so that no scope and name spell another's; else refused by name."""
     if not isinstance(name, str) or not name or name != name.strip() or any(ord(c) < 32 for c in name):
@@ -133,17 +132,6 @@ def check_name(name: object, what: str = "name") -> str:
     if "::" in name:
         raise ValueError(f"{what} {name!r} holds '::', which separates a scope from a name in an id: drop it")
     return name
-
-
-def check_key(key: object) -> str:
-    """A ``key=`` as a declaration gives it (``check_name``)."""
-    return check_name(key, "key")
-
-
-def key_id(key: str) -> str:
-    """The id a ``key=`` gives a document in place of its derived one: uuid5 of ``key::`` and the key,
-    global, the same wherever its declaration is."""
-    return str(uuid.uuid5(NAMESPACE, "key::" + check_key(key)))
 
 
 def is_id(text: object) -> bool:

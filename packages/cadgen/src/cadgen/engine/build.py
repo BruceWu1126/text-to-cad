@@ -72,6 +72,9 @@ class _Written:
     tree: Any = None
     # The document's bytes as taken from the engine's cache (``_previous``): what it answers with.
     data: bytes | None = None
+    # A document taken from a cache file built where its script was before a move: that script and
+    # its module (its record's ``relocated``), what its closure is compared as (``identity.relocated``).
+    relocated: dict[str, Any] | None = None
     # A model declaring an xbf: the document's xbf bytes as its build made them, before any export
     # (a mesh export leaves the shapes meshed, which a later serialisation would write too): what
     # its declared xbf is written from on every run, and what the engine's cache keeps of it.
@@ -397,7 +400,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
     differs runs on every call for the worker's life (``memo.always``)."""
     from cadgen.engine import previous
     from cadgen.engine.kernel import determinism, memo
-    from cadgen.engine.model import _KEYS, _MODELS, BuildContext, models_in
+    from cadgen.engine.model import _FINGERPRINTS, _MODELS, _NAMES, BuildContext, models_in
 
     script = Path(script).resolve()
     if not script.is_file():
@@ -417,7 +420,8 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
             reader.session():
         run.verify = verify
         _MODELS.clear()  # the models this build defines, known by name to what its replays ran
-        _KEYS.clear()  # and the keys their declarations claim (``model.claim``)
+        _NAMES.clear()  # and the names their declarations claim (``model.claim``)
+        _FINGERPRINTS.clear()  # and their scripts' fingerprints, read again once
         load_key = (run_token, str(script), str(cwd))
         kept = _kept_load(load_key) if run_token and not verify else None
         fresh = None
@@ -455,6 +459,8 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
         context.base = script.parent
         context.script = script
         models = models_in(vars(module), script)
+        # The explicit names the script declares now, what its run tells the engine (``identity.released``).
+        own, declared = set(models), sorted({model.explicit_name for model in models if model.explicit_name is not None})
         if functions:
             by_name = {model.name: model for model in models}
             missing = [name for name in functions if name not in by_name]
@@ -482,6 +488,11 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
                     found.append((child, made))
             return found
 
+        if cache is not None:
+            try:
+                _reattach(models, Path(cache))
+            except Exception as error:  # noqa: BLE001 - identity never fails a build: a new document
+                print(f"cadgen: re-attachment failed: {type(error).__name__}: {error}", file=sys.stderr)
         for model in models:
             body_started = time.perf_counter()
             tally = dict(run.tally)
@@ -563,8 +574,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
     load_seconds = loaded - started
     for report, (model, result, body, children) in zip(reports, results):
         report["id"] = model.id
-        report["source"] = {"script": str(model.script), "name": model.name}
-        report["key"] = model.key
+        report["source"] = model.source
         if result is not None:
             report["timings"] = {"load": round(load_seconds, 4), "body": round(body, 4)}
             _written(model, result, run, report, log, model.plan(), context)
@@ -576,6 +586,8 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
                 report["ok"] = False
                 report["error"] = "".join(traceback.format_exception_only(type(error), error)).rstrip()
                 report["trace"] = traceback.format_exc()
+        if model in own:
+            report["source"]["declares"] = declared
         # Each child that ran writes the files it declares, from its own document, after its
         # target's: its report is the target's, under its identity (``child_models``).
         for child, made in children:
@@ -763,8 +775,7 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
     _outputs(plan, report, log, lambda path: document.write_bytes(path, data or b"", made_from), source, kept=True)
     _WRITTEN[key] = _Written(signature, xbf, kept, tree.closure, made_from, xbf=data)
     report["id"] = model.id
-    report["source"] = {"script": str(model.script), "name": model.name}
-    report["key"] = model.key
+    report["source"] = model.source
 
 
 def _outputs(plan: list, report: dict[str, Any], log: Callable[[str], None],
@@ -950,6 +961,7 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
     if remembered is not None:
         where = "memory"  # the document this process last built or took: its record is in memory
         text = remembered.record
+        moved = remembered.relocated
         if text is None:
             return {"used": False, "reason": "its last build wrote no key"}, None
     else:
@@ -966,13 +978,25 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
             return {"used": False, "reason": f"its cache was written by {writer or 'another program'}"}, None
         if text is None:
             return {"used": False, "reason": "its cache holds no key"}, None
+        moved = _relocation(model)
     found = json.loads(text)
     if found.get("key") is None:
         return {"used": False, "reason": "its cache holds no key" if where == "cache" else "its last build wrote no key"}, None
     modules, _unkeyable = context.modules(model)
-    now, changes = previous.again(found, model, folder, modules, context.named(model))
+    compared = found
+    if moved is not None:
+        # Built where its script was before a move: compared as the same files named from here,
+        # and its module's symbols under the name they had there (``identity.relocated``).
+        from cadgen.engine.identity import relocated
+
+        compared = relocated(found, moved["script"], model.script, folder)
+        origin = moved.get("module")
+        if origin and origin != model.function.__module__:
+            symbols = context.symbols if context.script is None or model.script == context.script else context.others[model.script]
+            modules, _unkeyable = symbols.modules(model.function, aliases={model.function.__module__: origin})
+    now, changes = previous.again(compared, model, folder, modules, context.named(model))
     keyed = time.perf_counter()
-    if now != found["key"]:
+    if now != (previous.key(compared) if compared is not found else found["key"]):
         changes = changes or ["its closure changed"]
         shown_changes = changes[:3] + ([f"{len(changes) - 3} more"] if len(changes) > 3 else [])
         return {"used": False, "reason": ", ".join(shown_changes), "changed": changes}, None
@@ -992,7 +1016,7 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
             return {"used": False, "reason": "its cache does not hold the closure its head shows",
                     "unreadable": True}, None
         timings["read"] = round(time.perf_counter() - keyed, 4)
-        _WRITTEN[name] = _Written(("loaded", found["key"]), None, None, text, data=data)
+        _WRITTEN[name] = _Written(("loaded", found["key"]), None, None, text, data=data, relocated=moved)
     else:
         # What the bodies made stays the memo's, as a replay would keep it: an edit after
         # any number of these builds replays all it leaves alone.
@@ -1007,8 +1031,51 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
                             "reads": {}},
               "children": {}, "bodies": {model.identity: "loaded"}, "cache": {"used": True, "from": where},
               "timings": timings, "files": {}}
-    report["closure"] = previous.located(found, folder)
+    report["closure"] = previous.located(compared, folder)
     return report["cache"], report
+
+
+def _relocation(model: Any) -> dict[str, Any] | None:
+    """Where the cache file of ``model``'s document was built, when that is where its script was
+    before a move (its record's ``relocated``: ``{script, module}``); else None. One record read."""
+    from cadgen.engine import registry
+
+    held = registry.current()
+    found = ((held.get(model.id) if held is not None else None) or {}).get("relocated")
+    return found if isinstance(found, dict) and isinstance(found.get("script"), str) else None
+
+
+def _reattach(models: list, cache: Path) -> None:
+    """Before a build takes its models from anything: each model with nothing to take up -- no
+    document this worker built or took, and no cache file at its id, or a named model whose record
+    points at another file -- is asked of the engine in one request (``op: reattach``), which
+    re-attaches the record of its script moved (``identity.reattach``) before its cache is read. A
+    model this worker holds, or whose cache file is there, costs a stat, and nothing is asked. Asked
+    of the engine that runs this worker, never of one it would start."""
+    from cadgen.engine import registry
+    from cadgen.engine.cache import FILE
+
+    held = registry.current()
+    if held is None:
+        return
+    asked = []
+    for model in models:
+        if _WRITTEN.get(f"{model.script}::{model.name}") is not None:
+            continue
+        if (cache / model.id / FILE).is_file():
+            if model.explicit_name is None:
+                continue  # its id is its script's own: that file is its document
+            record = held.get(model.id)
+            if record is None or registry.home(held, record) == model.script:
+                continue
+        asked.append(model.source)
+    if not asked:
+        return
+    from cadgen.engine.client import request
+
+    answer = request({"op": "reattach", "models": asked, "pid": os.getpid()}, start=False) or {}
+    for line in answer.get("lines") or []:
+        print(line, file=sys.stderr)
 
 
 def _names(run: Any, part: Any) -> tuple[Any, dict[str, dict[str, Any]], dict[tuple[str, str], str | None]]:

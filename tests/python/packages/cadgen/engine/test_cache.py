@@ -226,7 +226,8 @@ class CacheTest(unittest.TestCase):
         meta = self.cached(ident)
         record = self.record(ident)
         self.assertEqual(set(record), {"schema", "id", "kind", "root", "home", "entry", "revision", "built", "created", "facts",
-                                       "cache"}, "a build's record, once its document is cached")
+                                       "cache", "namespace", "name", "fingerprint", "module", "declares"},
+                         "a build's record, once its document is cached")
         self.assertEqual(set(meta), {"revision", "bytes"})
         self.assertEqual((meta["revision"], meta["bytes"]), (record["revision"], self.file(ident).stat().st_size))
         self.assertEqual(sorted(os.listdir(self.state / "documents" / ident)), ["document.json"],
