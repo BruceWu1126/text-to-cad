@@ -155,7 +155,7 @@ class Models:
                 server = self.register_page(ident)
                 report["url"] = self.url(server, ident)
                 if (report.get("cache") or {}).get("unreadable"):
-                    self.cache.remove(ident)  # this build found its cache file broken: the idle save writes it again
+                    self.cache.refresh(ident)  # retain old bytes until this successful build is saved atomically
                 self.cache.touch(ident)
         held = self.registry() if declared else None
         if held is not None:
@@ -711,20 +711,6 @@ class Models:
             doc = server.served.get(ident)
             return doc.xbf if doc is not None and server.model_versions.get(ident) == version else None
 
-    def unreadable(self, ident: str, why: str) -> Exception:
-        """Document ``ident``'s held bytes did not read (``build.Unreadable``, ``why``): its cache file
-        removed, with its record's ``cache`` (``Cache.remove``), so it is no longer held on disk and its
-        next build writes it again -- rather than every restart offering the same bytes and failing
-        on them. The refusal to answer with: that, and the command that builds it again."""
-        from cadgen.engine.serve import NotHeld
-
-        self.cache.remove(ident)
-        said = f"the engine's cache of {ident} does not read ({why}), and is removed"
-        found = self.rebuild(ident)
-        if found is None:
-            return NotHeld(said, "unsaved", self.command(ident))
-        return NotHeld(f"{said}: {found['error']}", found["state"], found["rebuild"])
-
     def disk_bytes(self, ident: str) -> bytes | None:
         """The bytes of document ``ident``'s cache file when it is at the revision the book holds, its
         read noted (its idle timer and its recency); else None."""
@@ -746,16 +732,17 @@ class Models:
             record = self.records.get(ident)
         if data is None or record is None:
             raise self.not_held(ident)
-        from cadgen.engine import runtime
-
-        runtime.check_producer(data)
         replies: list[dict[str, Any]] = []
         name = record["source"]["name"]
         self.daemon._call({"source": {"document": ident, "held": ident}},
                           {"id": 1, "op": "result", "document": True, "name": name}, replies.append, data)
         answer = next((row for row in reversed(replies) if "done" in row or "failed" in row), {})
         if "done" not in answer:
-            raise ValueError(answer.get("failed") or f"{name} ({ident}): its cache file could not be read")
+            from cadgen.engine.document_migrations import DocumentCompatibilityError
+
+            error = DocumentCompatibilityError if answer.get("kind") == (
+                "cadgen.engine.document_migrations:DocumentCompatibilityError") else ValueError
+            raise error(answer.get("failed") or f"{name} ({ident}): its cache file could not be read")
         payload = base64.b64decode(answer.get("payload", ""))
         done = answer["done"]
         shapes, at = {}, 0

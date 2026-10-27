@@ -177,62 +177,6 @@ def check_native(found: Any) -> None:
             raise ValueError("the imported native kernel differs from the installed OCP distribution")
 
 
-NATIVE_SCHEMA = "cadgen.engine native/1"
-NATIVE_GUID = "457ceaca-c5ba-4c7b-a7ae-9d5b735bf385"
-READABLE_FORMATS = frozenset({"xbf/7", "xbf/8", "xbf/9"})
-
-
-class IncompatibleNative(ValueError):
-    """A last-built document that this native toolchain cannot safely decode."""
-
-
-def stamp_native(doc: Any) -> None:
-    """Shape hand-overs have no model closure: keep their producer in the raw-readable head."""
-    from OCP.Standard import Standard_GUID
-    from OCP.TCollection import TCollection_AsciiString
-    from OCP.TDataStd import TDataStd_AsciiString
-
-    text = json.dumps({"schema": NATIVE_SCHEMA, "compatibility": compatibility()}, separators=(",", ":"))
-    TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(NATIVE_GUID), TCollection_AsciiString(text))
-
-
-def check_producer(data: bytes) -> None:
-    """Check the original writer before native decoding, scanning ASCII attributes only.
-
-    Models carry their producer in the closure. A shape's native stamp serves the same purpose.
-    Known older model formats stay readable; missing legacy platform fields are not invented.
-    """
-    from cadgen.engine import previous
-
-    head = data[:previous._HEAD_BYTES]
-    writer, closure = previous._head(head)
-    import re
-
-    matched = re.fullmatch(r"cadgen\.engine (xbf/[0-9]+) \(cadgen .+\)", writer or "")
-    written = matched.group(1) if matched else None
-    found = None
-    prefix = ('{"schema":"' + NATIVE_SCHEMA + '",').encode()
-    at = head.find(prefix)
-    if at >= 0:
-        try:
-            stamp, _ = json.JSONDecoder().raw_decode(head[at:].decode("ascii", "replace"))
-            found = stamp.get("compatibility")
-        except (ValueError, AttributeError):
-            pass
-    if found is None and closure is not None:
-        record = json.loads(closure)
-        found = {"format": (record.get("engine") or {}).get("format"),
-                 "OCP": (record.get("libs") or {}).get("OCP"), **(record.get("platform") or {})}
-    current = compatibility()
-    if not isinstance(found, dict) or not found.get("OCP"):
-        raise IncompatibleNative("the last-built document has no producer native compatibility metadata; "
-                                 "run its model or hand the shape over again")
-    if (written not in READABLE_FORMATS or found.get("format") != written
-            or found.get("OCP") != current["OCP"]
-            or any(found.get(name) is not None and found[name] != current[name] for name in ("system", "arch"))):
-        raise IncompatibleNative("the last-built document has incompatible producer native kernel/document formats; "
-                                 "use a compatible server, or run its model or hand the shape over again")
-
 
 def describe(environment: dict[str, str] | None = None) -> dict[str, Any]:
     from cadgen.engine.previous import version

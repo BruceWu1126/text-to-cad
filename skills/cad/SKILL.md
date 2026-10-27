@@ -36,21 +36,21 @@ Use the corresponding robot-description skill for URDF, SRDF or SDF.
 
 Use the project's Python environment for model scripts and the registered command for CLI verbs:
 
-- `cadgen` below means `~/.local/bin/cadgen +0.8.1`, the registered CLI proxy.
+- `cadgen` below means `~/.local/bin/cadgen +0.8.2`, the registered CLI proxy.
   On Windows use `%USERPROFILE%\.local\bin\cadgen.cmd`; if `CADGEN_LAUNCHER_DIR` moved
   the proxy, use that directory. Use its explicit path so an activated project environment
   cannot shadow it with its own `cadgen` console script.
 - `python` below means the project's Python interpreter, from its virtual environment.
   Install the matching release in that environment
-  with `python -m pip install cadgen==0.8.1`; keep the project's other dependencies there too.
+  with `python -m pip install cadgen==0.8.2`; keep the project's other dependencies there too.
   If that interpreter has no pip, use
-  `uv pip install --python <project-python> cadgen==0.8.1` instead.
+  `uv pip install --python <project-python> cadgen==0.8.2` instead.
 
 The CAD app's MCP server starts or attaches to the engine. Without it, start the engine explicitly,
 outside a sandbox that cannot bind its listener:
 
 ```bash
-uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.1 cadgen server
+uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.2 cadgen server
 ```
 
 Keep that server running. Clients select port 3245 by default; set `CADGEN_PORT` in both the server
@@ -62,7 +62,7 @@ must have exactly the server's cadgen release. A missing server or version misma
 building; ordinary Python calls and CLI document operations never start a server or fall back locally.
 
 If the registered `cadgen` command is missing, run
-`uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.1 cadgen doctor` once
+`uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.2 cadgen doctor` once
 outside the sandbox or with its permission. It registers the CLI installation and writes the
 command; it does not start the engine.
 

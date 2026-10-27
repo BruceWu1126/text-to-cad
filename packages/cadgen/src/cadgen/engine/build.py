@@ -53,11 +53,6 @@ class BuildError(Exception):
     """A request the build cannot run: no such script, no such model."""
 
 
-class Unreadable(ValueError):
-    """Bytes the engine held of a document -- its cache file's, a retired worker's -- that do not
-    read as one (``held_source``): answered by this type, so the daemon drops that cache file
-    (``models.Models.unreadable``) and the next build writes it again."""
-
 
 @dataclass
 class _Written:
@@ -883,20 +878,18 @@ def held_source(payload: bytes, name: str, origin: dict[str, Any] | None = None)
             found = _read_held(payload, name)
             found.origin = origin
         except DocumentCompatibilityError:
-            # Unsupported or failed conversions leave the saved snapshot recoverable. Only
-            # unreadable binary data takes the cache-eviction path below.
+            # Unsupported or failed conversions leave the saved snapshot recoverable.
             raise
         except Exception as error:  # noqa: BLE001 - bytes that do not read are said so, by their type
             from cadgen.engine import document, previous
 
             writer, _closure = previous._head(payload[:previous._HEAD_BYTES])
             version = document.written_format(writer)
-            if version is not None and version != previous.FORMAT:
-                # The binary reader can fail before the format converter is reached. A
-                # historical/future snapshot is still recoverable; do not call it corrupt.
-                raise DocumentCompatibilityError(
-                    f"cannot read saved {version}: {error}; the original document is preserved") from error
-            raise Unreadable(str(error)) from error
+            # A failed read never deletes the person's saved state, including current-format
+            # bytes. A successful explicit rebuild may replace them atomically.
+            raise DocumentCompatibilityError(
+                f"cannot read saved {version or 'document'}: {error}; the original document is preserved; "
+                "restore a backup or explicitly rebuild its model") from error
     _HELD[key] = found  # the most recent last
     while len(_HELD) > _HELD_KEPT:
         _HELD.pop(next(iter(_HELD)))
@@ -1026,7 +1019,7 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
             doc = document.read_bytes(data)
             held = previous.read_record(doc)
         except Exception as error:  # noqa: BLE001 - a cache that does not read is built again
-            # ``unreadable``: the daemon drops the file, so this build's document is cached again.
+            # ``unreadable``: a successful rebuild replaces the old bytes only after its new document is saved.
             return {"used": False, "reason": f"its cache does not read: {error}", "unreadable": True}, None
         del doc
         if document.written_format(held[0]) != previous.FORMAT or held[1] != text:

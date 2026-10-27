@@ -139,34 +139,6 @@ class RuntimeTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "native kernel/document"):
                 handle._transferred()
 
-    def test_original_producer_is_checked_before_held_or_cached_native_decode(self):
-        from cadgen.engine import build, daemon, previous
-
-        compatible = runtime.compatibility()
-        def payload(format="xbf/9", ocp=None, legacy=False):
-            record = {"schema": previous.EARLIER_SCHEMA if legacy else previous.SCHEMA,
-                      "engine": {"format": format}, "libs": {"OCP": ocp or compatible["OCP"]}}
-            if not legacy:
-                record["platform"] = {name: compatible[name] for name in ("system", "arch")}
-            return (f"cadgen.engine {format} (cadgen current)\0" + json.dumps(record, separators=(",", ":")) + "\0").encode()
-        engine = daemon.Daemon(cap=1)
-        self.addCleanup(engine.pool.stop)
-        engine.models.records["cube"] = {"source": {"name": "cube"}, "version": "v1"}
-        for data in (payload(ocp="0.0.0"), payload(format="xbf/999")):
-            with self.subTest(data=data), mock.patch.object(build, "_read_held", side_effect=AssertionError("native decoded")) as decoded:
-                with self.assertRaises(runtime.IncompatibleNative):
-                    build.held_source(data, "cube")
-                decoded.assert_not_called()
-            with mock.patch.object(engine.models, "disk_bytes", return_value=data), \
-                    mock.patch.object(engine, "_call", side_effect=AssertionError("native worker called")) as called:
-                with self.assertRaises(runtime.IncompatibleNative):
-                    engine.models.from_disk("cube")
-                called.assert_not_called()
-        for data in (payload(), payload(format="xbf/8"), payload(format="xbf/7", legacy=True)):
-            runtime.check_producer(data)
-        with self.assertRaisesRegex(runtime.IncompatibleNative, "no producer"):
-            runtime.check_producer(b"cadgen.engine xbf/8 (cadgen old)\0")
-
     def test_restored_shape_uses_server_document_worker_without_pythonpath(self):
         from tests.python.support import engine_daemon
 

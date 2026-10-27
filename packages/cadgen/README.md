@@ -418,10 +418,10 @@ src/cadgen/
 Start a standalone server explicitly, or use the MCP bootstrap:
 
 ```bash
-uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen server
+uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.2 cadgen server
 ```
 
-In the project's Python environment, install the matching `cadgen==0.8.0` and its
+In the project's Python environment, install the matching `cadgen==0.8.2` and its
 other dependencies, then run `python model.py`. Its builds attach to the selected
 engine and run in warm workers of that project interpreter. Set `CADGEN_PORT` in
 both environments when using another port. Client, engine and worker releases

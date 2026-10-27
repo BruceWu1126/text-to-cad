@@ -325,7 +325,7 @@ only, and a file's id is derived again from its path after a restart.
 | `door.py` | how a client reaches the daemon on POSIX: the door, a named pipe, and a pair of pipes per connection (**The door**) |
 | `progress.py` | where a build is: the engine's stages heard where they begin, each body a model's body runs by name, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
-| `cache.py` | the document cache: each model document's bytes in the cache folder (`documents/<id>/document.xbf`), saved when idle, at its drain and at shutdown, once per revision; the index a restart reads; kept until a person deletes it, with no cap (`Cache`); safe startup handling of legacy closure bytes (`migrate`), with runtime-less models rebuilt only on explicit calls |
+| `cache.py` | the document cache: each model document's bytes in the cache folder (`documents/<id>/document.xbf`), saved when idle, at its drain and at shutdown, once per revision; the index a restart reads; kept until a person deletes it, with no cap (`Cache`); saved documents are converted only when read, with runtime-less models rebuilt only on explicit calls |
 | `registry.py` | the registry of documents in the user's state folder (`Registry`: `get`, `put`, `list`, `delete`), the user's page token (`token`, `put_token`), each engine's connection metadata (keyed by selected port), and the one owner of every write under that folder (`Folder`); where the folder is, the distribution's (`FACTORY`) |
 | `identity.py` | identity beyond the formula, on records and file names alone (no kernel, no XBF read): an explicit name's claim in its folder (`claimed`), a shape refused a declared model's id (`handed`), a moved script's record re-attached (`reattach`, `repoint`, `relocated`), and the startup identity migration (`migrate`) |
 | `cli.py` | the verbs as commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `delete`, `server` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
@@ -2624,8 +2624,8 @@ no git. It names what the document was built from and what built it, the toolcha
 schema    "cadgen.engine closure/2"
 engine    {"release": "cadgen <release>", "format": "xbf/10", "digest": ...}   the format (keyed); the release and
                                                                      the engine's code digest (information only)
-libs      {"build123d": "0.13.0", "OCP": "8.0.1.1",                   geometry and materials libraries (keyed);
-           "bd_materials": "...", "threejs_materials": "..."}         OCP leads with the OCCT it wraps
+libs      {"build123d": "0.13.0", "OCP": "8.0.1.1.0",                   geometry and materials libraries (keyed);
+           "bd_materials": "0.2.5", "threejs_materials": "1.2.5"}         OCP leads with the OCCT it wraps
 platform  {"python": "3.13.13", "system": "Darwin", "arch": "arm64"}  the system and architecture (keyed),
                                                                      Python (information only):
                                                                      platform.python_version(), .system(), .machine()

@@ -329,7 +329,7 @@ class PreviousTest(unittest.TestCase):
         self.cached.write_bytes(self.cached.read_bytes().replace(writer, other_release))
         self.assertEqual(self.kit()["cache"], {"used": True, "from": "cache"})
         # A document of the format before (the key made differently): built again, once.
-        old = other_release.replace(f"cadgen.engine {previous.FORMAT} ".encode(), b"cadgen.engine xbf/1 ")
+        old = other_release.replace(f"cadgen.engine {previous.FORMAT} ".encode(), b"cadgen.engine xbf/01 ")
         self.assertEqual(len(old), len(other_release))
         self.restart(saved=False)
         self.cached.write_bytes(self.cached.read_bytes().replace(other_release, old))
@@ -354,7 +354,7 @@ class PreviousTest(unittest.TestCase):
         self.cached.write_bytes(head)
         report = self.kit()
         self.assertTrue(report["cache"]["reason"].startswith("its cache does not read"), report["cache"])
-        self.assertTrue(report["cache"]["unreadable"], "the daemon drops it, and caches the build again")
+        self.assertTrue(report["cache"]["unreadable"], "the successful build replaces the unreadable saved bytes")
         self.assertEqual(self.xbf.read_bytes(), first)
 
     def export(self, name: str) -> bytes:

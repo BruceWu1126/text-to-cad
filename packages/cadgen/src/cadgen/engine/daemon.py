@@ -633,9 +633,6 @@ builds no script until a build takes it (``adopt``)."""
 # The requests that serve (``Daemon.serve``: the HTTP server bound on the first), each counted busy
 # while it is underway (``Daemon.handle``).
 SERVING = frozenset({"serve", "viewer", "http", "read", "warm"})
-# The type a worker answers bytes of a held document that do not read with (``build.Unreadable``),
-# as ``worker.refusal`` names it.
-UNREADABLE = "cadgen.engine.build:Unreadable"
 
 
 def refused(error: Exception) -> dict[str, Any]:
@@ -1772,10 +1769,6 @@ class Daemon:
                             send({"failed": "The source changed. Open Export again to use the displayed revision."})
                             return
                     answer = worker.build(ordered, send, payload)
-                    held = (request.get("source") or {}).get("document")
-                    if held and answer.get("kind") == UNREADABLE:
-                        # The bytes a held document was read from (its cache file's) do not read.
-                        answer = refused(self.models.unreadable(str(held), str(answer.get("failed"))))
                     returned = answer.pop("payload", b"")
                     if returned:
                         import base64

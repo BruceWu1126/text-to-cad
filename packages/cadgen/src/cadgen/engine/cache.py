@@ -31,8 +31,8 @@ Once per revision: the record gains ``cache: {revision, bytes}``, and a document
 whose revision is the cache's is never written again.
 
 The key covers the format, native material and kernel library versions, system and architecture,
-along with the model's code and inputs. The closure records cadgen and Python versions without
-keying them. An explicit build with a changed key rebuilds from source. Reading an older
+the runtime's Python version and effective dependencies, along with the model's code and inputs.
+The closure's separate cadgen release and platform Python fields are descriptive. An explicit build with a changed key rebuilds from source. Reading an older
 supported snapshot converts its metadata in memory, leaving these bytes and its build key alone.
 
 Read: at start the daemon indexes which records have a cache file (``Cache.ensure_index``: a listing
@@ -43,9 +43,9 @@ key it holds is the model's (``build._previous``), with nothing run.
 
 Kept: nothing removes a cache file on its own -- no size cap, no least recently used, no age. A
 document's file goes only with the document, when a person deletes it (its record and its file
-together, ``registry.Registry.delete``), or when its bytes do not read (``models.Models.unreadable``:
-its next build writes it again). Unsupported formats and failed data migrations are retained,
-with an error; they are not corrupt cache entries. It moves only with its record (``identity.repoint``: a moved
+together, ``registry.Registry.delete``). Failed reads, unsupported formats and failed data
+migrations preserve the original bytes and record, with a recoverable error. A successful explicit
+rebuild may atomically replace an unreadable snapshot. It moves only with its record (``identity.repoint``: a moved
 script's record re-attached, a ``key::`` record migrated), landed at the new id before the old goes.
 The memory budget is another thing (``serve.Server.trim``): a document that leaves memory for it is
 read again from here. A save that fails is logged and listed in
@@ -97,6 +97,7 @@ class Cache:
         self.idle = idle()
         self.lock = threading.Condition()
         self.indexed = False
+        self.refreshing: set[str] = set()  # rebuilt after a failed read; old bytes stay until replacement
         # Each cache file: its bytes, and its revision once known.
         self.index: dict[str, dict[str, Any]] = {}
         self.due: dict[str, float] = {}  # each document's idle deadline (monotonic)
@@ -198,6 +199,8 @@ class Cache:
             return False
         self.ensure_index()
         with self.lock:
+            if ident in self.refreshing:
+                return False
             entry = self.index.get(ident)
             known = None if entry is None else entry["revision"]
         if entry is None:
@@ -323,21 +326,14 @@ class Cache:
                     if found is not None and found.get("revision") == revision else None)
         with self.lock:
             self.index[ident] = {"bytes": len(data), "revision": revision}
+            self.refreshing.discard(ident)
             self.written += 1
 
-    def remove(self, ident: str) -> None:
-        """Document ``ident``'s cache file, gone, because its bytes do not read; its record kept,
-        saying so (no ``cache``), so its next build writes it again. The record stops naming the file
-        before the file goes, so no record ever names a file that is not there (``_write`` writes the
-        file before its record names it)."""
-        held = self.registry()
+    def refresh(self, ident: str) -> None:
+        """A successful build found unreadable saved bytes: replace them on its next save,
+        preserving the original file and record until the atomic write succeeds."""
         with self.lock:
-            self.index.pop(ident, None)
-        if held is None:
-            return
-        held.update(ident, lambda found: {key: value for key, value in found.items() if key != "cache"}
-                    if found is not None and "cache" in found else None)
-        held.cache.remove(f"{self.inside(ident).rsplit('/', 1)[0]}")  # documents/<id>, nothing outside it
+            self.refreshing.add(ident)
 
     def forget(self, ident: str) -> None:
         """Document ``ident`` deleted (``models.delete``): nothing of it is saved from now on -- its idle
@@ -345,6 +341,7 @@ class Cache:
         (``Registry.delete``), and a save under way finds no record to write to."""
         with self.lock:
             self.index.pop(ident, None)
+            self.refreshing.discard(ident)
             self.due.pop(ident, None)
             self.writes = collections.deque(row for row in self.writes if row[0] != ident)
             self.lock.notify_all()

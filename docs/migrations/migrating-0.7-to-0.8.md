@@ -5,7 +5,7 @@ and you will end with a working 0.8 project. An agent with the CAD skill install
 pointed here by the skill's short `references/migrations.md` and can do most of this for
 you: ask it to follow this guide. A project still on 0.4 first follows
 [Migrating 0.4 to 0.5](migrating-0.4-to-0.5.md), which ends here. This guide targets
-cadgen 0.8.1 with build123d 0.13.
+cadgen 0.8.2 with build123d 0.13.
 
 ## Read this first: there is no authoring compatibility layer
 
@@ -57,14 +57,14 @@ are gone.
 
 ## Prerequisites
 
-1. **Update the plugin and project pin together.** Install `cadgen==0.8.1` in the
+1. **Update the plugin and project pin together.** Install `cadgen==0.8.2` in the
    project's Python environment alongside its other dependencies. Use that actual
    interpreter for scripts and tests; `.venv/bin/python` is typical on POSIX,
    `.venv\Scripts\python.exe` on Windows. The Python floor is 3.11. Snapshots
    use OCCT and download no browser.
 
    ```bash
-   python -m pip install cadgen==0.8.1
+   python -m pip install cadgen==0.8.2
    python -m pip install -r requirements.txt  # if the project has other requirements
    ```
 
@@ -73,7 +73,7 @@ are gone.
    sandbox that cannot bind its listener:
 
    ```bash
-   uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.1 cadgen server
+   uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.2 cadgen server
    ```
 
    Server, project clients and workers must have exactly the same cadgen release.
@@ -104,12 +104,12 @@ are gone.
    configure a GUI server or make mismatched releases compatible.
 
 4. **Run source with project Python; use `cadgen` for CLI verbs.** The registered
-   command `~/.local/bin/cadgen +0.8.1 <verb>` selects a CLI installation, not the Python that
+   command `~/.local/bin/cadgen +0.8.2 <verb>` selects a CLI installation, not the Python that
    runs project source. Use its explicit path so an activated project environment's
    `cadgen` console script cannot shadow it. On Windows use
    `%USERPROFILE%\.local\bin\cadgen.cmd`; honor `CADGEN_LAUNCHER_DIR` if set.
    If that command is missing, run
-   `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.1 cadgen doctor`
+   `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.2 cadgen doctor`
    once outside the sandbox. Doctor registers it without starting a server.
 
    | Project action | Current command |
@@ -117,8 +117,8 @@ are gone.
    | Build the models called by a script | `python src/model.py` |
    | Run project checks | `python -m unittest ...` |
    | Add the project's import root | `PYTHONPATH=src python src/camera/payload.py` |
-   | Export a built document | `~/.local/bin/cadgen +0.8.1 export <id> part.step` |
-   | Check the selected engine | `~/.local/bin/cadgen +0.8.1 status` |
+   | Export a built document | `~/.local/bin/cadgen +0.8.2 export <id> part.step` |
+   | Check the selected engine | `~/.local/bin/cadgen +0.8.2 status` |
 
 5. **Handle an old viewer explicitly.** Stop an old process only if you own it,
    using the command for that installation, or choose a distinct port. No new
@@ -545,7 +545,7 @@ assign any explicit colour:
 @step(materials={"definitions": {"cast": {"name": "As-cast steel", "roughness": 0.85, "metalness": 0.2}},
                  "assignments": [{"targets": ["#housing"], "material": "cast"}]})
 
-# 0.8.1, in the body
+# 0.8.2, in the body
 from bd_materials import metals
 from cadgen import paint
 
@@ -591,7 +591,7 @@ material is inherited by children without one; assign it before reading their ma
 `Color`. Native PBR base-colour floats are sRGB ratios; emission and attenuation floats
 are linear. Hex strings avoid that distinction.
 
-| 0.7 | 0.8.1 |
+| 0.7 | 0.8.2 |
 | --- | --- |
 | `srgb("#2E3742")` | `"#2E3742"` |
 | `srgb("#38414D", 0.42)` | `"#38414D6B"` |

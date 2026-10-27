@@ -264,9 +264,6 @@ def _handed_bytes(shape: Any, name: str, animations: Any) -> bytes:
         part.key = document.geometry_key(part.shape)
     document.merge(tree)
     doc = document.to_xcaf(tree, document.Kept())
-    from cadgen.engine import runtime
-
-    runtime.stamp_native(doc)
     return document.to_bytes(doc, [part.shape for part in tree.parts])
 
 

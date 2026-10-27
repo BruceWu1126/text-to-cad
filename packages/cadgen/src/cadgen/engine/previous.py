@@ -7,11 +7,12 @@ When a build writes a model's xbf, the document's main label carries its closure
 - ``engine``: the keyed xbf format (``FORMAT``); as information only, the release that wrote it
   (``cadgen <VERSION>``, the version declared beside this very code: ``version``) and a digest of
   the engine's own code;
-- ``libs``: the versions of build123d and OCP (the kernel: OCCT's release leads its version),
-  which decide the geometry;
+- ``libs``: the versions of build123d, OCP (the kernel: OCCT's release leads its version),
+  bd_materials and threejs_materials, which decide geometry and native material payload;
 - ``platform``: the keyed system and architecture (``platform.system()``, ``platform.machine()``):
   an arm64 kernel and an x86-64 one write other bytes of one model; the Python version is recorded
   as information only;
+- ``runtime``: the keyed effective dependency snapshot and Python version;
 - ``source``: ``{"kind": "script", "path", "function"}`` -- the script relative to the
   document's folder and the model's function;
 - ``modules``: ``[path, digest]`` per first-party module the script's load imported or the
@@ -29,10 +30,9 @@ When a build writes a model's xbf, the document's main label carries its closure
 - ``key``: one digest over the format, the libraries, the system and the architecture, and the
   code: the source, the modules and the inputs; ``null`` where the closure
   cannot say all the model is made of (a body read a pipe, or reaches what cannot be keyed).
-  Not the engine's code digest: an engine edit that leaves the document alone keeps every xbf
-  current. ``FORMAT`` is what moves when the written document, or what the key covers, changes
-  (``xbf/1`` to ``xbf/2``), and every xbf then builds once, cleanly. A cadgen release or Python
-  version change alone leaves the key current.
+  The separate engine digest is descriptive; actual cadgen source and release contribute to
+  the dependency snapshot. ``FORMAT`` moves when the written document, or what the key covers,
+  changes (``xbf/1`` to ``xbf/2``), and an explicit build rebuilds the old format once.
 
 No source text, no line, no input's contents (**the file is the document**, **names are the
 durable tie to code**).
