@@ -6,10 +6,12 @@ process never conceals an installed dependency changed since its last run.
 """
 from __future__ import annotations
 
+import csv
 import functools
 import hashlib
 import importlib.metadata as metadata
 import importlib.util
+import io
 import json
 import os
 import platform
@@ -20,10 +22,11 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 STARTUP = ("PYTHONPATH", "PYTHONHOME", "PYTHONSAFEPATH", "PYTHONNOUSERSITE", "PYTHONUSERBASE", "PYTHONPLATLIBDIR")
-_SOURCE = frozenset({".py", ".pyi", ".so", ".pyd", ".dll", ".dylib", ".pth"})
+# Type stubs do not execute; explicit data reads are covered by the model's build closure.
+_SOURCE = frozenset({".py", ".so", ".pyd", ".dll", ".dylib", ".pth"})
 _SKIP = frozenset({".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", "build", "dist"})
 _current: dict[str, Any] | None = None
-_records: dict[str, tuple[Any, str, str, list[Path], Path | None]] = {}
+_records: dict[str, tuple[Any, str, str, list[str], Path | None]] = {}
 
 
 def digest(value: Any) -> str:
@@ -53,7 +56,7 @@ def _windows_files() -> tuple[Any, Any, Any, Any, Any]:
     close.argtypes = [wintypes.HANDLE]
     close.restype = wintypes.BOOL
 
-    def refused(path: Path) -> OSError:
+    def refused(path: Path | str) -> OSError:
         why = ctypes.WinError(ctypes.get_last_error())
         return OSError(f"cannot verify Windows dependency change time for {path}: {why}; "
                        "check file permissions and filesystem support")
@@ -61,7 +64,7 @@ def _windows_files() -> tuple[Any, Any, Any, Any, Any]:
     return opened, query, close, Basic, refused
 
 
-def _windows_change(path: Path) -> int:
+def _windows_change(path: Path | str) -> int:
     """FILE_BASIC_INFO.ChangeTime survives a last-write timestamp restored with os.utime."""
     import ctypes
 
@@ -83,13 +86,14 @@ def _windows_change(path: Path) -> int:
             raise refused(path)
 
 
-def _stamp(path: Path) -> list[Any]:
+def _stamp(path: Path | str) -> list[Any]:
+    path = os.fspath(path)
     try:
-        found = path.stat()
+        found = os.stat(path)
     except OSError:
-        return [str(path), None]
+        return [path, None]
     changed = _windows_change(path) if os.name == "nt" else found.st_ctime_ns
-    return [str(path), found.st_size, found.st_mtime_ns, changed]
+    return [path, found.st_size, found.st_mtime_ns, changed]
 
 
 def _editable(root: Path) -> list[list[Any]]:
@@ -98,8 +102,8 @@ def _editable(root: Path) -> list[list[Any]]:
     for folder, directories, names in os.walk(root):
         directories[:] = sorted(name for name in directories if name not in _SKIP and not name.startswith('.'))
         for name in sorted(names):
-            if Path(name).suffix.lower() in _SOURCE:
-                rows.append(_stamp(Path(folder) / name))
+            if os.path.splitext(name)[1].lower() in _SOURCE:
+                rows.append(_stamp(os.path.join(folder, name)))
     return rows
 
 
@@ -119,13 +123,20 @@ def dependencies() -> str:
         if token in seen:
             continue
         seen.add(token)
-        changed = [_stamp(Path(token) / name) for name in ("METADATA", "RECORD", "direct_url.json")] if location is not None else None
+        changed = [_stamp(os.path.join(token, name)) for name in ("METADATA", "RECORD", "direct_url.json")] if location is not None else None
         held = _records.get(token)
         if held is None or held[0] != changed:
             name = str(dist.metadata.get("Name") or "").lower().replace("_", "-")
             base = Path(dist.locate_file("")).resolve()
-            files = [Path(os.path.normpath(os.path.join(base, str(entry)))) for entry in dist.files or ()
-                     if Path(entry).suffix.lower() in _SOURCE or Path(entry).name in ("METADATA", "RECORD", "direct_url.json")]
+            record = dist.read_text("RECORD")
+            # metadata.files stats every wheel entry before we can filter it. Read the same
+            # inventory directly; the stamps below check the runtime files once. Legacy/custom
+            # distributions without RECORD keep importlib.metadata's own inventory semantics.
+            entries = (row[0] for row in csv.reader(io.StringIO(record)) if row) if record is not None else (
+                str(entry) for entry in dist.files or ())
+            files = [os.path.normpath(os.path.join(base, entry)) for entry in entries
+                     if os.path.splitext(entry)[1].lower() in _SOURCE
+                     or os.path.basename(entry) in ("METADATA", "RECORD", "direct_url.json")]
             try:
                 direct = json.loads(dist.read_text("direct_url.json") or "{}")
             except (ValueError, TypeError):
@@ -140,7 +151,7 @@ def dependencies() -> str:
         if name in names:
             continue
         names.add(name)
-        stamps = [_stamp(path) for path in files]
+        stamps = [found for path in files if len(found := _stamp(path)) > 2]
         if editable is not None:
             stamps.extend(_editable(editable))
         rows.append([name, version, sorted(stamps)])

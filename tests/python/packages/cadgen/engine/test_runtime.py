@@ -62,6 +62,50 @@ class RuntimeTest(unittest.TestCase):
                 (info / "METADATA").write_text("Name: custom\nVersion: 2\n", encoding="utf-8")
                 self.assertNotEqual(second, runtime.dependencies())
 
+    def test_runtime_inventory_reads_quoted_record_paths_and_preserves_legacy_fallback(self):
+        from importlib import metadata
+
+        self.addCleanup(runtime._records.clear)
+        for inventory in ("record", "legacy"):
+            with self.subTest(inventory=inventory), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                source, stub = root / "custom,geometry.py", root / "custom.pyi"
+                source.write_text("WIDTH=1\n", encoding="utf-8")
+                stub.write_text("WIDTH: int\n", encoding="utf-8")
+                info = root / "custom-1.dist-info"
+                info.mkdir()
+                (info / "METADATA").write_text("Name: custom\nVersion: 1\n", encoding="utf-8")
+                if inventory == "record":
+                    (info / "RECORD").write_text(
+                        '"custom,geometry.py",,\ncustom.pyi,,\nmissing.py,,\ncustom-1.dist-info/METADATA,,\n',
+                        encoding="utf-8")
+                dist = metadata.Distribution.at(info)
+                listing = mock.PropertyMock(side_effect=AssertionError("full distribution inventory walked")) if (
+                    inventory == "record") else mock.PropertyMock(return_value=[
+                        Path(source.name), Path(stub.name), Path("missing.py"), Path("custom-1.dist-info/METADATA")])
+                runtime._records.clear()
+                with mock.patch.object(runtime.metadata, "distributions", return_value=[dist]), mock.patch.object(
+                        type(dist), "files", listing):
+                    first = runtime.dependencies()
+                    stub.write_text("WIDTH: float\n", encoding="utf-8")
+                    self.assertEqual(first, runtime.dependencies(), "type-only stubs do not affect execution")
+                    stamp = source.stat()
+                    source.write_text("WIDTH=2\n", encoding="utf-8")
+                    os.utime(source, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                    changed = runtime.dependencies()
+                    self.assertNotEqual(first, changed, "a quoted runtime path retains mutation-time validation")
+                    (root / "missing.py").write_text("VALUE=1\n", encoding="utf-8")
+                    reappeared = runtime.dependencies()
+                    self.assertNotEqual(changed, reappeared, "a recorded missing source can reappear")
+                    source.unlink()
+                    removed = runtime.dependencies()
+                    self.assertNotEqual(reappeared, removed, "removing runtime source invalidates the snapshot")
+                    runtime._records.clear()
+                    self.assertEqual(removed, runtime.dependencies(), "cold and warm inventories agree after deletion")
+                    source.write_text("WIDTH=2\n", encoding="utf-8")
+                    self.assertNotEqual(removed, runtime.dependencies(), "restoring source invalidates the snapshot")
+                self.assertEqual(listing.call_count, 0 if inventory == "record" else 2)
+
     def test_pool_keeps_venvs_warm_and_replaces_changed_dependencies(self):
         def start(script, environment, cwd, execution):
             worker = Fake(script, environment, cwd)
