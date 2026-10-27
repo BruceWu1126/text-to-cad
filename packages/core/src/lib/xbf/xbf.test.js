@@ -10,7 +10,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import * as THREE from "three";
 
-import { headlessSceneDress } from "../../common/headlessScene.js";
+import { headlessSceneDress, headlessSceneFamily } from "../../common/headlessScene.js";
 import { resolveViewSceneSettings } from "../../common/sceneSettings.js";
 import { viewFeaturesForKind } from "../../common/viewSettings.js";
 import { recordingRenderer } from "../viewer/__tests__/recordingRenderer.js";
@@ -581,4 +581,16 @@ test("Explode moves each instance's carrier by the document's tree, and puts it 
 test("a read the engine refuses carries its status: a 404 is a document the engine no longer holds", async () => {
   const gone = async () => new Response(JSON.stringify({ error: "not found" }), { status: 404, headers: { "content-type": "application/json" } });
   await assert.rejects(waitForXbfVersion(`${URL_BASE}`, "v1", { fetch: gone }), error => error.status === 404 && /answered 404 \(not found\)/.test(error.message));
+});
+
+
+test("headless XBF applies resolved hidden instance IDs and refuses unknown ones", async () => {
+  const { fetch } = engine();
+  const document = await loadXbfDocument(URL_BASE, { fetch });
+  const family = headlessSceneFamily({ resolved: { kind: "xbf" } });
+  const scene = family.build(THREE, document, { resolved: { hiddenParts: ["i1"] } });
+  assert.deepEqual(scene.hiddenParts(), ["i1"]);
+  scene.dispose();
+  const another = await loadXbfDocument(URL_BASE, { fetch });
+  assert.throws(() => family.build(THREE, another, { resolved: { hiddenParts: ["i999"] } }), /existing XBF instances/);
 });

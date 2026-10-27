@@ -84,6 +84,9 @@ exhausted; it never substitutes a raster image. The installed browser and bundle
 run locally. If no supported browser is installed, run `cadgen doctor --install-browser` once.
 An optional JSON object supplies the Viewer's render configuration, including its existing
 `exposure`, `lighting` (including `quality`) and `backdrop` settings:
+Native Preview keeps `display.hidden` and `display.isolated` part/assembly references. Robot
+Preview takes exact visual IDs (`link:v1`). Browser renders of direct mesh files refuse these
+selectors explicitly; ordinary OCCT snapshots retain their existing support.
 
 ```bash
 cadgen snapshot "$ID" tmp/studio.png --preview '{"lighting":{"quality":"final"},"exposure":0}'

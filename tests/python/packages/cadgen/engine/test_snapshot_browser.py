@@ -71,11 +71,14 @@ class BrowserSnapshotContractTest(unittest.TestCase):
             @contextlib.contextmanager
             def served(*args):
                 try:
-                    yield {"kind": "glb", "url": "http://127.0.0.1/input/source.glb"}, None
+                    yield {"kind": "xbf", "url": "http://127.0.0.1/api/doc/fixture", "hiddenParts": ["i1"]}, None
                 finally:
                     released.append(True)
             async def fail(job, runtime, document, engine_origin, stage):
                 self.assertTrue(job["preview"], "an empty preview mapping still enables Preview")
+                self.assertEqual(job["resolved"]["hiddenParts"], ["i1"])
+                self.assertNotIn("hidden", job["display"])
+                self.assertNotIn("isolated", job["display"])
                 stage.write_bytes(b"partial")
                 failures = browser._BrowserFailures()
                 route = SimpleNamespace(request=SimpleNamespace(url=browser.PAGE_ORIGIN + "/input/missing_texture.png"), fulfill=AsyncMock())
@@ -84,7 +87,7 @@ class BrowserSnapshotContractTest(unittest.TestCase):
                 failures.check()
             with patch.object(assets, "snapshot_dist_dir", return_value=runtime), patch.object(browser, "_source", served), patch.object(browser, "_render", fail):
                 with self.assertRaisesRegex(RuntimeError, "Missing required resource.*missing_texture"):
-                    browser.render(source, out, snapshot.Still(preview={}))
+                    browser.render(source, out, snapshot.Still(preview={}, display={"hidden": ["lid"], "isolated": ["assembly"]}))
             self.assertEqual(out.read_bytes(), b"earlier")
             self.assertEqual(released, [True], "the private source is released after a resource failure")
             self.assertEqual(sorted(p.name for p in root.iterdir()), ["picture.png", "runtime", "source.glb"])
@@ -123,6 +126,32 @@ class BrowserSnapshotContractTest(unittest.TestCase):
         flattened = browser._video_rgb(picture, {"previewSettings": {"background": {"color": "#0000ff"}}})
         self.assertEqual([flattened.getpixel((x, 0)) for x in range(2)], [(128, 0, 127), (0, 0, 255)])
         self.assertEqual(browser._video_rgb(picture, {"display": {"appearance": "dark"}}).getpixel((1, 0)), (32, 34, 38))
+
+    def test_native_visibility_resolves_refs_to_exact_instance_ids(self):
+        structure = {"name": "assembly", "path": "/fixture/assembly.xbf",
+            "prototypes": [{"name": "base"}, {"name": "lid"}],
+            "instances": [{"prototype": 0, "path": "assembly/base"}, {"prototype": 1, "path": "assembly/lid"}],
+            "tree": {"name": "assembly", "children": [{"name": "base", "instance": 0, "prototype": 0},
+                                                       {"name": "lid", "instance": 1, "prototype": 1}]}}
+        self.assertEqual(browser._native_hidden_parts(structure, {"hidden": ["lid"]}, "assembly"), ["i1"])
+        self.assertEqual(browser._native_hidden_parts(structure, {"isolated": ["lid"]}, "assembly"), ["i0"])
+        self.assertEqual(browser._native_hidden_parts(structure, {"isolated": ["assembly"], "hidden": ["lid"]}, "assembly"), ["i1"])
+        with self.assertRaisesRegex(snapshot.SnapshotRefused, "missing"):
+            browser._native_hidden_parts(structure, {"hidden": ["missing"]}, "assembly")
+        with self.assertRaisesRegex(snapshot.SnapshotRefused, "nothing"):
+            browser._native_hidden_parts(structure, {"isolated": []}, "assembly")
+
+    def test_robot_visibility_uses_existing_visual_ids_and_other_families_refuse_refs(self):
+        payload = {"visuals": [{"id": "base:v1"}, {"id": "arm:v1"}]}
+        self.assertEqual(browser._robot_hidden_visuals(payload, {"hidden": ["arm:v1"]}), ["arm:v1"])
+        self.assertEqual(browser._robot_hidden_visuals(payload, {"isolated": ["arm:v1"]}), ["base:v1"])
+        with self.assertRaisesRegex(snapshot.SnapshotRefused, "unknown robot visual IDs"):
+            browser._robot_hidden_visuals(payload, {"hidden": ["unknown:v1"]})
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "source.glb"
+            with self.assertRaisesRegex(snapshot.SnapshotRefused, "cannot resolve hidden/isolated"):
+                with browser._source(path, None, display={"hidden": ["lid"]}):
+                    self.fail("an unsupported selector must not silently render the full file")
 
     def test_cli_accepts_auto_or_named_animation_and_full_preview_settings(self):
         parser = snapshot.build_parser()

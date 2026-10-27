@@ -1,8 +1,28 @@
 import { createProgressivePreview } from '../lib/preview-tracing/progressivePreview.js';
 
+// A completed GPU fence can start the next batch without waiting for a display
+// refresh. A task (not a microtask) still yields to browser and worker events.
+function frameScheduler() {
+  const channel = new MessageChannel(), tasks = new Map();
+  let next = 0;
+  channel.port1.onmessage = event => {
+    const task = tasks.get(event.data);
+    tasks.delete(event.data);
+    task?.();
+  };
+  return {
+    schedule(task) { const id = ++next; tasks.set(id, task); channel.port2.postMessage(id); return id; },
+    cancel(id) { tasks.delete(id); },
+    dispose() { tasks.clear(); channel.port1.close(); channel.port2.close(); },
+  };
+}
+
 // The headless page drives the very same controller as Preview. It owns a host
 // for the controller's private canvases and refuses to encode a raster fallback.
-export function createHeadlessPreview(viewport, { createController = createProgressivePreview, schedule = requestAnimationFrame, cancel = cancelAnimationFrame } = {}) {
+export function createHeadlessPreview(viewport, { createController = createProgressivePreview, schedule = null, cancel = null } = {}) {
+  const scheduler = schedule ? null : frameScheduler();
+  schedule ||= scheduler.schedule;
+  cancel ||= scheduler?.cancel || (() => {});
   const host = document.createElement('div');
   const canvas = viewport.renderer.domElement;
   const oldParent = canvas.parentNode, oldNext = canvas.nextSibling;
@@ -44,6 +64,7 @@ export function createHeadlessPreview(viewport, { createController = createProgr
       if (queued !== null) cancel(queued);
       if (pending) { pending.reject(new Error('Preview session is closed')); pending = null; }
       controller.dispose();
+      scheduler?.dispose();
       if (oldParent) oldParent.insertBefore(canvas, oldNext); else canvas.remove();
       host.remove();
     }

@@ -1399,6 +1399,11 @@ guided RGB/coverage denoiser as Viewer Preview. It waits for the full quality ta
 unsupported scenes, unavailable tracing and exhausted budgets; it never saves a raster fallback.
 The engine's `snapshot.BROWSER_RENDER` hook is supplied by the distribution's host adapter, so the
 standalone engine does not import its enclosing application's browser or runtime resolver.
+Native `display.hidden` and `display.isolated` references are resolved through the existing
+part/assembly grammar before meshing, then passed as exact instance IDs to the browser scene.
+Robot Preview uses its exact visual IDs (`link:v1`); unknown IDs fail. Browser snapshots of
+other direct mesh families refuse these selectors explicitly rather than rendering the full
+file in their place. Normal OCCT snapshots keep their existing reference support.
 
 `preview` in `snapshot(...)` and `Document.snapshot(...)` accepts a boolean or the Viewer's full
 render configuration object. Even `{}` enables Preview. The CLI's `--preview` enables defaults;

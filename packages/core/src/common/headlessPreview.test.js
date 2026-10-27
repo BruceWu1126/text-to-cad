@@ -30,3 +30,17 @@ test('headless Preview waits for the complete denoised frame, reuses its control
     await assert.rejects(session.renderFrame({}), /closed/);
   } finally { globalThis.document = previous; }
 });
+
+test('headless scheduling wakes on tasks without waiting for a display frame', async () => {
+  const previous = globalThis.document;
+  const host = { appendChild(canvas) { canvas.parentNode = this; }, remove() {} };
+  globalThis.document = { createElement: () => host };
+  const canvas = { parentNode: null, nextSibling: null, remove() { this.parentNode = null; } };
+  const viewport = { THREE: {}, renderer: { domElement: canvas }, scene: {}, model: { root: {} }, studioRuntime: {}, studioConfiguration: {} };
+  const result = {}, controller = { progress: { state: 'ready', samples: 128, denoisedSamples: 128 }, captureCanvas: result, render() {}, invalidate() {}, dispose() {} };
+  try {
+    const session = createHeadlessPreview(viewport, { createController: () => controller });
+    assert.equal(await session.renderFrame({}), result);
+    session.dispose();
+  } finally { globalThis.document = previous; }
+});

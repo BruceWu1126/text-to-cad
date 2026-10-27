@@ -78,12 +78,39 @@ def _encoder():
     return str(candidates[0])
 
 
+def _native_hidden_parts(structure, display, name):
+    from cadgen.engine.snapshot import hidden_instances
+
+    return [f"i{index}" for index in sorted(hidden_instances(structure, display, name))]
+
+
+def _robot_hidden_visuals(payload, display):
+    """Robot visual IDs are the existing scene contract, not inferred mesh indices."""
+    from cadgen.engine.snapshot import SnapshotRefused
+
+    every = {visual["id"] for visual in payload.get("visuals", [])}
+    for field in ("hidden", "isolated"):
+        unknown = set(display.get(field) or []) - every
+        if unknown:
+            raise SnapshotRefused(f"display.{field}: unknown robot visual IDs {', '.join(sorted(unknown))}; "
+                                  f"available IDs: {', '.join(sorted(every))}")
+    shown = (set(display["isolated"]) if display.get("isolated") is not None else every) - set(display.get("hidden") or [])
+    if not shown:
+        raise SnapshotRefused("display.hidden and display.isolated leave no robot visuals to draw")
+    return sorted(every - shown)
+
+
 @contextlib.contextmanager
-def _source(document, source, pose=None):
+def _source(document, source, pose=None, display=None):
+    display = display or {}
     """An in-memory native document, or a mesh read unchanged by its viewer loader."""
     if source is None and document.suffix.lower() not in (".xbf", ".step", ".stp"):
         resolved = {"kind": document.suffix.lower().lstrip("."), "url": PAGE_ORIGIN + "/input/" + quote(document.name),
                     "inputPath": str(document)}
+        if (display.get("hidden") or display.get("isolated") is not None) and document.suffix.lower() not in (".urdf", ".sdf", ".srdf"):
+            from cadgen.engine.snapshot import SnapshotRefused
+            raise SnapshotRefused(f"browser snapshots cannot resolve hidden/isolated references for {document.suffix}; "
+                                  "use a native document or robot visual IDs")
         if document.suffix.lower() in (".urdf", ".sdf", ".srdf"):
             from cadgen.robot_payload import (locate_robot_payload, primitive_glb_bytes, robot_control_values,
                                               robot_payload_bytes, RobotReadError)
@@ -103,6 +130,8 @@ def _source(document, source, pose=None):
             try:
                 payload = json.loads(robot_payload_bytes(document))
                 resolved["controls"] = robot_control_values(payload, pose)
+                if display.get("hidden") or display.get("isolated") is not None:
+                    resolved["selection"] = {"hide": _robot_hidden_visuals(payload, display)}
                 resolved["robot"] = locate_robot_payload(payload, file_url=file_url, object_url=object_url)
                 resolved["_assets"] = assets
             except RobotReadError as error:
@@ -120,16 +149,18 @@ def _source(document, source, pose=None):
             ident = server.add(document)
         server.start()
         doc = server.document(ident)
+        structure = server.structure(doc)
+        hidden = _native_hidden_parts(structure, display, document.name)
         values = None
         if pose is not None:
             from cadgen.engine import mechanism
             from cadgen.engine.snapshot import SnapshotRefused
             try:
-                values = mechanism.resolve(server.structure(doc).get("kinematics") or {}, pose)[0]
+                values = mechanism.resolve(structure.get("kinematics") or {}, pose)[0]
             except mechanism.KinematicsError as error:
                 raise SnapshotRefused(str(error)) from None
         server.mesh_all(doc, None)
-        yield {"kind": "xbf", "url": server.url + "/api/doc/" + ident, "inputPath": str(document),
+        yield {"kind": "xbf", "url": server.url + "/api/doc/" + ident, "inputPath": str(document), "hiddenParts": hidden,
                **({"poseValues": values} if values is not None else {})}, server.url
     finally:
         server.stop()
@@ -153,9 +184,9 @@ def render(document, out, still, *, source=None, progress=None):
         raise RuntimeError(runtime_build_hint(runtime))
     started = time.monotonic()
     say("scene", detail=document.name)
-    with _source(document, source, still.pose) as (resolved, engine_origin):
+    with _source(document, source, still.pose, still.display) as (resolved, engine_origin):
         pose = resolved.pop("poseValues", still.pose)
-        job = {"kind": resolved["kind"], "mode": "view", "display": still.display,
+        job = {"kind": resolved["kind"], "mode": "view", "display": {key: value for key, value in still.display.items() if key not in ("hidden", "isolated")},
                "camera": still.camera, "outputs": [{"path": str(out), "width": width, "height": height,
                                                      **({"camera": still.camera} if still.camera else {})}],
                "resolved": resolved, "preview": still.preview is True or isinstance(still.preview, dict),

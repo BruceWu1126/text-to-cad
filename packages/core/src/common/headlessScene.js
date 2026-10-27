@@ -105,8 +105,17 @@ const XBF_FAMILY = Object.freeze({
   load: job => loadXbfDocument(jobUrl(job)),
   build(THREE, document, job) {
     const scene = createXbfScene(THREE, document);
-    if (job?.jointValues != null) scene.setPose(job.jointValues);
-    return scene;
+    try {
+      if (job?.jointValues != null) scene.setPose(job.jointValues);
+      const hidden = job?.resolved?.hiddenParts;
+      if (hidden != null) {
+        if (!Array.isArray(hidden) || hidden.some(id => typeof id !== 'string' || !scene.hasPart(id))) {
+          throw new Error('Snapshot hiddenParts must name existing XBF instances');
+        }
+        scene.setHiddenParts(hidden);
+      }
+      return scene;
+    } catch (error) { scene.dispose(); throw error; }
   },
   release: document => document.release()
 });
