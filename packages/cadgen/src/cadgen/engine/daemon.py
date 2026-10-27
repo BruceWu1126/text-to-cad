@@ -2002,9 +2002,15 @@ class Daemon:
         self.touch()
         op = request.get("op")
         if op == "reattach":
+            # A worker's models with nothing to take up, before it reads their cache (``build._reattach``).
+            sources = request.get("models")
+            if not isinstance(sources, list) or not all(
+                    isinstance(row, dict) and isinstance(row.get("script"), str) and isinstance(row.get("name"), str)
+                    for row in sources):
+                send(refused(ValueError("reattach takes models: [{script, name, ...}]")))
+                return
             try:
-                lines = self.models.reattach(request["id"], request["source"], request.get("pid"))
-                send({"ok": True, "lines": lines})
+                send({"ok": True, "lines": self.models.reattach(sources, request.get("pid"))})
             except (OSError, ValueError) as error:
                 send(refused(error))
             return
@@ -2689,10 +2695,15 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
     # Before it can be reached: a cached document of the closure before this engine's is moved to
     # it in place, once, so no build meets one (``cache.Cache.migrate``).
     daemon.models.cache.migrate()
-    # Identity is a JSON/cache-path pass, independent of the closure's XBF migration.
+    # And the records from before namespace/name identity brought to it, once (``identity.migrate``:
+    # JSON and file names, no XBF, independent of the closure's pass). It never keeps the engine
+    # from starting.
     from cadgen.engine.identity import migrate
 
-    migrate(daemon.models.registry())
+    try:
+        migrate(daemon.models.registry())
+    except Exception as error:  # noqa: BLE001
+        print(f"cadgen: identity migration failed: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
     daemon.stand()
     if foreground:
         try:

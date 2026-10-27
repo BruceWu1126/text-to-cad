@@ -16,7 +16,8 @@ its id is known -- ``held`` from its cache file, or ``unsaved`` with the command
 again (none for a shape) when the cache holds no file of it, or
 ``detached`` once its script is gone -- and nothing is run to bring it back. An explicit ``name=`` claims its id
 for one declaration within its script folder: another declaration is refused, naming both
-locations (``identity.claimed``). A served
+locations (``identity.claimed``), until the claiming file is gone or a run of it declares the name
+no more (``identity.released``). A served
 document's generation (``version``, what a page shows and the viewer's export compares) is a token
 of its build's own, never a counter that starts again, so an id and a generation never name two
 documents across a restart; a run of the same closure in the worker holding the last build keeps it
@@ -100,6 +101,9 @@ class Models:
         if not isinstance(reports, list):
             return
         program = answer.get("program")
+        # Per script of the run: the explicit names it declares now, and those its models' records
+        # say it declared before (None: no record says), to give up what it declares no more.
+        declared: dict[str, tuple[list[str], set[str] | None]] = {}
         for root in reports:
             if not root.get("ok") and root.get("id") and self.held(root["id"]) is not None:
                 root["previous"] = True  # the failed run's line says its previous good build is served
@@ -116,7 +120,12 @@ class Models:
                         held = self.registry()
                         if held is not None:
                             claimed(held, source, source["explicit_name"])
-                    self.record(report, recorded, facts)
+                    had = self.record(report, recorded, facts)
+                    if isinstance(source.get("declares"), list):
+                        _now, was = declared.get(source["script"], (source["declares"], None))
+                        if isinstance(had.get("declares"), list):
+                            was = (was or set()) | set(had["declares"])
+                        declared[source["script"]] = (source["declares"], was)
                 except ValueError as error:  # a name another declaration holds: the build is refused, by name
                     report["ok"], report["error"] = False, f"{source['name']}: {error}"
                     root["ok"] = False
@@ -148,9 +157,22 @@ class Models:
                 if (report.get("cache") or {}).get("unreadable"):
                     self.cache.remove(ident)  # this build found its cache file broken: the idle save writes it again
                 self.cache.touch(ident)
+        held = self.registry() if declared else None
+        if held is not None:
+            from cadgen.engine.identity import claims, released
 
-    def reattach(self, ident: str, source: dict[str, Any], pid: int | None = None) -> list[str]:
-        """Prepare an identity before a worker asks its cache, including an unsaved live document."""
+            for script, (now, was) in declared.items():
+                # What the script's records said it declared, else -- none of this run's models had a
+                # record saying it -- the claims the registry holds of it, read once.
+                released(held, script, (was if was is not None else claims(held, script)) - set(now))
+
+    def reattach(self, sources: list[dict[str, Any]], pid: int | None = None) -> list[str]:
+        """A worker's models with nothing to take up (``build._reattach``: each its ``source``), each
+        re-attached to the record of its script moved (``identity.reattach``) before the worker reads
+        its cache: a document this engine holds live and has not saved yet is saved first, from the
+        bytes the server holds or the worker that holds it (never the asking worker, ``pid``, busy
+        building), so its cache file moves with its record; what the book holds of an old id is
+        dropped. The lines that say what was re-attached."""
         from cadgen.engine.identity import reattach
 
         held = self.registry()
@@ -170,11 +192,12 @@ class Models:
                 self.cache._write(record["id"], row["revision"], data)
 
         with self.identity_lock:
-            old = reattach(held, ident, source, before=save, log=lines.append)
-            if old is not None:
+            moved = [(old, new) for old, new in reattach(held, sources, before=save, log=lines.append) if old != new]
+            for old, _new in moved:
                 self.forget(old)
+            if moved:
                 with self.cache.lock:
-                    self.cache.indexed = False
+                    self.cache.indexed = False  # the moved cache files: indexed again when next asked
         return lines
 
     def facts(self, ident: str, report: dict[str, Any], recorded: str) -> tuple[dict | None, dict | None]:
@@ -202,14 +225,14 @@ class Models:
 
         return registry.current()
 
-    def record(self, report: dict[str, Any], recorded: str, facts: dict[str, Any] | None = None) -> None:
-        """The registry's record of a document a build made (``registry``), written when it changed.
-        Nothing with no registry."""
+    def record(self, report: dict[str, Any], recorded: str, facts: dict[str, Any] | None = None) -> dict[str, Any]:
+        """The registry's record of a document a build made (``registry``), written when it changed;
+        the record it had (``{}``: none). Nothing with no registry."""
         from cadgen.engine import registry as registering
 
         held = self.registry()
         if held is None:
-            return
+            return {}
         ident, source = report["id"], report["source"]
         script = Path(source["script"])
         old = held.get(ident) or {}
@@ -230,7 +253,9 @@ class Models:
         elif "created" in old:
             found["created"] = old["created"]
         if source.get("explicit_name") is not None:
-            found["line"] = source["line"]
+            found["line"] = source["line"]  # its claim of the name in its folder (``identity.claimed``)
+        if isinstance(source.get("declares"), list):
+            found["declares"] = source["declares"]  # the explicit names its script declared at this run
         if facts is not None:
             found["facts"] = facts
         for key in ("opened", "pinned", "preview", "cache", "relocated"):  # the home's and the cache's, kept across builds
@@ -239,13 +264,16 @@ class Models:
         if not (report.get("cache") or {}).get("used"):
             found.pop("relocated", None)  # a fresh document has paths at its new home
         held.put(found)
+        return old
 
     def hand_over(self, request: dict[str, Any]) -> dict[str, Any]:
         """A shape a program handed over (``api.hand_over``): its document's bytes read through the
         documents worker -- checked, and made the structure the server serves -- then held as a
         drained document is (``server.keep``, and the cache), its page registered, and recorded as a
         ``kind: "shape"``, with the ``program`` that handed it over where there is one: the engine did
-        not run it, so nothing builds it again. Refused (``ValueError``) for bytes that are no document. The answer carries its page."""
+        not run it, so nothing builds it again. Refused (``ValueError``) for bytes that are no
+        document, and under the id of a model a script declares (``identity.handed``). The answer
+        carries its page."""
         import hashlib
 
         from cadgen.engine import registry as registering
@@ -254,6 +282,11 @@ class Models:
         ident, name, scope = str(request.get("id")), str(request.get("name")), str(request.get("scope"))
         if not is_id(ident):
             raise ValueError(f"{ident!r} is not a document id")
+        held = self.registry()
+        if held is not None:
+            from cadgen.engine.identity import handed
+
+            handed(held, ident, scope, name)  # one id is one document: a model's is not a shape's
         source = {"script": scope, "name": name}
         data = base64.b64decode(request.get("xbf") or "")
         replies: list[dict[str, Any]] = []

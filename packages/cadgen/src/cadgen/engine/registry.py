@@ -1,8 +1,8 @@
 """The registry: one self-describing record per document the engine knows, in the user's state folder.
 
 ``<state>/documents/<id>/document.json`` is a document's record, one shape for every kind:
-``{schema, id, kind, root, home, entry, namespace, name, fingerprint?, revision, built, facts?, program?, cache?, opened?,
-pinned?, preview?}``. ``kind`` is ``model``, a model built from a script (``home`` and ``entry``: the
+``{schema, id, kind, root, home, entry, namespace, name, fingerprint?, module?, line?, declares?, relocated?,
+revision, built, facts?, program?, cache?, opened?, pinned?, preview?}`` (identity's fields: ``identity``). ``kind`` is ``model``, a model built from a script (``home`` and ``entry``: the
 script and the function it points at; the command that builds it again is always ``cadgen run``
 of its home); ``shape``, a shape a program handed over (``home``: the script that handed it over,
 or the folder it was handed over in; ``program``: that program, where there is one; nothing builds

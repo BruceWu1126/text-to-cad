@@ -1,7 +1,7 @@
 """Document ids: one formula for every document -- uuid5 of a scope's canonical path and a name: a
-model's script and function, a file's path and no name, a shape's calling script (or working folder)
-and its name -- or a ``key=``'s, the same in every process, and the one key the engine's server and
-the viewer agree on."""
+model's script and function, or its folder and the explicit ``name=`` it is given, a file's path and
+no name, a shape's calling script (or working folder) and its name -- the same in every process, and
+the one key the engine's server and the viewer agree on."""
 
 from __future__ import annotations
 

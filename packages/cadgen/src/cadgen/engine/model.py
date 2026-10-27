@@ -156,9 +156,6 @@ class Model:
                              "document from the file it is in. Where the code is in no file (a notebook cell, a "
                              f"REPL), build the shape and hand it over: model(shape, name={self.name!r})")
         self.script = Path(canonical(filename))
-        from cadgen.engine.identity import fingerprint
-
-        self.fingerprint = fingerprint(self.script)
         self.outputs: list[Output] = []
         # The name within the script folder; None keeps the script/function id.
         self.explicit_name: str | None = None
@@ -172,7 +169,20 @@ class Model:
         return model_id(self.script, self.name, self.explicit_name)
 
     @property
+    def fingerprint(self) -> str | None:
+        """SHA-256 of its script's bytes (``identity.fingerprint``), read once a build per script
+        (``_FINGERPRINTS``) and only when a report or a re-attachment asks: never at declaration."""
+        script = str(self.script)
+        if script not in _FINGERPRINTS:
+            from cadgen.engine.identity import fingerprint
+
+            _FINGERPRINTS[script] = fingerprint(self.script)
+        return _FINGERPRINTS[script]
+
+    @property
     def source(self) -> dict[str, Any]:
+        """What a build's report says of this model's declaration: its script and function, its
+        first line, its explicit name, its script's fingerprint and its module."""
         return {"script": str(self.script), "name": self.name,
                 "line": self.function.__code__.co_firstlineno, "explicit_name": self.explicit_name,
                 "fingerprint": self.fingerprint, "module": self.function.__module__}
@@ -190,21 +200,24 @@ class Model:
         return self
 
     def named(self, name: str | None) -> "Model":
-        """An explicit name claims one declaration within this script's folder."""
+        """The explicit ``name=`` a declaration gives: this model's name in its script's folder, its
+        id the folder's and the name's. One declaration per name in a folder: in this process
+        (``claim``), and against the file the registry's record of it points at
+        (``identity.claimed``); refused naming both ``file:line``."""
         if name is None:
             return self
         check_name(name)
         if self.explicit_name is not None and self.explicit_name != name:
             raise TypeError(f"model {self.name!r} declares two names, {self.explicit_name!r} and {name!r}")
-        location = f"{self.script}:{self.function.__code__.co_firstlineno}"
-        claim(str(self.script.parent), name, location)
+        line = self.function.__code__.co_firstlineno
+        claim(str(self.script.parent), name, str(self.script), self.name, line)
         from cadgen.engine import registry
 
         held = registry.current()
         if held is not None:
             from cadgen.engine.identity import claimed
 
-            claimed(held, self.source, name)
+            claimed(held, {"script": str(self.script), "name": self.name, "line": line}, name)
         self.explicit_name = name
         return self
 
@@ -355,15 +368,24 @@ def as_package_module(main: Any) -> None:
 # gone when the worker is. A shape handed over (``model(shape, name=...)``) is a third, ``shape``: its
 # document is the bytes handed over, held and cached as a drained document is, with nothing to run.
 
-# Explicit names claimed in this process, reset when a build loads its scripts again.
-_NAMES: dict[tuple[str, str], str] = {}
+# Each explicit name a declaration in this process gives, by its namespace (the script's folder),
+# and the declaration that gave it: its script, its function and its first line. A build forgets
+# them before it loads the script, as it forgets the models (``_MODELS``).
+_NAMES: dict[tuple[str, str], tuple[str, str, int]] = {}
+# Each script's fingerprint (``Model.fingerprint``), read once a build: forgotten with ``_NAMES``.
+_FINGERPRINTS: dict[str, str | None] = {}
 
 
-def claim(namespace: str, name: str, location: str) -> None:
-    other = _NAMES.setdefault((namespace, name), location)
-    if other != location:
-        raise ValueError(f"name {name!r} in namespace {namespace} is claimed by {other} and {location}; "
-                         "give one declaration another name")
+def claim(namespace: str, name: str, script: str, function: str, line: int) -> None:
+    """``script``'s function ``function`` takes the explicit name ``name`` in ``namespace``; refused,
+    naming both ``file:line``, when another declaration of this process has it -- another function,
+    in this file or another. The same function declared again (a module loaded again, its line
+    moved) keeps it."""
+    other = _NAMES.setdefault((namespace, name), (script, function, line))
+    if other[:2] != (script, function):
+        raise ValueError(f"name {name!r} in namespace {namespace} is claimed by {other[0]}:{other[2]} and "
+                         f"{script}:{line}; give one declaration another name")
+    _NAMES[(namespace, name)] = (script, function, line)
 
 
 def _no_animations(animations: Any) -> None:
