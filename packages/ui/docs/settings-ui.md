@@ -963,12 +963,12 @@ button, not a disabled one, and never enters it, whatever asks. It is the shell'
 hosts neither start nor observe it. Its button is a play triangle ("Preview"), the strip's last
 tile after Display, in every host. A press covers the view at once
 ("Preparing preview…", in the scene's backdrop colour) and enters Preview under the cover,
-which lifts once Preview has presented its first raster frame and its published mesh is complete
-(`kit/shell/previewCover.js`). There is no minimum wait or convergence gate; after five seconds
-it stops waiting for more components. The image refines while visible. Orbiting or playing a
-routine keeps the responsive raster picture; at rest, supported hardware adds progressive
-path tracing. Missing WebGPU, unsupported materials or geometry, and scenes beyond its
-resource budget keep the studio raster picture. The navbar is gone too, in every host
+which lifts once Preview has presented its first traced image and its published mesh is complete
+(`kit/shell/previewCover.js`). The traced image refines while visible. Orbiting or playing a
+routine uses bounded, low-resolution traced frames with the same material transport; at rest,
+the picture refines and is denoised. Missing WebGPU, unsupported materials or geometry, and
+scenes beyond the resource budget show an error with Retry and Exit preview. Exit is available
+while preparation is in progress. The navbar is gone too, in every host
 (the renderer says Preview is up, `onPreviewChange`, and FileViewer hides it until it closes), as are
 the tool strip, its sub-toolbar, the tool stack and their resize grips, Quick
 Edit, the host's notice and corner, joint handles, cube and context menu (`PreviewChrome`, hidden and

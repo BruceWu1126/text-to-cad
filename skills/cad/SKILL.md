@@ -232,17 +232,10 @@ cadgen snapshot "$ID" tmp/top.png --camera top --display hidden-line
 cadgen snapshot "$ID" tmp/open.png --pose open
 ```
 
-A regular CAD snapshot is drawn by OCCT; `--preview` uses the viewer's shared
-path tracer and denoiser. It writes only the requested PNG. Its options say how the picture is drawn: camera (`--camera top`), display,
-grid, Preview, pose (`--pose open`) and size. It shows arrangement and appearance, not dimensions
+A snapshot draws the document as the viewer does, rendered by OCCT, and writes nothing
+but the PNG. Its options say how the picture is drawn: camera (`--camera top`), display,
+grid, pose (`--pose open`) and size. It shows arrangement and appearance, not dimensions
 ([snapshots](references/snapshot-review.md)).
-
-Export an authored AP242 configuration sequence from a native document/XBF, or a
-glTF clip from GLB, with `cadgen snapshot "$ID" tmp/motion.mp4 --animation running
---preview --fps 30`. Omit the routine name only when there is exactly one. The camera
-stays fixed and each frame finishes rendering before encoding; there is no automatic
-turntable. Current STEP exports do not carry AP242 motion. Browser setup, if needed,
-is `cadgen doctor --install-browser`; the skill still calls cadgen, never a browser.
 
 ## Prompt references and inspection
 

@@ -19,9 +19,10 @@ import { useAppliedViewSettings } from "../view-settings/useAppliedViewSettings.
  * @param {{ view: { scene: object | null, overlay?: ((viewport: object, drawn: object) => import("react").ReactNode) | null,
  *   runtimeLifecycle?: object | null, onCameraSettled?: (() => void) | null },
  *   desired: object, modelKey: string, sceneScaleMode: string, viewRef: import("react").RefObject<object>,
- *   orbit?: boolean, orbitSpeed?: number, onPresented?: (presented: boolean) => void }} props
+ *   orbit?: boolean, orbitSpeed?: number, onPresented?: (presented: boolean) => void,
+ *   onStatus?: ((status: {state: string, reason: string}) => void) | null }} props
  */
-export default function PreviewView({ view, desired, modelKey, sceneScaleMode, viewRef, orbit = false, orbitSpeed = 1, onPresented = null }) {
+export default function PreviewView({ view, desired, modelKey, sceneScaleMode, viewRef, orbit = false, orbitSpeed = 1, onPresented = null, onStatus = null }) {
   const previewKey = `${modelKey}#preview`;
   const update = useAppliedViewSettings(desired, previewKey, viewRef, null);
   // The file's Render as Preview draws it (`previewViewScene.js`), applied by its own coordinator.
@@ -50,6 +51,8 @@ export default function PreviewView({ view, desired, modelKey, sceneScaleMode, v
     viewCube={false}
     viewUpdate={update}
     onPresentationChange={presentationChange}
+    onPreviewStatus={onStatus}
+    previewMotionActive={view.animation?.playing === true}
     onCameraSettled={view.onCameraSettled || null}
     runtimeLifecycle={view.runtimeLifecycle || null}
     preserveInteractionPixelRatio

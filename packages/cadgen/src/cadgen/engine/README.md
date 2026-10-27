@@ -381,7 +381,7 @@ python SCRIPT.py                             the models the script explicitly ca
 cadgen export SRC DST [DST ...] [--json]
                                              SRC an .xbf, a .step, a document id, or a mesh
                                              (.glb, .stl, .3mf: to the other two mesh kinds)
-cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
+cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored]
                 [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
                 [--width W --height H | --size-profile P] [--json]
 cadgen snapshot --job PACKET [SRC] [the same flags, each over every job]
@@ -1259,6 +1259,9 @@ document's scene brings them as its own lighting and surface rule (the bundled
 `@text-to-cad/core`'s `lib/xbf/xbfLook.js`), which the viewer's viewport and the snapshot page put
 up in place of the theme's. Preview is drawn as any file's is.
 
+`cadgen snapshot` writes technical PNG images with OCCT. Photographic Preview belongs to the
+browser viewer; snapshot has no Preview or video option. A packet requesting `preview` is refused.
+
 `cadgen snapshot` draws a document as the viewer does. The engine serves and meshes it (the
 daemon's meshes, or with `daemon=False` a server of this process), and OCCT draws it from those meshes
 (`render/`, below), in the look the viewer resolves for the same display settings. `--display` takes
@@ -1300,7 +1303,7 @@ of jobs, or `{"input", "jobs": [...], "annotation", "measurements"}` -- in one c
 (`snapshot.job_pictures`, `api.snapshot(job=)`), on the machinery above: each job is a view, drawn with
 its own `camera` (an output's own `camera` over it), its `display` (its `hidden` and `isolated` parts
 among it; the packet's top-level copies are `--annotation`'s), its pose (`jointValues`, as `--pose`
-takes it), `preview`, and -- a robot's -- the visuals its `selection.hide` names by the viewer's ids
+takes it), and -- a robot's -- the visuals its `selection.hide` names by the viewer's ids
 (`link:v1`, each robot instance carrying its visual's), the packet's ink and dimensions over each
 (a job's own `annotation` and `measurements` over the packet's); and each of its `outputs` (`path`,
 `width`, `height`, `camera`, `label`) is a picture written at its path (a folder takes
@@ -1318,7 +1321,7 @@ Measure, the grid -- is as heavy against the picture at any scale, while OCCT's 
 drawing's hairlines) stay one pixel of the larger frame and read finer: OCCT's core profile draws no
 line wider than a pixel, and this is that, not a bug; `sizeProfile` sizes an output that gives no
 size. SRC, given, is drawn in place of every job's input, and a flag given overrides every job: the
-display, the grid, the camera, Preview, the pose, the ink, the dimensions, the size of every
+display, the grid, the camera, the pose, the ink, the dimensions, the size of every
 output; an OUT is refused. Every job is checked before anything renders (an unknown key, a setting
 out of range, two outputs at one path, a file that is not there: refused by name, every file left as
 it was), and a picture that fails writes none of the job's: every picture is staged beside its
@@ -1349,7 +1352,7 @@ fails saying so. Nothing is written but OUT.
 per file (read again when a file it read changes) or with `daemon=False` in this process:
 
 - **A mesh file** (`.stl`, `.3mf`, `.glb`) becomes a structure and part buffers as a document's are,
-  so the modes, the camera fit, the grid, clip, Explode, Preview and the annotation are a
+  so the modes, the camera fit, the grid, clip, Explode and the annotation are a
   document's. Each mesh carries the viewer's normals (creased at 30 degrees up to 10,000
   triangles, else flat) and its feature edges (three's `EdgesGeometry` at 16 degrees: the folds,
   the open rims), which Solid and the line modes draw. An STL is one part in the look's fill, its
@@ -1390,49 +1393,6 @@ draw the document a model call returned, by its id, as it is held; `cadgen.snaps
 with the decorated function itself builds it first, writing what the model declares (law 10), and
 the snapshot nothing but OUT. A picture is never a declaration: no
 decorator and no build flag draws one.
-
-### Browser Preview and authored-animation snapshots
-
-The ordinary PNG modes above retain their OCCT path. `--preview` instead calls the distribution's
-installed browser renderer: the same shared scene builders, studio, progressive path tracer and
-guided RGB/coverage denoiser as Viewer Preview. It waits for the full quality target and refuses
-unsupported scenes, unavailable tracing and exhausted budgets; it never saves a raster fallback.
-The engine's `snapshot.BROWSER_RENDER` hook is supplied by the distribution's host adapter, so the
-standalone engine does not import its enclosing application's browser or runtime resolver.
-Native `display.hidden` and `display.isolated` references are resolved through the existing
-part/assembly grammar before meshing, then passed as exact instance IDs to the browser scene.
-Robot Preview uses its exact visual IDs (`link:v1`); unknown IDs fail. Browser snapshots of
-other direct mesh families refuse these selectors explicitly rather than rendering the full
-file in their place. Normal OCCT snapshots keep their existing reference support.
-
-`preview` in `snapshot(...)` and `Document.snapshot(...)` accepts a boolean or the Viewer's full
-render configuration object. Even `{}` enables Preview. The CLI's `--preview` enables defaults;
-`--preview '{"lighting":{"quality":"final","exposure":0}}'` supplies a configuration. The browser, page,
-workers, weights and encoder are installed resources; rendering downloads nothing. A missing
-browser is installed explicitly with `cadgen doctor --install-browser`.
-
-`cadgen snapshot SRC OUT.mp4 --animation [NAME] --fps 30` renders an authored routine. Its Python
-form is `snapshot(source, out, animation="swing", fps=30)` (`animation=True` selects the only
-routine). XBF AP242 configuration sequences use the Viewer's exact forward-kinematics timeline;
-glTF clips use their absolute authored time. A routine name or stable clip id selects it; no
-routine or multiple matches are refused, listing the available names. A source without motion is
-not animated. Pose, annotation, measurements, transparent output and packet jobs cannot combine
-with animation.
-
-Every emitted frame is evaluated at `i / fps`, for `ceil(duration * fps)` frames. The camera
-is fitted over that routine's sampled placements once, then held. Without `preview`, the shared
-browser raster renderer draws the animation; with it, every frame waits for complete denoising.
-The report names its renderer and selected animation (`id`, `name`, authored `duration`, `fps`,
-`frames`, and `times`). A Preview report includes its completed sample target. MP4 is opaque: partial coverage is
-composited over the configured background colour (white by default, `#202226` for Dark).
-
-Animation defaults to 1280 × 720; explicit sizes must be even and at most 1920 × 1080. FPS is an
-integer from 1 to 60, at most 3,600 frames, with 300 seconds per browser frame and one hour per
-operation. Frames stream into the distribution's bundled FFmpeg encoder, never a PATH executable.
-A private temporary file replaces OUT only after all frames and encoding succeed. Failure keeps
-an earlier output unchanged and releases the browser, encoder and private document holder.
-Native reads use in-process interception without opening a listening socket. No intermediate
-XBF, GLB, PNG sequence or model source is written.
 
 ## Exports
 

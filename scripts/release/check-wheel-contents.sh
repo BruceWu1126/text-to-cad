@@ -83,10 +83,6 @@ REQUIRED=(
   "cadgen/mcp/tunnel.py"
   "cadgen/_runtime/mcp/index.html"
   "cadgen/_runtime/mcp/THIRD_PARTY_LICENSES.txt"
-  "cadgen/_internal/snapshot_browser.py"
-  "cadgen/_runtime/snapshot/render.html"
-  "cadgen/_runtime/snapshot/snapshot-render.js"
-  "cadgen/_runtime/snapshot/THIRD_PARTY_LICENSES.txt"
 )
 
 echo "Building cadgen wheel for content check..."

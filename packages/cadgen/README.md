@@ -5,9 +5,8 @@ The published distribution: CAD models written as Python, built by cadgen's engi
 3MF, DXF), and the tools that show and check them. One PyPI package carrying the Python under
 `src/cadgen/` and what it ships that is not Python under `src/cadgen/_runtime/`: the CAD
 Viewer's client and the CAD app page, which it serves, built from their JavaScript packages
-and bundled in at build time (the JS *source* never ships). Regular CAD snapshots use
-OCCT. Preview stills and animation frames use the same bundled renderer as the viewer,
-in a private headless Chromium session.
+and bundled in at build time (the JS *source* never ships). Its snapshots are drawn by OCCT,
+never in a browser.
 
 ```python
 from cadgen import step, xbf
@@ -27,15 +26,13 @@ if __name__ == "__main__":
 python arm.py                                 # builds it in the engine's warm worker
 cadgen export XBF/arm.xbf arm.glb arm.stl     # more translations of the document it wrote
 cadgen snapshot XBF/arm.xbf arm.png           # a still of it, drawn by OCCT
-cadgen snapshot XBF/arm.xbf studio.png --preview
-cadgen snapshot XBF/arm.xbf motion.mp4 --animation opening --preview --fps 30
 cadgen serve XBF/arm.xbf                      # the document on a local page
 cadgen inspect XBF/arm.xbf                    # what it holds, then its build closure
 ```
 
 **PURPOSE** — the engine and its command surface: models built in a warm worker whose memo
 makes an edit cost what it changed, documents and their exports, kinematics and configuration sequences,
-materials, references to geometry, CAD and Preview snapshots, authored-motion MP4 exports; the CAD Viewer (`cadgen viewer [FILE]`: a
+materials, references to geometry, snapshots drawn by OCCT; the CAD Viewer (`cadgen viewer [FILE]`: a
 launcher for the installation’s engine’s one page, every document at `/<id>`, every file read by its absolute path); CAD beside an agent's chat (`cadgen mcp`: a stateless stdio peer of the engine’s
 HTTP MCP endpoint, with tools and the app page owned by the engine); the URDF, SDF and SRDF validators; and
 engineering drawings (`@eng_drawing`).
@@ -138,8 +135,7 @@ Laws 1 to 13 and 19 to 23 are the engine's; 14 to 18 hold for the whole package.
 8. **Poses and motion definitions, never frames.** The document carries kinematics -- the
    mechanism, its mechanism states and its configuration sequences -- as poses and definitions,
    never baked frames or clips. A GLB export is the one place a sequence is baked, into a clip of
-   the GLB. A requested MP4 evaluates the authored routine at fixed timestamps and
-   streams rendered frames to its encoder; frames are never stored in the document.
+   the GLB; the engine plays nothing.
 9. **Names are the durable tie to code.** An element's name is spelled from the function that
    made its feature and the author's name for that feature, never from a line or a file: moving
    code renames nothing, and the file holds no line to go stale.
@@ -203,12 +199,6 @@ Laws 1 to 13 and 19 to 23 are the engine's; 14 to 18 hold for the whole package.
     kept beside the settings, and the next process that sends sends it, in the background. One
     wait remains, bounded: `cadgen telemetry off`, which waits for the deletion it asks for.
     The pages load nothing from the internet: everything they show ships in the wheel.
-    Preview snapshots and animation exports require a local Chromium (the managed
-    Playwright browser, Chrome or Edge). `cadgen doctor --install-browser` is an
-    explicit network setup operation that installs the pinned managed browser;
-    no snapshot invokes it. Preview additionally requires working hardware WebGPU.
-    The encoder ships in the declared `imageio-ffmpeg` dependency. After setup,
-    rendering, denoising and encoding work offline.
     *Pressure-test*: with an installed cadgen and every request refused (a proxy on a closed
     port), and again with every request hanging, start a server, open a view, call each tool,
     and run a build and a snapshot: each works, and nothing waits on a request beyond the one
@@ -286,8 +276,8 @@ Every MCP presentation exposes `cad_export`, `cad_snapshot` and `cad_inspect`,
 independently of the viewer. They call the Python operations through the engine's
 workers. No tool builds or imports a script: a model is built by its script, run by Python
 (laws 11, 12). A source is an absolute CAD file path or a document id; a document id is read as
-the engine holds it. Export names absolute server-host destinations; snapshot names a PNG,
-an MP4 with an authored animation, or a Quick Edit packet.
+the engine holds it. Export names absolute server-host destinations; snapshot names a PNG or a
+Quick Edit packet.
 
 Start with a unique `requestId` (16–100 letters, digits, underscores or hyphens).
 A start is checked whole before anything is queued: a refusal names every argument
@@ -393,7 +383,7 @@ src/cadgen/
                          #   the engine observer and the telemetry sender, the install
                          #   channel, atomic replace, file locks (the state folder's one
                          #   lock: `file_lock.state`), the CLI derivation
-  _runtime/              # BUILT: CAD Viewer, CAD app and shared snapshot renderer -- produced
+  _runtime/              # BUILT: the CAD Viewer client and the CAD app page -- produced
                          #   when the wheel is packaged, never committed, never edited
 ```
 

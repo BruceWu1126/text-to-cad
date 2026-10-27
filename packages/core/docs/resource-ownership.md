@@ -96,9 +96,11 @@ their textures remain borrowed. Releasing a guide scene disposes its render obje
 private material copies, never borrowed geometry, source materials or textures.
 
 Cancellation rejects pending worker preparation and terminates its worker. A generation
-token rejects stale async results. Motion hides the trace immediately; scene changes rebuild
-its scene using cached prototypes and the same GPU device. Preview exit disposes the cache,
-worker preparation, tracer and device. Admission or device failure restores the raster view.
+token rejects stale async results. Motion retains the last completed traced picture while a
+new low-resolution traced frame is prepared; rigid pose changes refit the private scene.
+Other scene changes rebuild it using cached prototypes and the same GPU device. Preview exit
+disposes the cache, worker preparation, tracer and device. Admission or device failure is
+reported to Preview's error presentation.
 
 The denoiser owns its auxiliary targets, inference weights and intermediate GPU buffers,
 and the current and previous completed output textures. It publishes a result only when

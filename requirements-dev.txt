@@ -14,9 +14,13 @@
 # names this command when it finds none.
 
 # cadgen's own runtime dependencies (build123d, cadquery-ocp-novtk, ezdxf, matplotlib,
-# numpy, pillow, shapely, Playwright and imageio-ffmpeg) come with the editable
-# install above. Playwright's exact pin also selects the snapshot/launch tests'
-# browser revision; install that browser separately during setup.
+# numpy, pillow, shapely) come with the editable install above.
+
+# The viewer's browser checks drive a headless Chromium through Python Playwright (the
+# launch smoke test, scripts/test/test-viewer-launch.sh), as does the manual parity bench
+# (scripts/bench/occt_parity.py). Dev tooling only: nothing in the wheel imports it.
+# Pinned exactly: each Playwright release fetches its own browser build.
+playwright==1.63.0
 # - skills/dfam-check/requirements.txt
 rtree
 scipy

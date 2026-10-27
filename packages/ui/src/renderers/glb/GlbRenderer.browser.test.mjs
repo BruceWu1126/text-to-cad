@@ -28,7 +28,7 @@ const HARNESS_SIZE = '<style>#root > div { width: 800px !important; height: 500p
 // (A browser's first WebGL page pays for compiling the viewer's shaders; later pages reuse them.)
 let server, browser;
 before(async () => {
-  const { bundle } = await harnessBundle();
+  const { bundle } = await harnessBundle({ mockPreview: true });
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
   server = createServer((request, response) => {
     const url = new URL(request.url, 'http://test');
@@ -67,7 +67,7 @@ async function open(t, file, { record = null, webgpu = true } = {}) {
       Object.defineProperty(window, name, { get() { throw new Error(`Renderer accessed ${name}`); } });
     }
   });
-  if (!webgpu) await page.addInitScript(() => Object.defineProperty(navigator, 'gpu', { value: undefined }));
+  if (!webgpu) await page.addInitScript(() => { window.__cadTestPreviewUnavailable = true; Object.defineProperty(navigator, 'gpu', { value: undefined }); });
   if (record) await page.addInitScript(stored => { window.__cadTabRecord = stored; }, record);
   await page.goto(`http://127.0.0.1:${server.address().port}/?file=${file}`);
   return { page, errors, pane: page.getByTestId('one') };
@@ -281,7 +281,7 @@ test('a static GLB opens on its native scene in Select: its tools, its display m
   assert.deepEqual(errors, []);
 });
 
-test('an animated GLB opens at rest, its clips the file sidebar\'s Animation section; in Preview, from its playbar, they play in Render without moving the camera or the floor, Orbit turns the camera, and leaving restores the tools routine\'s held frame', async (t) => {
+test('an animated GLB opens at rest, its clips the file sidebar\'s Animation section; in the Preview workflow fixture, its playbar moves them without moving the camera or the floor, Orbit turns the camera, and leaving restores the tools routine\'s held frame', async (t) => {
   const { page, pane, errors } = await open(t, 'animated.glb');
   await ready(pane);
   await glbTools(pane);
@@ -451,34 +451,16 @@ test('a corrupt GLB raises the viewer\'s load alert, with reload and details', a
 });
 
 
-test('Preview without WebGPU presents its raster studio, captures it and restores the editor on every exit', async t => {
+test('Preview without WebGPU reports an error and returns to the editor', async t => {
   const { page, pane, errors } = await open(t, 'static.glb', { webgpu: false });
   await ready(pane);
   const editor = await stillCapture(page);
-  const editorCamera = await page.evaluate(() => window.__cadCamera());
-  for (let visit = 0; visit < 2; visit++) {
-    await togglePreview(page, pane, true);
-    const preview = pane.locator('[data-preview-view]');
-    await preview.locator('canvas').first().waitFor({ state: 'visible' });
-    const image = await stillCapture(page);
-    assert.ok(dominantColors(image).length >= 2, 'the raster studio keeps both authored part colours');
-    assert.equal(await preview.locator('canvas').count(), 1, 'unavailable tracing allocates no overlay canvases');
-    const path = await page.evaluate(() => window.__cadStage().pathTracing);
-    assert.ok(path === null || path.state === 'fallback', 'software and unavailable GPU paths retain raster');
-    await togglePreview(page, pane, false);
-    assert.equal(await pane.locator('[data-preview-view]').count(), 0);
-    assert.equal(await page.evaluate(() => window.__cadStage().pathTracing), null, 'the editor owns no tracing session');
-    await captureMatching(page, editor, 'leaving Preview restores the editor pixels');
-    const restored = await page.evaluate(() => window.__cadCamera());
-    for (const key of ['projection', 'target', 'up']) assert.deepEqual(restored[key], editorCamera[key]);
-    assert.ok(Math.abs(restored.halfHeight - editorCamera.halfHeight) < 1e-9);
-    const direction = camera => {
-      const vector = camera.position.map((value, axis) => value - camera.target[axis]);
-      const length = Math.hypot(...vector);
-      return vector.map(value => value / length);
-    };
-    assert.ok(direction(restored).every((value, axis) => Math.abs(value - direction(editorCamera)[axis]) < 1e-12),
-      'depth fitting may translate an orthographic eye, preserving its projected view');
-  }
+  await pane.getByRole('button', { name: 'Preview', exact: true }).click();
+  const cover = pane.locator('[data-preview-cover]');
+  await cover.getByRole('alert').waitFor();
+  assert.match(await cover.innerText(), /WebGPU unavailable/);
+  await cover.getByRole('button', { name: 'Exit preview', exact: true }).click();
+  await pane.locator('[data-preview-view]').waitFor({ state: 'detached' });
+  await captureMatching(page, editor, 'leaving failed Preview restores the editor pixels');
   assert.deepEqual(errors, []);
 });

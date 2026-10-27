@@ -59,19 +59,11 @@ scripts/bundle/bundle.sh
 ./.venv/bin/python -m cadgen.cli urdf validate --help
 ```
 
-The engine draws regular CAD snapshots with OCCT in an OpenGL context. On Linux with no
+The engine draws every snapshot with OCCT in an OpenGL context. On Linux with no
 screen (a server, a container, CI) that context is an X server's: install Xvfb,
 Mesa's software GL and the font the stills set their text in, and run the cadgen
 suite or a snapshot under `xvfb-run`, as CI's Linux job does. Without a display a
 snapshot fails, saying so.
-
-Preview snapshots and animation frames use the packaged shared viewer renderer.
-Build it with `scripts/bundle/bundle.sh`; install Chromium explicitly with
-`.venv/bin/python -m cadgen.cli doctor --install-browser` if no supported local
-Chrome or Edge is installed. Preview needs hardware WebGPU and finishes the selected
-sample budget and denoising before capture; it fails instead of exporting a raster
-fallback. Raster animation export works with software WebGL. The Python dependency
-`imageio-ffmpeg` supplies the MP4 encoder. No snapshot downloads anything.
 
 ```bash
 sudo apt-get install -y xvfb libgl1-mesa-dri fonts-dejavu-core
@@ -584,14 +576,16 @@ bundled assets without the repository. Run `scripts/bundle/bundle.sh` after
 editing build inputs to refresh all packaged outputs.
 
 The self-contained browser suite creates tiny inputs and owns its project,
-viewer and cache. It never reads the sample-model corpus. The UI/web tests and the
-browser suite drive npm Playwright's Chromium. Snapshot exports and the viewer's
-launch smoke test (`scripts/test/test-viewer-launch.sh`) use Python Playwright's
-Chromium, a declared cadgen dependency. Install both; their revisions can differ:
+viewer and cache. It never reads the sample-model corpus. cadgen itself needs no
+browser: OCCT draws its snapshots, and the wheel depends on no Playwright. The
+tests do: the UI/web tests and the browser suite drive npm Playwright's Chromium,
+and the viewer's launch smoke test (`scripts/test/test-viewer-launch.sh`) drives
+Python Playwright's headless shell, the one Python package `requirements-dev.txt`
+installs for a browser. Install both; their revisions can differ:
 
 ```bash
 npx --no-install playwright install chromium                  # UI/web tests, browser suite
-.venv/bin/python -m cadgen.cli doctor --install-browser       # snapshot and launch tests
+.venv/bin/python -m playwright install --only-shell chromium  # the launch smoke test
 scripts/bundle/bundle.sh
 scripts/test/test-viewer-browser.sh
 scripts/test/test-viewer-browser.sh --only camera

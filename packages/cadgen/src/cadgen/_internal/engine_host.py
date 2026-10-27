@@ -39,7 +39,7 @@ def registry():
     return Registry(state_dir(), cache=cache_dir())
 
 
-_MODULES = {"cadgen.engine.client", "cadgen.engine.daemon", "cadgen.engine.registry", "cadgen.engine.snapshot"}
+_MODULES = {"cadgen.engine.client", "cadgen.engine.daemon", "cadgen.engine.registry"}
 
 
 # The agent hosts whose shells run in a sandbox that refuses the loopback port the engine's HTTP
@@ -68,9 +68,6 @@ def _attach(module):
     if module.__name__ == "cadgen.engine.client":
         module.DAEMON_MODULE = "cadgen._internal.engine_daemon"
         module.SANDBOXES = SANDBOXES
-    elif module.__name__ == "cadgen.engine.snapshot":
-        from cadgen._internal.snapshot_browser import render
-        module.BROWSER_RENDER = render
     elif module.__name__ == "cadgen.engine.registry":
         module.FACTORY = registry
     else:

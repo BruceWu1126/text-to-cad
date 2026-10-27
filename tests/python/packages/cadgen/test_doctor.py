@@ -47,20 +47,6 @@ def skill_text(version: str) -> str:
     return f"- `cadgen` means `uvx --no-config --managed-python --python 3.13 --from cadgen=={version} cadgen`\n"
 
 
-class BrowserSetupTests(unittest.TestCase):
-    def test_explicit_setup_uses_this_interpreter_and_propagates_failure(self) -> None:
-        # The proxy may select a different Python from the user's shell. Setup
-        # must provision that installation, and must not start its engine.
-        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=7)) as run, \
-                mock.patch.object(doctor, "_setup") as setup:
-            self.assertEqual(_run(["--install-browser"])[0], 7)
-        run.assert_called_once_with(
-            [sys.executable, "-m", "playwright", "install", "chromium"],
-            timeout=600, check=False,
-        )
-        setup.assert_not_called()
-
-
 class DoctorTests(unittest.TestCase):
     def setUp(self) -> None:
         patcher = mock.patch.object(doctor, "_probe_kernel", return_value=(doctor.KERNEL_OK, "/site/OCP.pyd"))

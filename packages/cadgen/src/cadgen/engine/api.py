@@ -1,7 +1,7 @@
 """The engine's verbs as functions, one per command; ``cli`` is a thin argparse over them.
 
     export(source, *destinations) -> list[Written]
-    snapshot(source, out, *, display=None, camera=None, grid=False, preview=False, pose=None,
+    snapshot(source, out, *, display=None, camera=None, grid=False, pose=None,
              width=None, height=None, annotation=None, measurements=None) -> Drawn
     snapshot(source=None, *, job, the same flags) -> list[Drawn]
     serve(source, port=0) -> Served
@@ -201,15 +201,15 @@ class Document:
         return _said(_exporting(self, destinations), destinations)
 
     def snapshot(self, out: Any, *, display: Any = None, camera: Any = None, grid: bool = False,
-                 preview: bool | dict[str, Any] = False, pose: Any = None, width: int | None = None, height: int | None = None,
+                 pose: Any = None, width: int | None = None, height: int | None = None,
                  size_profile: str | None = None, daemon: bool = True, annotation: Any = None,
-                 measurements: Any = None, animation: Any = None, fps: int = 30) -> Drawn:
+                 measurements: Any = None) -> Drawn:
         """``snapshot(handle, out, ...)``: the document drawn into ``out`` (a ``.png``); every option is
         the ``snapshot`` verb's, about the picture (law 22)."""
         self._outside("snapshot")
-        return cast(Drawn, snapshot(self, out, display=display, camera=camera, grid=grid, preview=preview,
+        return cast(Drawn, snapshot(self, out, display=display, camera=camera, grid=grid,
                                     pose=pose, width=width, height=height, size_profile=size_profile, daemon=daemon,
-                                    annotation=annotation, measurements=measurements, animation=animation, fps=fps))
+                                    annotation=annotation, measurements=measurements))
 
 
 def _handed_bytes(shape: Any, name: str, animations: Any) -> bytes:
@@ -543,9 +543,9 @@ def _exported(order: dict[str, Any], spec: dict[str, Any], shown: Callable[[str]
 
 
 def snapshot(source: Any = None, out: Any = None, *, job: Any = None, display: Any = None, camera: Any = None,
-             grid: bool = False, preview: bool | dict[str, Any] = False, pose: Any = None, width: int | None = None,
+             grid: bool = False, pose: Any = None, width: int | None = None,
              height: int | None = None, size_profile: str | None = None, daemon: bool = True, annotation: Any = None,
-             measurements: Any = None, progress: Any = None, animation: Any = None, fps: int = 30) -> Drawn | list[Drawn]:
+             measurements: Any = None, progress: Any = None) -> Drawn | list[Drawn]:
     """Draw a document (``.xbf``, ``.step``, or a document id: the one the engine holds) or a mesh
     file (``.glb``, ``.stl``, ``.3mf``) into ``out`` (a ``.png``) as the viewer draws it: one
     picture, a ``Drawn``. A ``Model`` is called first, as the program's own call of it builds it:
@@ -573,60 +573,54 @@ def snapshot(source: Any = None, out: Any = None, *, job: Any = None, display: A
 
     frames, bar = progressing.sink(progress)
     try:
-        return _pictured(source, out, job=job, display=display, camera=camera, grid=grid, preview=preview, pose=pose,
+        return _pictured(source, out, job=job, display=display, camera=camera, grid=grid, pose=pose,
                          width=width, height=height, size_profile=size_profile, daemon=daemon, annotation=annotation,
-                         measurements=measurements, progress=frames, animation=animation, fps=fps)
+                         measurements=measurements, progress=frames)
     finally:
         if bar is not None:
             bar.close()
 
 
-def _pictured(source: Any, out: Any, *, job: Any, display: Any, camera: Any, grid: bool, preview: bool | dict[str, Any], pose: Any,
+def _pictured(source: Any, out: Any, *, job: Any, display: Any, camera: Any, grid: bool, pose: Any,
               width: int | None, height: int | None, size_profile: str | None, daemon: bool, annotation: Any,
-              measurements: Any, progress: Callable[[dict], None] | None, animation: Any = None, fps: int = 30) -> Drawn | list[Drawn]:
+              measurements: Any, progress: Callable[[dict], None] | None) -> Drawn | list[Drawn]:
     """``snapshot``, its frames to ``progress`` (a callable, or None for nowhere)."""
     if job is not None:
-        if animation is not None or fps != 30:
-            from cadgen.engine.snapshot import SnapshotRefused
-            raise SnapshotRefused("animation and fps require a single source/output, not a job")
         if out is not None:
             raise TypeError("snapshot() takes out or job, not both: a job's outputs name its pictures")
-        return _job(job, source, display=display, camera=camera, grid=grid, preview=preview, pose=pose, width=width,
+        return _job(job, source, display=display, camera=camera, grid=grid, pose=pose, width=width,
                     height=height, size_profile=size_profile, daemon=daemon, annotation=annotation,
                     measurements=measurements, progress=progress)
     if source is None or out is None:
         raise TypeError(f"snapshot() missing required argument: {'source' if source is None else 'out'!r}")
     from cadgen.engine import snapshot as drawing
 
-    drawing.validate_animation(animation, fps)
-    drawing.validate_preview(preview)
-    out = drawing.picture_path(out, source, animation=animation)
-    return _snapshot(source, out, display=display, camera=camera, grid=grid, preview=preview, pose=pose,
+    out = drawing.picture_path(out, source)
+    return _snapshot(source, out, display=display, camera=camera, grid=grid, pose=pose,
                      width=width, height=height, size_profile=size_profile, daemon=daemon, annotation=annotation,
-                     measurements=measurements, progress=progress, animation=animation, fps=fps)
+                     measurements=measurements, progress=progress)
 
 
-def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, preview: bool | dict[str, Any], pose: Any,
+def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, pose: Any,
               width: int | None, height: int | None, size_profile: str | None, daemon: bool, annotation: Any,
-              measurements: Any, progress: Callable[[dict], None] | None = None, animation: Any = None, fps: int = 30) -> Drawn:
+              measurements: Any, progress: Callable[[dict], None] | None = None) -> Drawn:
     from cadgen.engine import snapshot as drawing
     from cadgen.engine.ids import is_id
     from cadgen.engine.model import Model
 
     if isinstance(source, (Model, Document)) or is_id(os.fspath(source)):
-        extension = ".mp4" if animation is not None and animation is not False else ".png"
-        if out.suffix.lower() != extension:
-            raise drawing.SnapshotRefused(f"a snapshot is a {extension}; {out.name} is not one")
+        if out.suffix.lower() != ".png":
+            raise drawing.SnapshotRefused(f"a snapshot is a .png; {out.name} is not one")
         drawing.options(display, camera, grid, width, height, size_profile)  # refused here, before any build
         drawing.parse_annotation(annotation)  # refused here, before any build
         source = _called(source, daemon)
         spec = _source(source)
         if isinstance(annotation, (str, Path)) and not str(annotation).lstrip().startswith("{"):
             annotation = str(Path(annotation).expanduser().resolve())  # read in the worker, beside its packets
-        draw = {"out": str(out), "display": display, "camera": camera, "grid": grid, "preview": preview,
+        draw = {"out": str(out), "display": display, "camera": camera, "grid": grid,
                 "pose": drawing.parse_pose(pose) if isinstance(pose, str) else pose, "width": width,
                 "height": height, "size_profile": size_profile, "annotation": annotation,
-                "measurements": drawing.parse_measurements(measurements), "animation": animation, "fps": fps}
+                "measurements": drawing.parse_measurements(measurements)}
         order = {"op": "export", "source": spec, "destinations": [], "draw": draw,
                  "cwd": str(source.cwd) if isinstance(source, Document) else os.getcwd()}
         found = _exported(order, spec, lambda _text: None, daemon, progress)["drawn"]
@@ -634,23 +628,23 @@ def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, 
             found["document"] = spec["id"]  # what was drawn, by the id it was named by
         return Drawn(out, found["width"], found["height"], found)
     shown, framed, size = drawing.options(display, camera, grid, width, height, size_profile)
-    found = drawing.snapshot(Path(os.fspath(source)), out, display=shown, camera=framed, preview=preview,
+    found = drawing.snapshot(Path(os.fspath(source)), out, display=shown, camera=framed,
                              size=None if width is None and height is None and size_profile is None else size,
                              daemon=daemon, pose=drawing.parse_pose(pose) if isinstance(pose, str) else pose,
                              annotation=drawing.parse_annotation(annotation),
                              measurements=drawing.parse_measurements(measurements), annotation_source=annotation,
-                             progress=progress, animation=animation, fps=fps)
+                             progress=progress)
     return Drawn(out, found["width"], found["height"], found)
 
 
-def _job(job: Any, source: Any, *, display: Any, camera: Any, grid: bool, preview: bool | dict[str, Any], pose: Any,
+def _job(job: Any, source: Any, *, display: Any, camera: Any, grid: bool, pose: Any,
          width: int | None, height: int | None, size_profile: str | None, daemon: bool, annotation: Any,
          measurements: Any, progress: Callable[[dict], None] | None = None) -> list[Drawn]:
     """``snapshot(job=...)``: every picture the job names (see ``snapshot``)."""
     from cadgen.engine import snapshot as drawing
 
     _heard("source", os.fspath(source) if source is not None else drawing.job_input(job))
-    pictures = drawing.job_pictures(job, source, display=display, camera=camera, grid=grid, preview=preview, pose=pose,
+    pictures = drawing.job_pictures(job, source, display=display, camera=camera, grid=grid, pose=pose,
                                     width=width, height=height, size_profile=size_profile, annotation=annotation,
                                     measurements=measurements)
     return [Drawn(Path(found["output"]), found["width"], found["height"], found)

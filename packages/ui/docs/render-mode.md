@@ -6,8 +6,7 @@ validates it and resolves the mode, or Preview's Render, into renderer groups.
 controls are in [settings-ui.md](settings-ui.md#display-settings-and-section-primitives).
 
 A file's display is a mode and the Grid switch. A mode is a look at its own defaults, with
-nothing to set. Render is no display mode: it is the photographic look Preview and a
-snapshot's `--preview` ask for on their own, over the same display, with Preview's own
+nothing to set. Render is no display mode: it is the photographic look Preview asks for on its own, over the same display, with Preview's own
 settings (the viewer's alone, kept beside the display).
 
 | Mode | Surface / edge recipe |
@@ -113,15 +112,14 @@ an M1 Max) and a still view converges in about half a second. A snapshot is OCCT
 the engine (`engine/render/occt.py`), not through this frame. Software WebGL has no frame: one
 draw, as before.
 
-Preview additionally refines a still view with an optional WebGPU path tracer
-(`core/lib/preview-tracing/progressivePreview.js`). The raster studio remains the immediate
-picture and handles all motion. A fully denoised image replaces it after 32 traced samples,
-then refines to 128 samples for Preview lighting quality or 256 for Final. Filtering uses
-bundled Open Image Denoise weights and preserves the previous finished image until the
-next one is ready. Tracing is limited to one million
-pixels and bounded scene resources; unsupported geometry/materials or unavailable WebGPU
-retain the raster studio. This introduces no setting and does not change engine snapshots.
-The existing raster convergence timings above do not describe path-tracing convergence.
+Preview uses a WebGPU path tracer (`core/lib/preview-tracing/progressivePreview.js`)
+for both movement and still views. A cover stays up while the first traced image prepares;
+a failed or unsupported device or scene offers retry and exit. During motion, a bounded
+low-resolution traced image is updated at the same material and bounce settings. At rest,
+it is replaced by a denoised image after 32 samples and refined to 128 samples for Preview
+lighting quality or 256 for Final. Filtering uses bundled Open Image Denoise weights.
+Tracing is limited to one million interactive pixels and bounded scene resources. The
+existing raster convergence timings above do not describe path-tracing convergence.
 
 Each interactive viewport keeps its raster renderer (a view of the page's shared WebGL device:
 [the GPU device](cad-renderer.md#the-gpu-device)), canvas and camera controls
@@ -155,8 +153,7 @@ for scheduling, resource caching, loading presentation and capture readiness.
 
 Render's floor stands under the model's lowest point (`RENDER_FLOOR_PLACEMENT`, `lowest`), at 60%
 opacity, its opacity letting geometry below it show; Model origin (the document's Z=0 plane) is a
-choice away and is remembered in Render, as Glossy is. A snapshot's Preview floor stands where
-the viewer's does.
+choice away and is remembered in Render, as Glossy is.
 Render's floor carries a studio's soft grounding shadow, as deep
 as the floor is opaque: darkest where the model touches it, the key light's cast
 shadow softening and fading away from the model. The viewer re-renders its

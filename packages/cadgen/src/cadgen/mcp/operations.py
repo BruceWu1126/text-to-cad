@@ -35,11 +35,10 @@ COMMON = {
 FOLLOW = ("action", "operationId", "epoch", "afterSequence", "waitMs")
 FOLLOW_REQUIRED = ("action", "operationId", "epoch")
 SNAPSHOT = {"source": STRING,
-            "output": {**STRING, "description": "The PNG or animation MP4's absolute path; required with source unless a packet names the outputs."},
+            "output": {**STRING, "description": "The PNG's absolute path; required with source unless a packet names the outputs."},
             "packet": {**JSON_VALUE, "description": "A Quick Edit packet (its absolute path or object), which declares its outputs: "
                                                     "give it in place of output; a source with it replaces its input."},
-            "display": JSON_VALUE, "camera": JSON_VALUE, "grid": BOOL, "preview": {"type": ["boolean", "object"]},
-            "animation": {"type": ["boolean", "string"]}, "fps": {"type": "integer", "minimum": 1, "maximum": 60},
+            "display": JSON_VALUE, "camera": JSON_VALUE, "grid": BOOL,
             "pose": {"type": ["object", "string"]}, "width": {"type": "integer", "minimum": 1},
             "height": {"type": "integer", "minimum": 1}, "size_profile": STRING,
             "annotation": JSON_VALUE, "measurements": JSON_VALUE}
@@ -56,7 +55,7 @@ STARTS = {"cad_export": (("source", "destinations"),), "cad_snapshot": (("source
           "cad_inspect": (("source",),)}
 DESCRIPTIONS = {
     "cad_export": "Export a document to explicit absolute destinations on the engine host (.xbf/.step/.glb/.stl/.3mf/.dxf). The source is an absolute CAD file path or a document id (a model's, which running its script prints); a document id is exported as the engine holds it. A mesh source (.glb/.stl/.3mf) exports to the other two mesh kinds only, each holding what its format carries. Reuses the Python export operation. Viewer downloads instead choose a destination in the user's browser and use temporary artifacts.",
-    "cad_snapshot": "Render an explicit source/output PNG, an authored animation MP4, or a Quick Edit packet, using the Python snapshot operation. The source is an absolute CAD file path or a document id; paths must be absolute on the engine host. A failed snapshot or packet leaves existing pictures unchanged.",
+    "cad_snapshot": "Render an explicit source/output PNG or a Quick Edit packet, using the Python snapshot operation. The source is an absolute CAD file path or a document id; paths must be absolute on the engine host. A failed snapshot or packet leaves existing pictures unchanged.",
     "cad_inspect": "Inspect an existing CAD file (.xbf, .step, a mesh) or a document id. Without a ref it answers what `cadgen inspect SOURCE` prints: the summary (parts, bounds, volume, materials and mass, joints, states, sequences, animations) as data and as its text, with the build closure where there is one. With a ref (or SOURCE#REF), that element's or part's geometry. query picks one answer instead: summary, structure (the summary's lists without bounds, volume or mass, so nothing is measured), closure, geometry (requires ref) or build (file metadata or live build metadata). Never builds a model, meshes a part or writes its declared outputs; a document the engine no longer holds is refused with the command that builds it again.",
 }
 
@@ -177,7 +176,7 @@ def checked(value, schema, label="arguments"):
 # The snapshot's words name its command's flags (``--pose '{"hinge": 90}'``); a cad_snapshot's caller
 # gave arguments: the same words with each flag named as the argument it is.
 _FLAG_VALUE = re.compile(r"--(pose|display|camera) '([^']*)'")
-_FLAG = re.compile(r"--(pose|display|camera|annotation|measurements|width|height|grid|preview|size-profile)\b")
+_FLAG = re.compile(r"--(pose|display|camera|annotation|measurements|width|height|grid|size-profile)\b")
 
 
 def arguments_named(text):

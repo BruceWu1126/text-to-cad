@@ -126,6 +126,8 @@ const ShellViewport = forwardRef(function ShellViewport({
   annotationTouches = null,
   onPerspectiveChange = null,
   onPresentationChange = null,
+  onPreviewStatus = null,
+  previewMotionActive = false,
   onViewerAlertChange = null,
   // The camera came to rest on a new view: a preview camera that moved (preview's
   // orbit, which persists nothing and so emits no perspective), or a viewport whose size
@@ -681,7 +683,7 @@ const ShellViewport = forwardRef(function ShellViewport({
     IDLE_PIXEL_RATIO_CAP: Number(quality?.idlePixelRatioCap) > 0 ? Number(quality.idlePixelRatioCap) : IDLE_PIXEL_RATIO_CAP,
     INTERACTION_IDLE_DELAY_MS, TRACKPAD_PINCH_ZOOM_SPEED, COARSE_POINTER_PINCH_ZOOM_SPEED, ACCELERATED_WHEEL_ZOOM_SPEED,
     KEYBOARD_ORBIT_NUDGE_RAD, defaultGridRadius, sceneScaleMode: normalizedSceneScaleMode, floorMode: resolvedFloorMode,
-    renderMode, onInitializationError: handleRuntimeInitializationError, onFramePresented: handleFramePresented,
+    renderMode, onInitializationError: handleRuntimeInitializationError, onFramePresented: handleFramePresented, onPreviewStatus, previewMotionActive,
     presentationRequestRef, onContextLost: handleRuntimeContextLost, onContextRestored: handleRuntimeContextRestored,
     preserveInteractionPixelRatio, runtimeResetToken
   });

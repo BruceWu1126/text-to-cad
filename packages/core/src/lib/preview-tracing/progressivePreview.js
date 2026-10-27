@@ -8,15 +8,17 @@ import { drawPreviewBackdrop } from './backdrop.js';
 import { inspectPreviewScene, preparePreviewScene, disposePreviewScene, createPreviewGeometryCache, previewSceneBudget, syncPreviewSceneTransforms, PREVIEW_LIMITS } from './scene.js';
 
 const FRAME_PATH_BUDGET = 250000;
+// Upstream low-res mode advances five wavefront steps per update. Four bounded
+// updates let paths traverse the full 12 surface plus 5 transparent bounces.
+const MOTION_UPDATES = 4, MOTION_SCALE = 0.3;
 const RAY_STATE_BYTES = 224;
 const MAX_RENDER_PIXELS = 1000000;
 const FIRST_DENOISE_SAMPLES = 32, PREVIEW_SAMPLES = 128, FINAL_SAMPLES = 256;
 const MAX_BOUNCES = 12, MAX_TRANSPARENT_BOUNCES = 5;
 const MIN_FRAME_LIMIT = 2048, MAX_FRAME_LIMIT = 32768, MAX_REFERENCE_FRAMES = 65536;
 
-// The raster remains underneath this optional canvas at every stage. A failed device,
-// oversized or unsupported scene is a normal fallback, not a blank Preview.
-export function createProgressivePreview(runtime, { requestRender = () => {}, diagnostic = null } = {}) {
+// Preview presents only this tracer; the caller owns loading and error UI.
+export function createProgressivePreview(runtime, { requestRender = () => {}, onFailure = () => {}, diagnostic = null } = {}) {
   // For reproducible visual comparisons only: a bounded raw reference rendered
   // with this same scene and tracer. There is no viewer control for this profile.
   const rawReferenceSamples = diagnostic?.rawReferenceSamples ?? null;
@@ -25,19 +27,33 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
   }
   const rawReference = rawReferenceSamples !== null;
   let state = 'idle', reason = null, generation = 0, cameraEpoch = 0, abort = null, tracer = null;
-  let gpu = null, scene = null, camera = null, canvas = null, background = null, capture = null, frames = 0, visible = false;
+  let gpu = null, scene = null, camera = null, canvas = null, background = null, presented = null, capture = null, frames = 0, visible = false, renderWidth = 0, renderHeight = 0;
   let rasterOpacity = null;
   let started = false, disposed = false, cameraDirty = false, transformsDirty = false, measuring = null, sample = 0, frameBudget = FRAME_PATH_BUDGET;
-  let inFlight = null, denoiser = null, denoisedSamples = 0, denoisingSamples = 0, budgetExhausted = false;
+  let inFlight = null, denoiser = null, denoisedSamples = 0, denoisingSamples = 0, budgetExhausted = false, motionRemaining = 0, motionActive = false, presentedFrames = 0, shownSamples = 0;
   const cache = createPreviewGeometryCache();
   let maxSamples = rawReferenceSamples ?? (runtime.previewConfiguration?.quality === 'final' ? FINAL_SAMPLES : PREVIEW_SAMPLES);
-  const hide = () => { visible = false; if (canvas) canvas.style.visibility = 'hidden'; if (background) background.style.visibility = 'hidden'; if (rasterOpacity !== null) { runtime.renderer.domElement.style.opacity = rasterOpacity; rasterOpacity = null; } };
-  const release = () => {
-    hide(); inFlight = null;
+  const hide = (restoreRaster = true) => { visible = false; if (canvas) canvas.style.visibility = 'hidden'; if (presented) presented.style.visibility = 'hidden'; if (background) background.style.visibility = 'hidden'; if (restoreRaster && rasterOpacity !== null) { runtime.renderer.domElement.style.opacity = rasterOpacity; rasterOpacity = null; } };
+  // The GPU canvas can be rewritten while tracing. Hold a completed traced frame
+  // on a separate canvas until its next complete low-resolution update is ready.
+  const show = (newFrame = true) => {
+    if (presented.width !== canvas.width || presented.height !== canvas.height) { presented.width = canvas.width; presented.height = canvas.height; }
+    const context = presented.getContext('2d');
+    if (!context) throw new Error('Preview presentation unavailable');
+    context.clearRect(0, 0, presented.width, presented.height);
+    context.drawImage(canvas, 0, 0);
+    presented.style.visibility = 'visible';
+    if (!visible) { rasterOpacity = runtime.renderer.domElement.style.opacity; runtime.renderer.domElement.style.opacity = '0'; }
+    visible = true; background.style.visibility = 'visible';
+    if (newFrame) presentedFrames++;
+  };
+  const release = (restoreRaster = true) => {
+    hide(restoreRaster); inFlight = null;
     tracer?.dispose(); tracer = null; denoiser = null; denoisedSamples = 0; denoisingSamples = 0;
     disposePreviewScene(scene); scene = null;
     gpu?.dispose(); gpu = null;
-    canvas?.remove(); canvas = null; background?.remove(); background = null; capture = null;
+    canvas?.remove(); canvas = null; presented?.remove(); presented = null; background?.remove(); background = null; capture = null;
+    motionRemaining = 0; motionActive = false;
     camera = null;
     frames = 0; sample = 0; budgetExhausted = false;
   };
@@ -60,7 +76,7 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
     });
   };
   const invalidate = ({ sceneChanged = false, transformsChanged = false } = {}) => {
-    hide(); cameraEpoch++; measuring = null;
+    cameraEpoch++; measuring = null;
     const wasDenoising = denoiser?.running;
     denoiser?.reset(); denoisedSamples = 0; denoisingSamples = 0;
     if (wasDenoising) fenceDenoise();
@@ -68,7 +84,7 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
       generation++;
       // Abort also rejects an in-flight worker task, so its private geometry is released.
       abort?.abort(); abort = null;
-      transformsDirty = false; started = false; state = 'idle'; reason = null; frames = 0; sample = 0; measuring = null; budgetExhausted = false;
+      motionRemaining = 0; motionActive = false; transformsDirty = false; started = false; state = 'idle'; reason = null; frames = 0; sample = 0; measuring = null; budgetExhausted = false;
     } else {
       cameraDirty = true; transformsDirty ||= transformsChanged;
     }
@@ -77,7 +93,8 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
     if (disposed || token !== generation || state === 'fallback') return;
     state = 'fallback'; reason = error?.message || String(error);
     generation++; cameraEpoch++; measuring = null; abort?.abort(); abort = null;
-    release(); cache.dispose();
+    try { onFailure(error); } catch { /* Reporting must not prevent cleanup. */ }
+    release(false); cache.dispose();
     requestRender();
   };
   const prepare = async (sourceCamera) => {
@@ -85,7 +102,7 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
     started = true;
     state = 'preparing'; reason = null;
     maxSamples = rawReferenceSamples ?? (runtime.previewConfiguration?.quality === 'final' ? FINAL_SAMPLES : PREVIEW_SAMPLES);
-    let localGpu = gpu, localScene = null, localCanvas = null, localBackdrop = null;
+    let localGpu = gpu, localScene = null, localCanvas = null, localBackdrop = null, localPresented = null;
     const taskAbort = new AbortController();
     abort = taskAbort;
     try {
@@ -113,10 +130,14 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
         Object.assign(localCanvas.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', pointerEvents: 'none', visibility: 'hidden' });
         runtime.renderer.domElement.parentElement.appendChild(localCanvas);
         canvas = localCanvas;
+        localPresented = document.createElement('canvas');
+        Object.assign(localPresented.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', pointerEvents: 'none', visibility: 'hidden' });
+        runtime.renderer.domElement.parentElement.appendChild(localPresented);
+        presented = localPresented;
         localGpu = new WebGPURenderer({ canvas: localCanvas, alpha: true, antialias: false, powerPreference: 'high-performance', requiredLimits });
         await localGpu.init();
         if (!localGpu.backend?.isWebGPUBackend) throw new Error('WebGPU unavailable');
-        if (token !== generation || disposed) { localGpu.dispose(); localCanvas.remove(); backdrop.remove(); return; }
+        if (token !== generation || disposed) { localGpu.dispose(); localCanvas.remove(); backdrop.remove(); localPresented?.remove(); return; }
         gpu = localGpu;
         const device = localGpu.backend.device;
         device.addEventListener('uncapturederror', event => { if (gpu === localGpu) fail(event.error || new Error('WebGPU error'), generation); });
@@ -160,7 +181,7 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
       state = 'ready'; cameraDirty = true;
       requestRender();
     } catch (error) {
-      if (token !== generation || disposed) { if (localScene && localScene !== scene) disposePreviewScene(localScene); if (localGpu && localGpu !== gpu) localGpu.dispose(); localCanvas?.remove(); localBackdrop?.remove(); return; }
+      if (token !== generation || disposed) { if (localScene && localScene !== scene) disposePreviewScene(localScene); if (localGpu && localGpu !== gpu) localGpu.dispose(); localCanvas?.remove(); localBackdrop?.remove(); localPresented?.remove(); return; }
       if (localScene && localScene !== scene) disposePreviewScene(localScene);
       if (localGpu && localGpu !== gpu) localGpu.dispose();
       fail(error, token);
@@ -168,8 +189,8 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
   };
   const render = (_renderer, _scene, sourceCamera, { still = true, moving = false, sceneChanged = false } = {}) => {
     if (disposed) return { refining: false, visible: false };
+    if (globalThis.document?.visibilityState === 'hidden') return { refining: false, visible };
     if (sceneChanged && started) invalidate({ sceneChanged: true });
-    if (moving || !still) { if (denoiser?.running || denoiser?.texture) invalidate({ sceneChanged: false }); else hide(); cameraDirty = true; return { refining: false, visible: false }; }
     if (!started) { void prepare(sourceCamera); return { refining: false, visible: false }; }
     if (state !== 'ready') return { refining: false, visible: false };
     // A quality-only setting can extend a converged image without rebuilding
@@ -177,14 +198,17 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
     const desiredSamples = rawReferenceSamples ?? (runtime.previewConfiguration?.quality === 'final' ? FINAL_SAMPLES : PREVIEW_SAMPLES);
     if (desiredSamples !== maxSamples) {
       const wasDenoising = denoiser?.running;
-      maxSamples = desiredSamples; tracer.maxSamples = maxSamples; denoisedSamples = 0; denoisingSamples = 0; budgetExhausted = false; hide();
+      maxSamples = desiredSamples; tracer.maxSamples = maxSamples; denoisedSamples = 0; denoisingSamples = 0; budgetExhausted = false;
       if (wasDenoising) fenceDenoise();
     }
-    // Do not queue more GPU work than one batch; a slow device can then return to
-    // raster as soon as the current batch finishes instead of draining a backlog.
+    // Do not queue more than one GPU batch; camera changes can then take effect
+    // after the current batch without draining a backlog.
     if (inFlight) return { refining: false, visible };
     try {
-      if (transformsDirty) {
+      const wantsMotion = moving || !still;
+      // Finish the current latched motion picture before sampling a newer pose;
+      // otherwise a continuous stream of pointer changes would reset every path.
+      if (motionRemaining === 0 && transformsDirty) {
         transformsDirty = false;
         if (!scene || !syncPreviewSceneTransforms(scene, runtime.modelGroup, runtime.photographicStudio?.ground)) {
           invalidate({ sceneChanged: true });
@@ -200,12 +224,35 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
       const height = Math.max(1, rasterCanvas.height || rasterCanvas.clientHeight);
       const scale = Math.min(1, Math.sqrt(MAX_RENDER_PIXELS / (width * height)));
       const w = Math.max(1, Math.floor(width * scale)), h = Math.max(1, Math.floor(height * scale));
-      if (canvas.width !== w || canvas.height !== h) { gpu.setSize(w, h, false); cameraDirty = true; }
-      if (cameraDirty) {
+      renderWidth = w; renderHeight = h;
+      if (canvas.width !== w || canvas.height !== h) { gpu.setSize(w, h, false); cameraDirty = true; motionRemaining = 0; }
+      if (motionRemaining === 0 && wantsMotion && (cameraDirty || !motionActive)) {
+        tracer.dynamicLowRes = true; tracer.lowResScale = MOTION_SCALE; tracer.renderDelay = 60000000; tracer.fadeDuration = 0;
+        motionActive = true; motionRemaining = MOTION_UPDATES;
+      }
+      if (motionRemaining === 0 && !wantsMotion && motionActive) {
+        tracer.dynamicLowRes = false; tracer.renderDelay = 0; motionActive = false; cameraDirty = true;
+      }
+      if (cameraDirty && motionRemaining !== MOTION_UPDATES && motionRemaining > 0) {
+        // A newer camera waits until the latched low-resolution image completes.
+      } else if (cameraDirty) {
         camera.copy(sourceCamera, false); camera.coordinateSystem = THREE.WebGPUCoordinateSystem;
-        tracer.updateCamera(); cameraDirty = false; frames = 0; sample = 0; budgetExhausted = false; denoisedSamples = 0; denoisingSamples = 0; cameraEpoch++; measuring = null; hide();
+        tracer.updateCamera(); cameraDirty = false; frames = 0; sample = 0; budgetExhausted = false; denoisedSamples = 0; denoisingSamples = 0; cameraEpoch++; measuring = null;
         drawPreviewBackdrop(background, sourceCamera, runtime.photographicStudio, w, h, runtime.renderer.getClearAlpha());
       }
+      if (motionRemaining > 0) {
+        // Submit one latched picture as one bounded GPU batch. Low-resolution
+        // updates each advance five wavefront steps, and are not tied to vsync.
+        while (motionRemaining > 0) { tracer.renderSample(); motionRemaining--; }
+        show(); shownSamples = 0;
+        const fence = gpu.backend.device.queue.onSubmittedWorkDone();
+        inFlight = fence;
+        const token = generation;
+        fence.then(() => { if (inFlight !== fence) return; inFlight = null; if (!disposed && state === 'ready') requestRender(); })
+          .catch(error => { if (inFlight !== fence) return; inFlight = null; if (token === generation) fail(error, token); });
+        return { refining: false, visible };
+      }
+      if (wantsMotion) return { refining: false, visible };
       if (denoiser.running) return { refining: false, visible };
       const estimatedFrames = Math.ceil(w * h / frameBudget * maxSamples * (MAX_BOUNCES + MAX_TRANSPARENT_BOUNCES + 4));
       const limit = Math.min(rawReference ? MAX_REFERENCE_FRAMES : MAX_FRAME_LIMIT, Math.max(MIN_FRAME_LIMIT, estimatedFrames));
@@ -225,7 +272,11 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
       tracer.pause = budgetExhausted;
       try { tracer.renderSample(); } finally { tracer.pause = wasPaused; }
       if (!budgetExhausted) frames++;
-      if (denoiser.texture || (rawReference && sample >= 1)) { if (!visible) { rasterOpacity = rasterCanvas.style.opacity; rasterCanvas.style.opacity = '0'; } visible = true; background.style.visibility = 'visible'; canvas.style.visibility = 'visible'; }
+      if (denoiser.texture || (rawReference && sample >= 1)) {
+        const newFrame = rawReference || denoisedSamples !== shownSamples || !visible;
+        if (newFrame) show(newFrame);
+        shownSamples = denoisedSamples;
+      }
       // Readback only occasionally: it is asynchronous and only used to stop the loop.
       if (!budgetExhausted && !measuring && frames % 16 === 0) {
         const measurement = {};
@@ -262,16 +313,13 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
       if (!visible) return null;
       // WebGPU's presentation texture expires after the frame. Redraw the settled
       // accumulation into a fresh one before the synchronous canvas copy.
-      const paused = tracer.pause;
-      tracer.pause = true;
-      try { tracer.renderSample(); } finally { tracer.pause = paused; }
       capture ||= document.createElement('canvas');
       capture.width = canvas.width; capture.height = canvas.height;
       const context = capture.getContext('2d');
       context.drawImage(background, 0, 0, capture.width, capture.height);
-      context.drawImage(canvas, 0, 0);
+      context.drawImage(presented, 0, 0);
       return capture;
     },
-    get progress() { return { state, sample, samples: maxSamples, frames, denoise: denoiser?.status || 'idle', denoisedSamples, budgetExhausted, denoiseTimings: denoiser?.timings || null, fallbackReason: reason }; },
+    get progress() { return { state, motion: motionActive, motionRemaining, presentedFrames, traceWidth: motionActive ? Math.ceil(renderWidth * MOTION_SCALE) : renderWidth, traceHeight: motionActive ? Math.ceil(renderHeight * MOTION_SCALE) : renderHeight, sample, samples: maxSamples, frames, renderWidth, renderHeight, denoise: denoiser?.status || 'idle', denoisedSamples, budgetExhausted, denoiseTimings: denoiser?.timings || null, fallbackReason: reason }; },
   };
 }

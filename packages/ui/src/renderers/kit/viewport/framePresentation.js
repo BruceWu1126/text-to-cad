@@ -13,7 +13,9 @@ export function createFramePresentation({ canvas, renderMode, onPresent }) {
       const hasVisibleContent = Boolean(runtime?.hasVisibleModel || runtime?.hasDrawingDocument);
       const environmentReady = !(runtime?.renderMode ?? renderMode) || runtime?.environmentReady === true;
       if (!canvasPresented && (!ready || !key || !hasVisibleContent || !environmentReady)) return false;
-      drawFrame();
+      const presentable = drawFrame();
+      // A traced Preview can prepare without presenting its underlying canvas.
+      if (presentable === false) return true;
       if (!canvasPresented) {
         canvasPresented = true;
         canvas.style.visibility = "visible";

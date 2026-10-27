@@ -1,5 +1,4 @@
-// Preview lifts its initial cover when the raster studio presents the loaded model.
-// Refinement happens in view: a still picture never waits behind the cover for samples.
+// Preview lifts its initial cover only after a traced picture of the loaded model is present.
 
 /**
  * @param {{ presented: boolean, loading: boolean }} view

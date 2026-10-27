@@ -125,17 +125,17 @@ export function usePreviewIdle(root, active, held) {
  * @param {{ active: boolean, name?: string, controls?: import("react").ReactNode, panel?: import("react").ReactNode,
  *   panelOpen?: boolean, idle?: ReturnType<typeof createPreviewIdle> | null, children?: import("react").ReactNode }} props
  */
-export default function PreviewChrome({ active, name = "", controls = null, panel = null, panelOpen = false, idle = null, children }) {
+export default function PreviewChrome({ active, covered = false, name = "", controls = null, panel = null, panelOpen = false, idle = null, children }) {
   return <>
     <div data-preview-chrome="" hidden={active} inert={active}
       className="pointer-events-none absolute inset-0 z-20">
       <ToolbarTooltipScope enabled={!active}>{children}</ToolbarTooltipScope>
     </div>
     {active ? <ToolbarTooltipScope enabled>
-      <PreviewBar name={name} controls={controls} idle={idle} />
+      <PreviewBar name={name} controls={controls} idle={idle} covered={covered} />
       {/* `panel`, under the bar (`top-9`), as tall as its content up to the room under it. Closed, it
           is off the view's right edge, out of reach and out of the accessibility tree. */}
-      {panel ? <div data-preview-panel="" data-open={panelOpen ? "" : undefined} inert={!panelOpen} aria-hidden={panelOpen ? undefined : true}
+      {panel ? <div data-preview-panel="" data-open={panelOpen ? "" : undefined} inert={!panelOpen || covered} aria-hidden={panelOpen && !covered ? undefined : true}
         className={cn("pointer-events-none absolute top-9 z-30 flex min-h-0 max-w-[calc(100%-1rem)] flex-col items-end", SIDEBAR_SLIDE_CLASS,
           panelOpen ? null : "translate-x-[calc(100%+1rem)] opacity-0")}
         style={{ right: VIEWPORT_INSET_PX, bottom: VIEWPORT_INSET_PX }}>{panel}</div> : null}
@@ -145,10 +145,10 @@ export default function PreviewChrome({ active, name = "", controls = null, pane
 
 // The navbar's row (`h-9`, a phone's 48px in `globals.css`) with no surface under it: the only part of
 // the frame that redraws as it comes and goes. The name is muted, as its controls are.
-function PreviewBar({ name, controls, idle }) {
+function PreviewBar({ name, controls, idle, covered }) {
   const shown = usePreviewShown(idle);
   const reach = shown ? "pointer-events-auto" : "pointer-events-none";
-  return <div data-preview-bar="" data-state={shown ? "visible" : "hidden"} {...idle?.hold("bar")}
+  return <div data-preview-bar="" aria-hidden={covered || undefined} inert={covered} data-state={shown ? "visible" : "hidden"} {...idle?.hold("bar")}
     className={cn("pointer-events-none absolute inset-x-0 top-0 z-30 flex h-9 items-center justify-between gap-2 px-2", PREVIEW_FADE_CLASS,
       shown ? "opacity-100" : "opacity-0")}>
     <span data-preview-name="" className={cn("min-w-0 truncate px-1 text-sm text-muted-foreground [text-shadow:0_0_6px_var(--background)]", reach)}>{name}</span>

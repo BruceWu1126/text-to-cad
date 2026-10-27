@@ -104,11 +104,15 @@ export function useViewerRuntime({
   onContextRestored,
   onInitializationError,
   onFramePresented,
+  onPreviewStatus,
+  previewMotionActive = false,
   presentationRequestRef,
   preserveInteractionPixelRatio = false,
   runtimeResetToken = 0
 }) {
   const renderModeRef = useRef(renderMode);
+  const previewStatusRef = useRef(onPreviewStatus); previewStatusRef.current = onPreviewStatus;
+  const previewMotionRef = useRef(previewMotionActive); previewMotionRef.current = previewMotionActive;
   // The view's language, read when the context is lost (in a listener that does not rerun for it).
   const { t } = useI18n();
   const tRef = useRef(t);
@@ -570,7 +574,7 @@ export function useViewerRuntime({
         const sceneChanged = interactionState.sceneChanged === true;
         const still = !sceneChanged && interactionState.shadowsDirty !== true;
         const moving = interactionState.active || cameraTransitionActive || keyboardOrbitMoved
-          || needsMoreFrames || runtimeRef.current?.previewOrbitEnabled === true
+          || needsMoreFrames || previewMotionRef.current || runtimeRef.current?.previewOrbitEnabled === true
           || document.visibilityState === "hidden";
         let refining = false;
         if (!runtimeRef.current?.viewUpdateGate?.held) {
@@ -592,12 +596,15 @@ export function useViewerRuntime({
                 renderWithSceneRig(runtimeRef.current?.sceneRig, renderer, scene, drawCamera);
                 return { refining: false };
               };
-              if (runtimeRef.current?.renderMode && previewRef.current && !softwareRendering && !runtimeRef.current.contextLost) {
+              if (runtimeRef.current?.renderMode && previewRef.current) {
                 const active = runtimeRef.current;
-                active.progressivePreview ||= createPreviewRefinement(active, { requestRender });
-                refining = renderPreviewFrame(active.progressivePreview, renderer, scene, drawCamera,
-                  { still, moving, sceneChanged }, drawRaster).refining;
-              } else refining = drawRaster().refining;
+                active.progressivePreview ||= createPreviewRefinement(active, { requestRender, onStatus: status => previewStatusRef.current?.(status) });
+                const traced = renderPreviewFrame(active.progressivePreview, renderer, scene, drawCamera,
+                  { still, moving, sceneChanged: sceneChanged && !previewMotionRef.current });
+                refining = traced.refining;
+                return traced.visible === true;
+              }
+              refining = drawRaster().refining;
             },
             presentationRequestRef?.current,
           );
@@ -925,8 +932,7 @@ export function useViewerRuntime({
             renderFrame(frameTime());
           }
         } else {
-          // Optional refinement pauses while the document is hidden. Resume it even if
-          // nothing moved while the raster picture was kept off screen.
+          // Tracing pauses while hidden. Resume it even if nothing moved off screen.
           requestRender();
         }
       };
@@ -1017,7 +1023,7 @@ export function useViewerRuntime({
         // Camera-driven paths use the closure-local requestRender and keep the
         // last shadow map.
         requestRender: () => {
-          runtimeRef.current?.progressivePreview?.invalidate({ sceneChanged: true });
+          runtimeRef.current?.progressivePreview?.invalidate(previewMotionRef.current ? { transformsChanged: true } : { sceneChanged: true });
           interactionState.shadowsDirty = true;
           interactionState.sceneChanged = true;
           requestRender();
@@ -1026,14 +1032,14 @@ export function useViewerRuntime({
         // highlight's colour, an overlay, the floor shadow's deferred bake): the shadow maps
         // it has are kept, as on a frame that only moved the camera.
         requestFrame: () => {
-          runtimeRef.current?.progressivePreview?.invalidate({ sceneChanged: true });
+          runtimeRef.current?.progressivePreview?.invalidate(previewMotionRef.current ? { transformsChanged: true } : { sceneChanged: true });
           interactionState.sceneChanged = true;
           requestRender();
         },
         drawCurrentFrame: renderNow,
         progressivePreview: null,
         invalidateShadows: () => {
-          runtimeRef.current?.progressivePreview?.invalidate({ sceneChanged: true });
+          runtimeRef.current?.progressivePreview?.invalidate(previewMotionRef.current ? { transformsChanged: true } : { sceneChanged: true });
           interactionState.shadowsDirty = true;
         },
         beginInteraction,

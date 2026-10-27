@@ -28,7 +28,7 @@ const red = new THREE.MeshStandardMaterial({ color: '#d22822', roughness: 0.55 }
 const blue = new THREE.MeshStandardMaterial({ color: '#2167db', roughness: 0.45 });
 const green = new THREE.MeshStandardMaterial({ color: '#2dab51', roughness: 0.5 });
 const metal = new THREE.MeshStandardMaterial({ color: '#c3cbd4', metalness: 1, roughness: 0.14 });
-const glass = new THREE.MeshPhysicalMaterial({ color: '#b4e6fa', transparent: true, opacity: 0.4, transmission: 0.65, roughness: 0.1 });
+const glass = new THREE.MeshPhysicalMaterial({ color: '#ffffff', opacity: 1, transmission: 1, thickness: 0.6, ior: 1.5, roughness: 0.06 });
 const box = new THREE.BoxGeometry(1.1, 1.1, 1.1);
 const painted = new THREE.Mesh(box, [red, blue, green, blue, red, green]);
 painted.position.set(-1.15, 0, 0.55); modelGroup.add(painted);
@@ -59,6 +59,7 @@ window.previewTest = {
   move: () => { moving=true; repeat.position.x=2; controller.invalidate({sceneChanged:true}); draw(); },
   orbit: () => { camera.position.set(6,-6,5); camera.lookAt(0,0.6,0.4); camera.updateMatrixWorld(); controller.invalidate({sceneChanged:false}); draw(); },
   stop: () => { moving=false; requestRender(); },
+  sustainedOrbit: () => { moving=true; let n=0; const tick=() => { if (!moving) return; n++; camera.position.set(6+0.8*Math.sin(n*0.02),-6+0.8*Math.cos(n*0.02),5); camera.lookAt(0,0.6,0.4); camera.updateMatrixWorld(); controller.invalidate({sceneChanged:false}); draw(); requestAnimationFrame(tick); }; tick(); },
   transparent: () => { camera.position.set(0,-3,18); camera.lookAt(0,0,0); camera.updateMatrixWorld(); scene.background=null; renderer.setClearAlpha(0); floor.scale.setScalar(0.5); floor.material.opacity=0.6; floor.material.transparent=true; runtime.photographicStudio.floorFade={value:0.8}; controller.invalidate({sceneChanged:true}); requestRender(); },
   emptyPatch: () => {
     const ray = new THREE.Raycaster();
@@ -161,17 +162,32 @@ async function open(t, fallback = false) {
   return { page, errors, logs };
 }
 
-test('a browser without WebGPU keeps the raster picture and disposes cleanly', async t => {
+test('a browser without WebGPU reports an unavailable tracer and disposes cleanly', async t => {
   const { page, errors } = await open(t, true);
-  const before = await page.locator('canvas').screenshot();
   await page.evaluate(() => window.previewTest.start());
   await page.waitForFunction(() => window.previewTest.progress().state === 'fallback');
   assert.equal(await page.evaluate(() => window.previewTest.capture()), null);
   assert.equal(await page.evaluate(() => window.previewTest.canvases()), 1);
-  assert.deepEqual(await page.locator('canvas').screenshot(), before, 'fallback preserves the raster output');
   await page.evaluate(() => window.previewTest.dispose());
   assert.equal(await page.evaluate(() => window.previewTest.canvases()), 1);
   assert.deepEqual(errors, []);
+});
+
+test('Preview offers retry and exit when WebGPU is unavailable', async t => {
+  const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
+  t.after(() => page.close());
+  await page.addInitScript(() => Object.defineProperty(navigator, 'gpu', { value: undefined }));
+  await page.goto(`http://127.0.0.1:${server.address().port}/ui/?file=pair.glb`);
+  const pane = page.getByTestId('one');
+  await page.waitForFunction(() => window.cadHarness?.a.controller?.readState().loading === false);
+  await pane.getByRole('button', { name: 'Preview', exact: true }).click();
+  const cover = pane.locator('[data-preview-cover]');
+  await cover.getByRole('alert').waitFor({ state: 'visible' });
+  assert.match(await cover.innerText(), /WebGPU unavailable/);
+  await cover.getByRole('button', { name: 'Retry', exact: true }).click();
+  await cover.getByRole('alert').waitFor({ state: 'visible' });
+  await cover.getByRole('button', { name: 'Exit preview', exact: true }).click();
+  await pane.locator('[data-preview-view]').waitFor({ state: 'detached' });
 });
 
 test('the real Preview viewport traces, captures and restores the editor on exit', async t => {
@@ -199,23 +215,7 @@ test('the real Preview viewport traces, captures and restores the editor on exit
   const progress = await page.evaluate(() => window.__cadStage().pathTracing);
   assert.notEqual(progress.state, 'fallback', JSON.stringify(progress));
   t.diagnostic(`Real Preview ${JSON.stringify(await page.evaluate(() => ({...window.previewTimings, progress: window.__cadStage().pathTracing})))}`);
-  if (artifacts) {
-    await page.screenshot({path: join(artifacts, 'preview-ui-traced.png')});
-    // The raster canvas retains the studio picture drawn immediately before the
-    // traced layer became visible. Show it briefly for the review comparison.
-    await pane.locator('[data-preview-view] canvas').evaluateAll(canvases => canvases.forEach((canvas, i) => {
-      canvas.dataset.savedVisibility = canvas.style.visibility;
-      canvas.dataset.savedOpacity = canvas.style.opacity;
-      canvas.style.visibility = i === 0 ? 'visible' : 'hidden';
-      if (i === 0) canvas.style.opacity = '1';
-    }));
-    await page.screenshot({path: join(artifacts, 'preview-ui-raster.png')});
-    await pane.locator('[data-preview-view] canvas').evaluateAll(canvases => canvases.forEach(canvas => {
-      canvas.style.visibility = canvas.dataset.savedVisibility; canvas.style.opacity = canvas.dataset.savedOpacity;
-      delete canvas.dataset.savedVisibility; delete canvas.dataset.savedOpacity;
-    }));
-    t.diagnostic(`Review images: ${artifacts}`);
-  }
+  if (artifacts) await page.screenshot({path: join(artifacts, 'preview-ui-traced.png')});
   // The raster canvas remains the controls' event target even when the traced
   // picture covers it. Exercise a real wheel gesture after convergence.
   const rasterCanvas = pane.locator('[data-preview-view] canvas').first();
@@ -303,10 +303,16 @@ test('hardware Preview converges on authored parts, resets for motion and releas
   assert.ok(red > 30 && blue > 30 && dark > 100, `authored face paints and shaded geometry survive: ${JSON.stringify({red,blue,dark})}`);
   assert.deepEqual(await page.evaluate(() => window.previewTest.source()), { sameGeometry: true, material: 'd22822', boundsTree: false }, 'tracing leaves shared source geometry and authored materials untouched');
   await page.evaluate(() => window.previewTest.orbit());
-  assert.equal(await page.evaluate(() => window.previewTest.capture()), null, 'a new camera immediately hides the old accumulated picture');
+  assert.ok(await page.evaluate(() => window.previewTest.capture()), 'a new camera retains the last traced picture while it updates');
   await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.denoisedSamples > 0 && window.previewTest.capture() !== null; }, null, { timeout: 120000 });
+  const previousFrames = await page.evaluate(() => window.previewTest.progress().presentedFrames);
+  await page.evaluate(() => window.previewTest.sustainedOrbit());
+  await page.waitForFunction(count => window.previewTest.progress().presentedFrames >= count + 2, previousFrames, { timeout: 120000 });
+  assert.ok(await page.evaluate(() => window.previewTest.progress().motion), 'continuous camera motion presents new traced frames');
+  await page.evaluate(() => window.previewTest.stop());
+  await page.waitForFunction(() => !window.previewTest.progress().motion, null, { timeout: 120000 });
   await page.evaluate(() => window.previewTest.move());
-  assert.equal(await page.evaluate(() => window.previewTest.capture()), null, 'motion exposes the immediate raster frame');
+  assert.ok(await page.evaluate(() => window.previewTest.capture()), 'scene motion retains a traced picture');
   await page.evaluate(() => window.previewTest.stop());
   await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.denoisedSamples > 0; }, null, { timeout: 120000 });
   // A denoised image must keep the tracer's transparent background coverage.

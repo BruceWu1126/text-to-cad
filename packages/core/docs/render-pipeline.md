@@ -63,8 +63,8 @@ The stages keep ownership narrow:
   as the other: three sorts each object back to front and draws a two-sided one back faces first,
   OCCT draws them as they were displayed, which is most of what still differs.
 - `captureModel` draws the scene headless and returns its pictures, with no filesystem
-  writes. cadgen's regular stills are OCCT's; Preview stills and animation frames use this
-  headless scene, which the renderer parity measurement also drives beside OCCT.
+  writes. cadgen's stills are OCCT's (`cadgen snapshot`); this headless scene is used by
+  the renderer parity measurement beside OCCT (`scripts/bench/occt_parity.py`).
 
 ## Modules
 
@@ -83,10 +83,10 @@ anything else (a per-mode tree, a style group) fails validation.
 ```
 
 Preview's photographic look (Render) is no mode: it is asked for on its own, by the
-viewer's Preview and a snapshot's `preview`, over the same display. Its own settings
+viewer's Preview and the parity page, over the same display. Its own settings
 (`PreviewSettings`: `parts`, `lighting`, `background`, `floor`) are the viewer's,
 kept beside the display, never in it (`normalizePreviewSettings`,
-`resolvePreviewSettings`, `previewSettingsChanged`); a snapshot accepts the same settings and defaults. `readViewSettings` and `readPreviewSettings` read a stored record setting
+`resolvePreviewSettings`, `previewSettingsChanged`). `readViewSettings` and `readPreviewSettings` read a stored record setting
 by setting, leaving out what this build cannot read, without rewriting it.
 
 `resolveViewSettings` returns the established renderer groups. Solid is shaded with
@@ -119,7 +119,7 @@ and normal effect colors. A mesh with several materials uses its first material
 as its cap color; texture and vertex-color variation are not sampled.
 
 `resolveViewSceneSettings({display, preview, previewSettings, camera, appearance, quality})` is the public
-Viewer/snapshot scene-policy boundary (`preview`: Render over the display, as above). Its `view` is the full grouped state;
+Viewer/parity-page scene-policy boundary (`preview`: Render over the display, as above). Its `view` is the full grouped state;
 `display` is the historical internal draw policy, including `surfaces` and
 edge color/visibility. `camera` combines the top-level pose with the grouped
 lens. Public top-level and per-output cameras contain pose/framing only;
@@ -155,9 +155,9 @@ the origin visible. Depth fitting includes the actual floor elevation;
 orthographic views can use a signed near plane when the floor crosses the eye.
 
 Lighting quality is `preview` or `final`, mapping to standard/high scene policy.
-The viewer and Preview snapshots default to `lightingQuality: "preview"`; an explicit
-Preview `lighting.quality` selects `final` in either caller. The path tracer converges
-at 128 samples for Preview or 256 for Final before its headless capture.
+The viewer defaults to `lightingQuality: "preview"`; an explicit Preview
+`lighting.quality` selects `final`. The path tracer converges at 128 samples for
+Preview or 256 for Final.
 Final is the High scene preset: 4096px spotlight shadows, a 512px procedural environment
 and 2x snapshot capture, and a still view in the viewer converges over 64 samples of the
 studio's frame (Preview: 32). `output.renderScale` is an explicit raster override; every
@@ -189,12 +189,12 @@ default backdrop color.
 
 #### Progressive viewer Preview
 
-`lib/preview-tracing/progressivePreview.js` adds an optional WebGPU path tracer to the
-interactive viewer's Preview. It leaves the raster studio available during preparation and
-motion, replaces its picture after a completed denoising pass, and stops scheduling after
-its sample/work budget. Camera, pose, material, lighting and viewport changes invalidate
-accumulation. Failures restore the raster picture; a late preparation cannot attach to a
-closed view. A headless Preview frame drives this same controller to its complete denoised sample budget; it reports failure instead of returning a raster approximation. A persistent session reuses the device, networks, environment and prototype BVHs across rigid animation frames, refitting their transforms. Native XBF animation uses AP242 configuration-sequence motions; GLB animation uses its authored glTF clips. Traced snapshots reject annotations, measurements, clipping and unsupported deformed geometry instead of omitting them; ordinary stills keep their existing OCCT path.
+`lib/preview-tracing/progressivePreview.js` draws interactive Preview through one WebGPU
+path tracer. The view stays covered while the first usable traced image prepares. Motion
+presents bounded low-resolution traced frames with the same light transport and bounce
+limits, then refines a still view to its denoised sample budget. Camera, pose, material,
+lighting and viewport changes invalidate accumulation. An unsupported scene or device
+shows an error with retry and exit; a late preparation cannot attach to a closed view.
 
 `scene.js` adapts the visible PBR meshes, preserving material arrays, face groups, vertex
 colours and world transforms. BVHs are prepared in a worker over private prototype copies;
@@ -209,7 +209,7 @@ against the device before upload. The scene's estimated additional CPU/GPU alloc
 capped at 512 MiB and each storage binding at the lesser of the device limit and 256 MiB;
 ray pools, denoising and render targets have separate limits. Actual worker-built BVH sizes
 and top-level primitive counts are checked before packing. A scene that
-cannot be represented faithfully stays entirely on the raster path. The tracer uses the
+cannot be represented faithfully reports an error. The tracer uses the
 same procedural studio cards and sweep, sampled into an owned equirectangular HDR texture
 by `common/environmentMap.js`; it needs no downloaded lighting asset. The environment
 supplies both direct illumination and reflections, without duplicating the raster shadow
@@ -224,11 +224,9 @@ normal guides. Separate network instances keep each pass's input shader and outp
 independent; the additional alpha output uses 16 bytes per pixel, plus its bounded tile
 working memory. It keeps the previous completed picture visible while filtering the next one,
 and lets the tracer's presentation pass apply tone mapping once. The pinned model and its
-license ship with both page bundles; inference needs no external request. A denoising error
-restores the raster studio.
+license ship with both page bundles; inference needs no external request. A denoising error is reported in Preview.
 
-A one-million-pixel cap bounds render targets, a ray budget bounds each update, and only one GPU batch is in
-flight. A finite update budget stops work even if sample readback stalls; on exhaustion,
+Interactive Preview caps its render targets at one million pixels. A ray budget bounds each update and only one GPU batch is in flight. A finite update budget stops work even if sample readback stalls; on exhaustion,
 the best available image is denoised and diagnostics report `budgetExhausted` rather than
 claiming target convergence. Hidden documents pause tracing until visible again. These are
 implementation limits, not new UI controls.
@@ -579,7 +577,8 @@ that rest box.
 
 It does not write files: its caller does. Consumers use compiled `@text-to-cad/core`
 exports; the OCCT parity bench bundles this entrypoint into a snapshot page of its own, built
-on demand and loads it in headless Chromium to compare with OCCT's stills. cadgen bundles the same entry for Preview stills and animation; regular stills use OCCT.
+on demand outside the wheel, and loads it in headless Chromium to compare with OCCT's stills.
+cadgen's own snapshots are drawn by OCCT and never load it.
 
 ### `common/headlessScene.js`
 

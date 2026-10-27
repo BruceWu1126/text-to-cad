@@ -18,8 +18,8 @@ screenshot the card to confirm your own work ([Pictures](../SKILL.md#pictures)).
 - [Targeted additions](#targeted-additions)
 - [Diagnostic review](#diagnostic-review)
 
-`cadgen snapshot SRC OUT.png` draws SRC into a PNG. Normal display modes use OCCT;
-`--preview` uses the same progressive path tracer and guided denoiser as Viewer Preview. SRC is a model's id (the `id:` line its run printed: drawn from the document
+`cadgen snapshot SRC OUT.png` draws SRC as the CAD Viewer draws it, rendered by OCCT,
+into a PNG. SRC is a model's id (the `id:` line its run printed: drawn from the document
 the engine holds, as it is, and nothing is built), a document file (`.xbf`, `.step`), a
 mesh (`.stl`, `.3mf`, `.glb`), a robot (`.urdf`, `.sdf`, `.srdf`) or a drawing (`.dxf`). A
 script is never a source. Nothing is written but OUT.
@@ -27,7 +27,6 @@ script is never a source. Nothing is written but OUT.
 ```bash
 cadgen snapshot "$ID" tmp/review.png
 cadgen snapshot "$ID" tmp/review.png --display hidden-line --grid --camera top
-cadgen snapshot "$ID" tmp/review.png --preview
 ```
 
 A face the mesher left without triangles is drawn without it and named in a
@@ -78,39 +77,7 @@ inline or as a JSON file: `mode`, `grid`, `appearance` (`light` or `dark`), `cam
 document of one part. Unknown keys and out-of-range values are refused.
 
 `--grid` draws the measuring grid (red X and green Y axes) under the model.
-`--preview` draws through the Viewer's progressive path tracer and waits for the full denoised
-quality target. It fails if tracing is unavailable, the scene is unsupported or its budget is
-exhausted; it never substitutes a raster image. The installed browser and bundled render assets
-run locally. If no supported browser is installed, run `cadgen doctor --install-browser` once.
-An optional JSON object supplies the Viewer's `parts`, `lighting`, `background` and `floor`
-settings. Quality and exposure belong inside `lighting`:
-
-```bash
-cadgen snapshot "$ID" tmp/studio.png --preview '{"lighting":{"quality":"final","exposure":0}}'
-```
-
-Native Preview keeps `display.hidden` and `display.isolated` part/assembly references. Robot
-Preview takes exact visual IDs (`link:v1`). Browser renders of direct mesh files refuse these
-selectors explicitly; ordinary OCCT snapshots retain their existing support.
-
-`--animation [NAME]` writes an MP4 of an authored routine, with the camera fixed across its
-frames. An XBF's AP242 configuration sequence or a glTF animation clip is sampled at authored
-seconds `i / fps`; no camera turntable is invented. Omit NAME only when exactly one routine
-exists. A STEP that carries no sequence cannot animate. `--fps` is 1–60, default 30; frames
-number `ceil(duration * fps)`. The movie therefore ends within one frame of the authored duration.
-
-```bash
-cadgen snapshot "$ID" tmp/swing.mp4 --animation swing --fps 30
-cadgen snapshot assembly.glb tmp/slide.mp4 --animation slide --preview
-```
-
-Without `--preview`, animation uses the shared browser raster renderer; with it, every frame
-waits for the completed path-traced image. Animation defaults to 1280 × 720 and supports even
-sizes up to 1920 × 1080, at most 3,600 frames, 300 seconds per frame and one hour per operation.
-A missing or ambiguous routine, unavailable encoder or failed frame leaves an existing output
-unchanged. MP4 has no alpha: partial coverage is composited over the configured background colour
-(white by default, or `#202226` for Dark). Animation cannot combine with `--pose`, annotations,
-measurements or `--job`.
+Snapshot draws technical OCCT images. Photographic Preview is available in the browser viewer.
 
 `--camera` is a preset (`iso`, `front`, `back`, `left`, `right`, `top`, `bottom`),
 an `azimuth:elevation` pair in degrees, a camera object (`position`, `target`, `up`,
@@ -233,7 +200,7 @@ still on it.
 ## Mesh files, robots and drawings
 
 - **A mesh** (`.stl`, `.3mf`, `.glb`) takes every display mode, the grid, clip,
-  Explode (a file of several parts), Preview and annotations; `--pose` is refused: a
+  Explode (a file of several parts) and annotations; `--pose` is refused: a
   mesh has no mechanism. A GLB is drawn at rest, its clips not played; its materials
   and base colour textures are drawn.
 - **A robot** (`.urdf`, `.sdf`, `.srdf`) is its links' visuals, each link one colour

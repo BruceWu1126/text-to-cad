@@ -451,6 +451,7 @@ it("Projection, Display and Preview end the strip; Render is no mode of Display'
 // Preview, entered as its tile enters it: the view covered first, then Preview under the cover.
 async function enterPreview(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'Preview' }));
+  await waitFor(() => expect(document.querySelector('[data-preview-cover]')).toBeNull());
   await screen.findByRole('button', { name: 'Exit preview' });
 }
 const previewSettings = () => screen.queryByRole('region', { name: 'Preview settings' });
@@ -535,16 +536,15 @@ it("Preview is in Render: the strip, the view's controls, the stack and the file
   expect([displayMenu(), displayLit()]).toEqual([null, false]);
 });
 
-it("Preview answers the press with a cover and reveals the first loaded raster frame while it refines", async () => {
+it("Preview answers the press with a cover and reveals the first traced frame", async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
   try {
     frame();
     const cover = () => document.querySelector('[data-preview-cover]');
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
     // The press is answered at once, before Preview itself is entered under it.
-    expect(cover()?.textContent).toBe('Preparing preview…');
-    // The mock viewport reports its first loaded frame on mount. Refinement has no
-    // bearing on presentation: the cover lifts without a minimum duration or sample wait.
+    expect(cover()?.textContent).toContain('Preparing preview…');
+    // The mock viewport reports its first presentable traced frame on mount.
     for (let step = 0; cover() && step < 20; step++) {
       await act(async () => { await vi.advanceTimersToNextTimerAsync(); });
     }

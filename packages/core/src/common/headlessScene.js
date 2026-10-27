@@ -103,20 +103,7 @@ const XBF_FAMILY = Object.freeze({
   // The document the xbf renderer loads (`useXbfScene`): its structure and part buffers, read
   // from the engine that serves it (`resolved.url`, the document's API URL).
   load: job => loadXbfDocument(jobUrl(job)),
-  build(THREE, document, job) {
-    const scene = createXbfScene(THREE, document);
-    try {
-      if (job?.jointValues != null) scene.setPose(job.jointValues);
-      const hidden = job?.resolved?.hiddenParts;
-      if (hidden != null) {
-        if (!Array.isArray(hidden) || hidden.some(id => typeof id !== 'string' || !scene.hasPart(id))) {
-          throw new Error('Snapshot hiddenParts must name existing XBF instances');
-        }
-        scene.setHiddenParts(hidden);
-      }
-      return scene;
-    } catch (error) { scene.dispose(); throw error; }
-  },
+  build: (THREE, document) => createXbfScene(THREE, document),
   release: document => document.release()
 });
 

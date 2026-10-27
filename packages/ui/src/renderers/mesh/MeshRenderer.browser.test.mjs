@@ -57,7 +57,7 @@ const HARNESS_SIZE = '<style>#root > div { width: 800px !important; height: 500p
 let server, browser;
 const requests = [];
 before(async () => {
-  const { bundle } = await harnessBundle();
+  const { bundle } = await harnessBundle({ mockPreview: true });
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
   server = createServer((request, response) => {
     const url = new URL(request.url, 'http://test');

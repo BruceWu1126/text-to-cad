@@ -136,12 +136,11 @@ echo "   $scratch_sp/cadgen-lazy-kernel.pth"
 step "Assets resolve to the packaged runtime"
 "$VENV/bin/python" - <<'PY' || exit 1
 import sys
-from cadgen.assets import viewer_dist_dir, snapshot_dist_dir
+from cadgen.assets import viewer_dist_dir
 from cadgen.mcp.ui import app_dir
 for label, resolved in (
     ("CAD Viewer client", viewer_dist_dir()),
     ("CAD app page", app_dir()),
-    ("Snapshot renderer", snapshot_dist_dir()),
 ):
     if "site-packages" not in str(resolved):
         sys.exit(f"FAIL: {label} resolved outside the wheel: {resolved}")
@@ -243,21 +242,15 @@ mkdir -p "$EMPTY/models"
 cat >"$EMPTY/models/probe.py" <<'PY'
 # A model script explicitly calls its model, writing what its decorators declare. Deliberately the simplest one that exists: this checks that an installed cadgen can
 # build at all, not that it models anything interesting.
-from cadgen.engine import step, stl, xbf, glb
-from cadgen.gltf import animation
+from cadgen.engine import step, stl, xbf
 import build123d as bd
 
 
 @xbf("XBF/probe.xbf")
 @step("probe.step")
 @stl("probe.stl")
-@glb("probe.glb")
 def probe():
-    cube = bd.Box(10, 10, 10)
-    cube.label = "cube"
-    result = bd.Compound(children=[cube], label="probe")
-    animation(result, "slide", duration=0.5).translation("cube", by=(3, 0, 0))
-    return result
+    return bd.Box(10, 10, 10)
 
 
 if __name__ == "__main__":
@@ -266,7 +259,7 @@ PY
 # Running the script IS the build: no CLI verb takes its place. Run as a skill runs it: cadgen +V run.
 "$CADGEN_COMMAND" "+$VERSION_INSTALLED" run models/probe.py >"$WORK/build.log" 2>&1 \
   || { cat "$WORK/build.log" >&2; fail "cadgen +$VERSION_INSTALLED run <model>.py"; }
-for written in XBF/probe.xbf probe.step probe.stl probe.glb; do
+for written in XBF/probe.xbf probe.step probe.stl; do
   [ -s "$EMPTY/models/$written" ] \
     || { cat "$WORK/build.log" >&2; fail "the model script did not write models/$written"; }
 done
@@ -281,18 +274,5 @@ for written in exported.step exported.stl; do
   [ -s "$EMPTY/models/$written" ] || { cat "$WORK/export.log" >&2; fail "export wrote no models/$written"; }
 done
 echo "   wrote a STEP and an STL from the document"
-
-step "Export an authored animation with the installed renderer and encoder"
-# This machine needs no WebGPU: the explicit raster path verifies the packaged
-# browser/worker/codec boundary. Hardware Preview quality has its own tests.
-"$CADGEN_COMMAND" "+$VERSION_INSTALLED" snapshot models/probe.glb models/probe.mp4 \
-  --animation slide --fps 4 --width 240 --height 180 >"$WORK/snapshot.log" 2>&1 \
-  || { cat "$WORK/snapshot.log" >&2; fail "installed animation snapshot"; }
-"$VENV/bin/python" - <<'PY' || exit 1
-from pathlib import Path
-video = Path("models/probe.mp4").read_bytes()
-assert len(video) > 1000 and b"ftyp" in video[:32], "snapshot did not encode an MP4"
-print(f"   encoded {len(video)} bytes outside the source checkout")
-PY
 
 printf '\nInstalled-mode checks passed.\n'
