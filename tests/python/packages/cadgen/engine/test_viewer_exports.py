@@ -56,24 +56,70 @@ class ViewerExportsTest(unittest.TestCase):
 class ViewerExportHttpTest(unittest.TestCase):
     def setUp(self):
         import os
+        from tests.python.support import engine_daemon
+
         self.tmp = tempfile.TemporaryDirectory(prefix="viewer-export-http-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name).resolve() / "models"
         self.root.mkdir()
-        environment = patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(Path(self.tmp.name) / "engine")})
+        self.env = engine_daemon.watched(
+            {**os.environ, "CADGEN_ENGINE_DIR": str(Path(self.tmp.name) / "engine")}, self.addCleanup)
+        environment = patch.dict(os.environ, self.env)
         environment.start()
         self.addCleanup(environment.stop)
         self.addCleanup(self.stop_engine)
 
     def stop_engine(self):
+        import os
+        import time
+
         from cadgen.engine.client import request, wait_gone
         from tests.python.support import engine_daemon
 
+        # Keep native handles to this test's processes before asking them to exit. The old
+        # observation (the daemon's PID and GetExitCodeProcess through ctypes) said "gone"
+        # while Windows still refused to remove the empty working directory. A signaled
+        # handle distinguishes a surviving process from a false-negative PID observation.
+        handles = []
+        if os.name == "nt":
+            import _winapi
+
+            for role, pid in engine_daemon._processes(self.env):
+                try:
+                    # SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE
+                    handle = _winapi.OpenProcess(0x100000 | 0x1000 | 1, False, pid)
+                except OSError as error:
+                    if error.winerror != 87:  # ERROR_INVALID_PARAMETER: that process is already gone
+                        raise
+                else:
+                    handles.append((role, pid, handle))
         answer = request({"op": "pid"}, start=False)
-        request({"op": "stop"}, start=False)
-        self.assertTrue(wait_gone(30), "test engine must release its Windows working directories")
-        self.assertTrue(engine_daemon.await_exit(answer["pid"] if answer else None),
-                        "the stopped engine leaves the test's folder")
+        try:
+            request({"op": "stop"}, start=False)
+            self.assertTrue(wait_gone(30), "test engine must release its Windows working directories")
+            observed_exit = engine_daemon.await_exit(answer["pid"] if answer else None)
+            remaining = []
+            for role, pid, handle in handles:
+                if _winapi.WaitForSingleObject(handle, 0) != _winapi.WAIT_OBJECT_0:
+                    entry = Path(self.env[engine_daemon.JOURNAL], f"{role}-{pid}.txt").read_text(encoding="utf-8")
+                    remaining.append(f"{role} {pid}: exit={_winapi.GetExitCodeProcess(handle)}, "
+                                     f"PID observer alive={engine_daemon._alive(pid)}; {entry}")
+            self.assertTrue(observed_exit and not remaining,
+                            f"stop must release the test's working directory {self.tmp.name}; "
+                            f"daemon={answer}, await_exit={observed_exit}; native handles still unsignaled:\n"
+                            + "\n".join(remaining))
+        finally:
+            # Failure remains a failure. Wait for owned processes only so its diagnostics do
+            # not leave a locked directory or live engine behind; never retry the test.
+            deadline = time.monotonic() + 30
+            for _role, _pid, handle in handles:
+                try:
+                    wait = max(0, int((deadline - time.monotonic()) * 1000))
+                    if _winapi.WaitForSingleObject(handle, wait) != _winapi.WAIT_OBJECT_0:
+                        _winapi.TerminateProcess(handle, 1)
+                        _winapi.WaitForSingleObject(handle, 30000)
+                finally:
+                    _winapi.CloseHandle(handle)
 
     def test_live_model_export_through_authenticated_session_and_worker(self):
         import contextlib
