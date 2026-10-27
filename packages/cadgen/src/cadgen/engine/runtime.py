@@ -132,7 +132,7 @@ def dependencies() -> str:
             # metadata.files stats every wheel entry before we can filter it. Read the same
             # inventory directly; the stamps below check the runtime files once. Legacy/custom
             # distributions without RECORD keep importlib.metadata's own inventory semantics.
-            entries = (row[0] for row in csv.reader(io.StringIO(record)) if row) if record is not None else (
+            entries = (row[0] for row in csv.reader(io.StringIO(record)) if row) if record else (
                 str(entry) for entry in dist.files or ())
             files = [os.path.normpath(os.path.join(base, entry)) for entry in entries
                      if os.path.splitext(entry)[1].lower() in _SOURCE

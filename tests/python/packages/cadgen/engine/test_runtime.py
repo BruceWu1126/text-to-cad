@@ -66,7 +66,7 @@ class RuntimeTest(unittest.TestCase):
         from importlib import metadata
 
         self.addCleanup(runtime._records.clear)
-        for inventory in ("record", "legacy"):
+        for inventory in ("record", "legacy", "empty-record"):
             with self.subTest(inventory=inventory), tempfile.TemporaryDirectory() as folder:
                 root = Path(folder)
                 source, stub = root / "custom,geometry.py", root / "custom.pyi"
@@ -79,6 +79,8 @@ class RuntimeTest(unittest.TestCase):
                     (info / "RECORD").write_text(
                         '"custom,geometry.py",,\ncustom.pyi,,\nmissing.py,,\ncustom-1.dist-info/METADATA,,\n',
                         encoding="utf-8")
+                elif inventory == "empty-record":
+                    (info / "RECORD").write_text("", encoding="utf-8")
                 dist = metadata.Distribution.at(info)
                 listing = mock.PropertyMock(side_effect=AssertionError("full distribution inventory walked")) if (
                     inventory == "record") else mock.PropertyMock(return_value=[
