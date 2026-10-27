@@ -399,8 +399,6 @@ export default {
   "chip.more": "{count}개 더",
   "chip.moreReferences": "참조 더 보기",
   "chip.references": "참조",
-  "prompt.addToPrompt": "프롬프트에 추가",
-  "prompt.copyForPrompt": "프롬프트용으로 복사",
   "measure.perpendicular": "수직 거리",
   "measure.centreToCentre": "중심 간 거리",
   "measure.shortest": "최단 거리",

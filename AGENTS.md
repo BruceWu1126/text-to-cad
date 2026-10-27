@@ -284,5 +284,8 @@ no tracked symlink, no `.gitattributes` rule that rewrites files at checkout or
 changes the archive (so no Git LFS; the repository root is the plugin, and
 claude.ai's plugin directory refuses files a filter rewrites), every tracked file
 under 5 MiB, no skill reaching into a repo root. Heavyweight media stays out of
-the tree. Local hooks live in `.githooks` and delegate build checks through
-`scripts/git-hooks/pre-commit`.
+the tree. Git holds code, never CAD or mesh assets (a STEP, STL, GLB, 3MF, XBF or DXF is
+made at run time, in a temporary folder or a gitignored output folder):
+`tests/python/global/test_no_cad_assets_tracked.py` fails on a tracked one but for its short
+allowlist, a reason and a size cap each. Local hooks live in `.githooks` and delegate build
+checks through `scripts/git-hooks/pre-commit`.

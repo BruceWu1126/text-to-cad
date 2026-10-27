@@ -45,10 +45,6 @@
       "types": "./dist/file-viewer/presentation.d.ts",
       "import": "./dist/file-viewer/presentation.js"
     },
-    "./file-viewer/empty": {
-      "types": "./dist/file-viewer/empty.d.ts",
-      "import": "./dist/file-viewer/empty.js"
-    },
     "./host": {
       "types": "./dist/host/index.d.ts",
       "import": "./dist/host/index.js"

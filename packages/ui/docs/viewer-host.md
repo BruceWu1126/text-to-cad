@@ -261,8 +261,9 @@ JSON file by its label and path (the views' `.snapshot.json`, an
 No pictures are rendered, attached or sent.
 
 
-`PromptContextAction` (a host renderer's prompt action) reads the subscribed
-destination and labels the action Add to prompt or Copy for prompt. It calls delivery during the
+A renderer's prompt action (the shell's, Quick Edit's, the drawing renderer's) reads the
+subscribed destination (`usePromptDestination`) to decide what it offers: delivery to the
+composer where the destination is one, a copy through the clipboard otherwise. It calls delivery during the
 user gesture, before awaiting capture: browser activation and desktop destination
 binding depend on this. Availability and advertised attachment/combination limits
 belong to the host. Every result is acknowledged: added, copied, sent, partial,

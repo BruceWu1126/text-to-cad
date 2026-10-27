@@ -134,8 +134,7 @@ controls photographic illumination and PMREM allocation. `theme` retains the
 neutral workbench recipe whenever photographic lighting is disabled, including
 when a custom background or floor is present. Consumers build CAD models with
 `surfaceSettings: resolved.view.surfaces` and the resolved edges; they must not
-reapply historical mode-owned edge forcing. `resolveSceneSettings()` remains an
-internal compatibility resolver for older low-level consumers.
+reapply historical mode-owned edge forcing.
 
 Background opacity follows the ordinary alpha convention: 0 is transparent and
 1 is opaque. Fractional alpha is carried by the renderer clear color with
@@ -365,7 +364,7 @@ drawn grid's span and the camera's target as pivot).
 ### Display modes, CAD edges and geometry sharing
 
 Internal draw modes are `shaded`, `shaded_edges`, `transparent`,
-`hidden_edges`, `hidden_lines_removed`, `unshaded`, `wireframe` and `render`
+`hidden_edges`, `hidden_lines_removed`, `unshaded` and `wireframe`
 (`common/displaySettings.js`). Public presets resolve to those implementation details plus independent surface and
 edge settings; never feed a public preset into `normalizeDisplayMode()`. Normal CAD
 keeps authored albedo, opacity and finish. Workbench PBR channels are fallbacks;

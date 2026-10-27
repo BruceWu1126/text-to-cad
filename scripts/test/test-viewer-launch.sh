@@ -64,8 +64,8 @@ if ! pick_interpreter; then
   exit 1
 fi
 export VIEWER_RUNTIME_DIR="$RUNTIME"
-"$PYTHON" - "$REPO_ROOT/tests/fixtures/cad/import-smoke.step" <<'PYTHON'
-import json, os, shutil, subprocess, sys, tempfile
+"$PYTHON" - <<'PYTHON'
+import json, os, subprocess, sys, tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -88,8 +88,13 @@ with tempfile.TemporaryDirectory(prefix="cv-") as temporary:
         assert first["pid"] == again["pid"] and first["port"] == again["port"]
         with urlopen(Request(first["apiUrl"]+"/__cad/server", headers={"Authorization": "Bearer "+first["token"]})) as response:
             assert json.load(response)["pid"] == first["pid"]
+        # The STEP the page imports: one cylinder, written by build123d's own STEP export, so that no
+        # CAD file is committed.
+        import build123d as bd
+        part = bd.Pos(42, 0, 2) * bd.Cylinder(3, 14)
+        part.label = "smoke"
         fixture = root / "smoke.step"
-        shutil.copyfile(sys.argv[1], fixture)
+        bd.export_step(part, str(fixture))
         # A launch given a file registers it and lands on its page, /<id>.
         opened = launch(str(fixture))
         assert opened["pid"] == first["pid"]

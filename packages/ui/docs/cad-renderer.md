@@ -753,7 +753,7 @@ construction or ever.
 renderer built without one gets). They hold the tool stack's layout and — for the
 host — the appearance and the home's layout. The playback settings (Orbit's speed, Autoplay, Speed and
 Loop) are not preferences: they are each file's own (`playback`, below). App light/dark appearance selects Inspect's
-fixed workbench basis, including the empty CAD stage; the settings contain no theme
+fixed workbench basis; the settings contain no theme
 choice or custom scene settings.
 
 **A file's view** is `files[[path, renderer id]]`, kept for the file on screen alone
@@ -907,8 +907,6 @@ axes and retains its snap and drag interactions.
 
 See [settings controls](settings-ui.md), [render types](render-types.md)
 and [renderer contracts](renderers.md) for changes inside the shared package.
-
-The optional `@text-to-cad/ui/file-viewer/empty` entry exports `EmptyCadBackdrop`, a host's empty-state backdrop. It lazily mounts an empty CAD viewport with the host’s `colorScheme`, and overlays its `children`. It owns no file access, catalog subscription, or persisted state. This puts the original grid and camera behind a host's own page without loading CAD into the file viewer. Its stage (`file-viewer/EmptyCadStage.tsx`) is `ShellViewport` with a null scene, built out of the kit alone: the file viewer MOUNTS a renderer through the registry and imports none itself, because a static edge into a slice pulls that family — and three.js with it — into every host that shows any file at all. `scripts/test/check-kit-boundaries.mjs` enforces that alongside the kit and slice rules.
 
 ## STEP and source separation
 

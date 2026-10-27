@@ -86,36 +86,9 @@ test("display mode vocabulary is canonical", () => {
   for (const mode of Object.values(CAD_DISPLAY_MODE)) {
     assert.equal(normalizeDisplaySettings({ mode }).mode, mode);
   }
-  for (const alias of ["solid", "rendered", "edges", "shaded-with-edges", "x-ray", "theme", "wire"]) {
+  for (const alias of ["render", "solid", "rendered", "edges", "shaded-with-edges", "x-ray", "theme", "wire"]) {
     assert.throws(() => normalizeDisplaySettings({ mode: alias }), /Unknown display mode/);
   }
-});
-
-test("render display settings share the viewer envelope and exclude camera", () => {
-  const display = normalizeDisplaySettings({
-    mode: "render",
-    render: {
-      studio: "dark",
-      quality: "preview",
-      exposure: 1,
-      lighting: { rotation: 30, size: 1.5, fill: 0.4 },
-      backdrop: { color: "#123456", transparent: false, ground: true, groundPlacement: "origin" }
-    },
-    clip: { enabled: true, axis: "x", at: 0.25 },
-    exploded: { enabled: true, amount: 0.5 }
-  });
-  assert.equal(display.mode, CAD_DISPLAY_MODE.RENDER);
-  assert.equal(display.render.studio, "dark");
-  assert.equal(display.clip.enabled, true);
-  assert.equal(display.exploded.amount, 0.5);
-  assert.throws(
-    () => normalizeDisplaySettings({ mode: "render", render: { camera: { preset: "front" } } }),
-    /Unsupported display\.render fields: camera/
-  );
-  assert.throws(
-    () => normalizeDisplaySettings({ mode: "shaded", render: { studio: "light" } }),
-    /requires display\.mode 'render'/
-  );
 });
 
 test("grid color and opacity stay optional and validate at the shared display boundary", () => {
@@ -128,9 +101,6 @@ test("grid color and opacity stay optional and validate at the shared display bo
     { enabled: false });
   for (const grid of [{ color: "red" }, { opacity: -0.1 }, { opacity: 1.1 }, { opacity: true }]) {
     assert.throws(() => validateDisplaySettings({ guides: { grid } }), /display.guides.grid/);
-  }
-  for (const backdrop of [{ groundColor: "red" }, { groundOpacity: -0.1 }, { groundOpacity: true }]) {
-    assert.throws(() => validateDisplaySettings({ mode: "render", render: { backdrop } }), /display.render.backdrop/);
   }
 });
 

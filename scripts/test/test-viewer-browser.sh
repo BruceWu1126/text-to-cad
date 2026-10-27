@@ -10,7 +10,6 @@ source "$SCRIPT_DIR/common.sh"
 python_candidate="${VIEWER_PYTHON:-$PYTHON_BIN}"
 PYTHON="$(command -v "$python_candidate" 2>/dev/null || true)"
 RUNTIME="${VIEWER_RUNTIME_DIR:-$REPO_ROOT/packages/cadgen/src/cadgen/_runtime/viewer}"
-FIXTURE="$REPO_ROOT/tests/fixtures/cad/import-smoke.step"
 HOST=127.0.0.1
 
 export PYTHONPATH="$REPO_ROOT/packages/cadgen/src${PYTHONPATH:+:$PYTHONPATH}"
@@ -21,10 +20,6 @@ if [ -z "$PYTHON" ] || ! "$PYTHON" -c 'import cadgen' >/dev/null 2>&1; then
 fi
 if [ ! -f "$RUNTIME/index.html" ]; then
   echo "FAIL: bundled Viewer missing at $RUNTIME; run scripts/bundle/bundle.sh first" >&2
-  exit 1
-fi
-if ! head -1 "$FIXTURE" | grep -q 'ISO-10303-21'; then
-  echo "FAIL: test fixture is not STEP text: $FIXTURE" >&2
   exit 1
 fi
 
@@ -67,7 +62,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cp "$FIXTURE" "$project/smoke.step"
+# The STEP the gates open: one cylinder, written by build123d's own STEP export, which the engine
+# imports as it does any STEP it did not write. It is made here so that no CAD file is committed.
+"$PYTHON" - "$project/smoke.step" <<'PY'
+import sys
+
+import build123d as bd
+
+part = bd.Pos(42, 0, 2) * bd.Cylinder(3, 14)
+part.label = "smoke"
+bd.export_step(part, sys.argv[1])
+PY
+if ! head -1 "$project/smoke.step" | grep -q 'ISO-10303-21'; then
+  echo "FAIL: the STEP fixture did not export" >&2
+  exit 1
+fi
 
 # The mesh fixture is an export of the STEP fixture, by the engine.
 if ! (cd "$project" && "$PYTHON" -m cadgen.engine export smoke.step smoke.stl) >"$log" 2>&1 \

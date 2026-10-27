@@ -1,14 +1,15 @@
 # examples
 
 Every script of `models/examples/src`, on cadgen 0.8: a `@model` each, writing nothing, but
-the two print parts below, which declare their files.
+the two print parts below, which declare their files, and the import's `__main__`, which
+exports the two STEPs it reads.
 
 | Script | Files | What it is |
 | --- | --- | --- |
 | `l_bracket.py` | — | L-bracket with gussets and a filleted transition (`lib/part_common.safe_fillet`) |
 | `electronics_enclosure_base.py` | — | Open-top enclosure with rounded corners and standoffs |
 | `basic_shape_mating_test_fixture.py` | — | Seven parts and a sub-assembly seated on a base plate by build123d joints |
-| `electronics_enclosure_base_import.py` | — | `vendor/electronics_enclosure_base.step` and `vendor/basic_shape_mating_test_fixture.step` read back with `read_step` |
+| `electronics_enclosure_base_import.py` | `STEP/electronics_enclosure_base.step`, `STEP/basic_shape_mating_test_fixture.step` (its `__main__` exports them) | The enclosure's and the fixture's STEP read back with `read_step` |
 | `electronics_enclosure_base_drawing.py` | `PDF/electronics_enclosure_base_drawing.pdf` | **Engineering drawing** (`@eng_drawing`) of the enclosure, calling its model: three views with hidden lines and centre marks, measured dimensions, hole callouts, title block. Build the enclosure first. |
 | `cam_follower_roller.py` | — | Cam follower roller with central bearing bore and rounded outer profile (Steel 4140) |
 | `centrifugal_impeller.py` | — | Single solid centrifugal impeller (Aluminum 6061-T6) |
@@ -53,9 +54,9 @@ anodised in each part's own colour (`color=None`). The imports read the STEP
 inputs as they are, without materials.
 
 A run writes nothing, but the mounting plate's and the gear blank's declared files. The
-import reads fixed STEP inputs committed in `../vendor/`, exported once from the enclosure
-and the fixture; no model writes them (re-export one with `cadgen export <id>
-../vendor/NAME.step`, the id the model's run prints).
+import script's `__main__` exports the enclosure and the fixture to `../STEP/` (gitignored,
+like every export: Git holds no CAD files) and reads them back; run it before opening either
+import model, which reads those files.
 Build from this folder, in any order: each script builds the models its `__main__` calls, for example
 
 ```

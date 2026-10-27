@@ -12,8 +12,7 @@ Each project has one layout, the cad skill's: its sources in `src/` (shared modu
 document's `id:` and page (`view:`), which every later run updates. A file is written
 on request, `cadgen export <id> STEP/<name>.step`, into the project's root-level
 `STEP/`, `STL/`, `GLB/`, `3MF/` or `DXF/`, which each project's `.gitignore` keeps out
-of Git. `examples/vendor/` holds the two STEP inputs `electronics_enclosure_base_import.py`
-reads. `juno` and `lyra` carry an authored URDF and SRDF beside `src/`; the link meshes
+of Git. `juno` and `lyra` carry an authored URDF and SRDF beside `src/`; the link meshes
 they reference are written by each project's `exports.py` (`3MF/<link>.3mf`), so run it
 before loading either URDF.
 
@@ -28,10 +27,9 @@ and clearance studies on frozen STEP snapshots, not the hand: dropped, in Git hi
 `drawings/src/exports.py`. A model that needs helper modules, several scripts or notes
 of its own gets a project of its own here.
 
-Commit sources (`*.py`, `*.urdf`, `*.srdf`, the JSON a body reads, docs) and the
-inputs a model reads that nothing builds (`examples/vendor/`); never what a run or an
-export writes, review media (`.gitignore` keeps images and video out of this tree) or
-runtime debris.
+Commit sources (`*.py`, `*.urdf`, `*.srdf`, the JSON a body reads, docs); never what a run
+or an export writes (Git holds code, never CAD or mesh files: no STEP, STL, GLB, 3MF, DXF or
+XBF), review media (`.gitignore` keeps images and video out of this tree) or runtime debris.
 
 ## The files the corpus writes
 
@@ -46,6 +44,7 @@ project delivers them and because something outside the model reads them:
 | `drawings` (all eight) | `DXF/<name>.dxf` | `src/exports.py` | the DXF deliverables, flat patterns among them; a drawing exists for its DXF |
 | `juno`, `lyra` (every link model) | `3MF/<link>.3mf` | `src/exports.py` | the URDFs reference them |
 | `examples` (`electronics_enclosure_base_drawing`) | `PDF/electronics_enclosure_base_drawing.pdf` | `@eng_drawing` | an engineering drawing is its PDF |
+| `examples` (`electronics_enclosure_base_import`) | `STEP/electronics_enclosure_base.step`, `STEP/basic_shape_mating_test_fixture.step` | `cadgen.export(model, path)` in the script's `__main__` | the two import models read them back; made on the spot, so no STEP is committed |
 | `radial` | `XBF/radial.xbf` | `@xbf` | the slow model's result kept across runs and engine restarts: a cold build takes most of an hour; every body replays, and a no-op takes the file (0.2 s) instead of sampling the running motion again (5.6 s without it) |
 
 ## Build and snapshot
@@ -120,7 +119,7 @@ marker costs a model body that is no longer one piece.
 | [`qdd_actuator`](qdd_actuator/src/README.md) | one file, 153 occurrences | a 102-part assembly, modules as nested compounds; one body (no `@memo`: its makers save under 0.1 s); build123d joints (each module fastened, the drive train's revolutes); the drive train one coupling, `drive` (a constraint), two configurations, the old clip `drive` a motion and `inspect` and `teardown` GLB animations at the old stations, the planets' radial spread restored |
 | [`motorbike`](motorbike/src/README.md) | 21 part models + the assembly | each part a `@model` the assembly calls, a child of its run and a page of its own, a part placed twice; revolute and rigid joints across parts; the old poses as three configurations (`stand_down`, `turned_left`, `bump`) and one motion, `steer` (a GLB export carries it as a clip) |
 | [`moonwatch`](moonwatch/src/README.md) | `case.py`, `dial.py`, `bracelet.py`, `finishing_sampler.py`, `movement.py` (3 `@memo` layers), and `moonwatch.py`, the full watch composing case, dial, movement and bracelet in one body | finishes as materials on every part: catalogue entries in each finish's look (coat, grain, transmission), own materials (sapphire, ruby, print ink, lacquer, lume), a painted face finish, transparent parts; the full watch (258 parts, 301 instances): its mates as 17 joints paired by label (the hands, going train, escapement, chronograph, crown and pushers) and rigid fastenings, its gear trains as two couplings (`running`, `chrono`: constraints its wheels and hands move only through), 7 configurations, the `running` motion and the `reveal`, `showcase` and `grand_tour` GLB animations (the escapement posed at every key, the parts translated, the movement turned about X with its tiers fanned inside it) |
-| [`examples`](examples/src/README.md) | all 29 scripts: 27 parts and assemblies, a `read_step` import and an `@eng_drawing` | fillets, chamfers, swept blades; assemblies placed by joints (the fixture's `connect_to` moving parts, the print-in-place hinges' pivots revolute joints paired by label); `read_step` of a part and of an assembly (imported naming), from STEP inputs committed in `examples/vendor/`; STL, 3MF and GLB declared on the model (`mounting_plate`, `spur_gear_blank`); an `@eng_drawing` PDF of the enclosure, calling its model; the hinged box's motion and its showcase `animation()` |
+| [`examples`](examples/src/README.md) | all 29 scripts: 27 parts and assemblies, a `read_step` import and an `@eng_drawing` | fillets, chamfers, swept blades; assemblies placed by joints (the fixture's `connect_to` moving parts, the print-in-place hinges' pivots revolute joints paired by label); `read_step` of a part and of an assembly (imported naming), from the STEPs its script exports first; STL, 3MF and GLB declared on the model (`mounting_plate`, `spur_gear_blank`); an `@eng_drawing` PDF of the enclosure, calling its model; the hinged box's motion and its showcase `animation()` |
 | [`hypercar`](hypercar/src/README.md) | 13 system files (`@memo` stages, 1,250-24,000 kernel calls each) + one model | a 706-part car whose panels share one master surface; a placed wheel prototype per axle; doors as cylindrical joints on the chassis paired by label across systems' groups, riders fastened by rigid-joint pairs; a configuration (`open`), the motion `doors`, and the `showcase` tour and `explode` as GLB animations of the old groups, each door with its flank and each rider with its own group |
 | [`f1`](f1/src/README.md) | 32 part files, `stages.py` and one model; 12 `@memo` stages (990-11,400 kernel calls each) | an 833-part car of 28 children grouped in stages by the builders they share; two closed-loop mechanisms (the DRS four-bar, the steering) authored as their tree of joints -- revolute, prismatic and ball -- paired by label, every pose solved in Python: 3 configurations, the `drs` and `steering` motions, and the `showcase`, `teardown` and `engine` explodes as GLB animations |
 | [`drawings`](drawings/src/README.md) | all eight scripts of the old `drawings`, and `exports.py` | drawings as models of planar documents, their DXFs written by `exports.py`: a layer per part (`CUT`, open `BEND` and `ENGRAVE` lines, a layer of several shapes one part of them all), bend fixtures in every orientation, `bd.Text` outlines engraved, a workshop drawing of three views and eleven dimensions, and a profile laid out from a solid's top face; byte-for-byte the old emitter's for the gasket |

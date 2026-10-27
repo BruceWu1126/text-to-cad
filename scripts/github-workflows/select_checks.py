@@ -255,7 +255,7 @@ RULES: tuple[Rule, ...] = (
     # The robot renderer's browser fixtures are the payloads cadgen resolves for its descriptions:
     # the payload suite asserts they are current.
     Rule(("packages/ui/src/renderers/robot/__fixtures__/**",), select(cadgen=[f"{CADGEN_SUITE}/test_robot_payload.py"])),
-    Rule(("tests/browser/**", "tests/fixtures/cad/**"), select(flags=["web_viewer", "packaging"])),
+    Rule(("tests/browser/**",), select(flags=["web_viewer", "packaging"])),
 
     # Tests: a test file runs itself.
     Rule((f"{CADGEN_SUITE}/**",), _test_file(CADGEN_SUITE, whole=CADGEN_SUITE)),

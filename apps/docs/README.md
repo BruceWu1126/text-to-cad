@@ -43,10 +43,12 @@ The hero is one GLB, `public/hero/planetary.glb`: the planetary gear model
 (`models/assemblies/src/planetary_gear_assembly/`) exported from its document by
 `cadgen export`, its parts, colours and its `meshCycle` motion, which the export bakes
 into a clip. It is committed as a PLAIN file (never LFS: Vercel serves it statically
-with no backend). The page frames it, draws each part's folds and outline in the
-hero's edge colour, and plays the clip slowed to a display pace. The site and its
-checks read only that committed file; nothing in the docs app's build or
-`npm run check` reads the sample corpus. Refresh it by hand after changing the model:
+with no backend), one of the few CAD files Git holds
+(`tests/python/global/test_no_cad_assets_tracked.py` lists it, with a size cap). The page
+frames it, draws each part's folds and outline in the hero's edge colour, and plays the
+clip slowed to a display pace. The site and its checks read only that committed file;
+nothing in the docs app's build or `npm run check` reads the sample corpus. Refresh it
+by hand after changing the model:
 
 ```
 node apps/docs/scripts/sync-hero-glb.mjs
