@@ -1,8 +1,8 @@
 """``cadgen inspect DOC`` without a ref: what the document holds, on one screen, before its build
 closure -- its state, parts, bounds, volume, materials, joints, states, sequences and declared
 files -- read from the document the engine holds, and nothing built; ``--json`` the same as data;
-``--query structure`` the same lists with nothing measured. A document inspected once is measured
-again after its next build, before it is asked for."""
+``--query structure`` the same lists with nothing measured. A build's document is measured once its
+worker settles, before anyone asks, and an edit's build measures only the part it changed."""
 
 from __future__ import annotations
 
@@ -143,7 +143,7 @@ class SummaryTest(unittest.TestCase):
         self.assertIn(frames[-1]["detail"], ("base", "arm"))
         self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
 
-        # Inspected once, the hinge is measured again after its next build, before anyone asks:
+        # Every build's document is measured once its worker settles, before anyone asks:
         # the longer arm's facts are in before the next inspection.
         measured = self.facts()
         self.assertGreater(measured, 0)
