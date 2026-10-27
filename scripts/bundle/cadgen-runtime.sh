@@ -3,18 +3,17 @@ set -euo pipefail
 
 # Build cadgen's non-Python runtime INTO THE PACKAGE (packages/cadgen/src/cadgen/_runtime).
 #
-# cadgen ships two things it does not write in Python: the CAD Viewer's built client
+# cadgen ships three things it does not write in Python: the CAD Viewer's built client
 # (`cadgen viewer` serves it) and the one-file CAD app an agent host renders (`cadgen mcp`
-# serves it). (The OCCT parity bench's headless page of the viewer's scene is not one of
-# them: cadgen's snapshots are OCCT's, so lib/snapshot_runtime.sh builds that page into
-# tmp/ when the bench asks for it, never into the wheel.)
+# serves it), and the shared renderer for Preview snapshots and animation frames.
 # cadgen resolves them inside the distribution, so there is one copy and one builder of
 # that copy: this script. scripts/bundle/bundle.sh is the entry point that calls it (after
 # stamping derived version metadata); call this directly only when debugging one stage.
 #
-# Stages (default: both of them):
+# Stages (default: all):
 #   --viewer    CAD Viewer client (vite)  -> _runtime/viewer
 #   --mcp       CAD app page (vite)       -> _runtime/mcp
+#   --snapshot  Shared snapshot renderer -> _runtime/snapshot
 #
 # NOTHING here is committed. The whole _runtime tree is gitignored and built on demand:
 # the wheel is the only place these files ship, and a rebundle of a built page is
@@ -33,6 +32,7 @@ RUNTIME_DIR="$REPO_ROOT/packages/cadgen/src/cadgen/_runtime"
 VIEWER_DIR="$RUNTIME_DIR/viewer"
 VIEWER_APP_DIR="$REPO_ROOT/apps/web"
 MCP_DIR="$RUNTIME_DIR/mcp"
+SNAPSHOT_DIR="$RUNTIME_DIR/snapshot"
 MCP_APP_DIR="$REPO_ROOT/apps/mcp"
 VIEWER_PACKAGE_MANAGER="${CAD_VIEWER_PACKAGE_MANAGER:-}"
 
@@ -42,12 +42,14 @@ VIEWER_PACKAGE_MANAGER="${CAD_VIEWER_PACKAGE_MANAGER:-}"
 # @text-to-cad/core/third-party-licenses): shipping them in a wheel is redistribution.
 VIEWER_OUTPUTS=(index.html THIRD_PARTY_LICENSES.txt)
 MCP_OUTPUTS=(index.html THIRD_PARTY_LICENSES.txt)
+SNAPSHOT_OUTPUTS=(render.html snapshot-render.js THIRD_PARTY_LICENSES.txt)
 
 MODE="write"
 CLEAN=0
 PRINT_OUTPUTS=0
 STAGE_VIEWER=0
 STAGE_MCP=0
+STAGE_SNAPSHOT=0
 ANY_STAGE=0
 
 usage() {
@@ -58,9 +60,10 @@ Usage:
 Builds cadgen's packaged runtime assets into packages/cadgen/src/cadgen/_runtime.
 None of it is committed; the wheel is where it ships.
 
-Stages (default: both):
+Stages (default: all):
   --viewer    CAD Viewer client (vite)  -> _runtime/viewer
   --mcp       CAD app page (vite)       -> _runtime/mcp
+  --snapshot  Shared snapshot renderer -> _runtime/snapshot
 
 Options:
   --check          Build, then assert every required output exists.
@@ -77,6 +80,7 @@ while [ "$#" -gt 0 ]; do
     --print-outputs) PRINT_OUTPUTS=1 ;;
     --viewer) STAGE_VIEWER=1; ANY_STAGE=1 ;;
     --mcp) STAGE_MCP=1; ANY_STAGE=1 ;;
+    --snapshot) STAGE_SNAPSHOT=1; ANY_STAGE=1 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -84,11 +88,11 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ "$ANY_STAGE" -eq 0 ]; then
-  STAGE_VIEWER=1; STAGE_MCP=1
+  STAGE_VIEWER=1; STAGE_MCP=1; STAGE_SNAPSHOT=1
 fi
 
 if [ "$PRINT_OUTPUTS" -eq 1 ]; then
-  printf '%s\n' "${VIEWER_DIR#"$REPO_ROOT"/}" "${MCP_DIR#"$REPO_ROOT"/}"
+  printf '%s\n' "${VIEWER_DIR#"$REPO_ROOT"/}" "${MCP_DIR#"$REPO_ROOT"/}" "${SNAPSHOT_DIR#"$REPO_ROOT"/}"
   exit 0
 fi
 
@@ -102,7 +106,7 @@ fi
 # What _runtime holds is what this script builds and nothing else: an entry no stage owns (one a
 # stage this script no longer has left behind) would otherwise ship in the next wheel, since
 # package-data takes the whole tree. It goes whatever stages this run builds.
-STAGE_DIRS=(viewer mcp)
+STAGE_DIRS=(viewer mcp snapshot)
 prune_stale_runtime() {
   local entry name stage known
   [ -d "$RUNTIME_DIR" ] || return 0
@@ -212,8 +216,12 @@ build_mcp_app() {
 }
 
 build_stage_packages() {
-  # Both stages bundle @text-to-cad/core and @text-to-cad/ui from their compiled exports.
-  npm --prefix "$REPO_ROOT" run build:packages
+  # The app stages consume core and UI; the snapshot stage consumes core alone.
+  if [ "$STAGE_VIEWER" -eq 1 ] || [ "$STAGE_MCP" -eq 1 ]; then
+    npm --prefix "$REPO_ROOT" run build:packages
+  else
+    npm --prefix "$REPO_ROOT" run build --workspace @text-to-cad/core
+  fi
 }
 
 build_all() {
@@ -225,6 +233,10 @@ build_all() {
   if [ "$STAGE_MCP" -eq 1 ]; then
     build_mcp_app "$root/mcp"
     echo "Bundled ${root#"$REPO_ROOT"/}/mcp"
+  fi
+  if [ "$STAGE_SNAPSHOT" -eq 1 ]; then
+    node "$SCRIPT_DIR/snapshot-runtime.mjs" "$root/snapshot"
+    echo "Bundled ${root#"$REPO_ROOT"/}/snapshot"
   fi
 }
 
@@ -254,6 +266,9 @@ if [ "$MODE" = "check" ]; then
   fi
   if [ "$STAGE_MCP" -eq 1 ]; then
     check_stage_outputs mcp "${MCP_OUTPUTS[@]}"
+  fi
+  if [ "$STAGE_SNAPSHOT" -eq 1 ]; then
+    check_stage_outputs snapshot "${SNAPSHOT_OUTPUTS[@]}"
   fi
   if [ "$missing" -ne 0 ]; then
     echo "" >&2

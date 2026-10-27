@@ -398,6 +398,8 @@ export function renderJobContext(meshData, job = {}) {
     // Preview's look is the job's own request (`preview: true`), over the same display, at
     // Preview's defaults: a snapshot has no Preview settings of its own.
     preview: job.preview === true,
+    lightingQuality: job.preview === true ? "preview" : "final",
+    previewSettings: job.previewSettings || {},
     // The viewer's rule for this file: only a CAD model has edges to draw; Parts colours a file of
     // several parts; a GLB of several parts explodes; every 3D file is cut by Clip (`viewFeaturesForKind`).
     features: viewFeaturesForKind(sourceKind, { parts: meshData.partCount || 0, explodeParts: meshData.explodeParts || 0 })
@@ -609,13 +611,15 @@ export async function captureModel(viewport, captureOptions = {}) {
   const padding = framePadding(job);
   const renderedOutputs = [];
   const renderStarted = performance.now();
-  for (const output of outputs) {
+  const selectedOutputs = captureOptions.outputIndex == null ? outputs : [outputs[captureOptions.outputIndex]];
+  if (selectedOutputs.some(output => !output)) throw new Error("Unknown snapshot output index");
+  for (const output of selectedOutputs) {
     const outputTimings = stageTimings ? { path: String(output.path || "") } : null;
     let stageStarted = performance.now();
     const { width, height } = outputSize(output, job);
     viewport.renderer.setSize(width, height, false);
     // A family's scene is posed once, as it is built: the still frames it as it stands.
-    let outputBounds = viewport.model.bounds;
+    let outputBounds = captureOptions.frameBounds || viewport.model.bounds;
     // The model at rest: what the viewer sizes the ground from, whatever the pose.
     const restBounds = viewport.model.restBounds || null;
     // The scene explodes and is cut through the scene contract, as the viewer's viewport explodes
@@ -624,7 +628,7 @@ export async function captureModel(viewport, captureOptions = {}) {
     const exploded = context.displaySettings.exploded;
     if (familyScene.setExplode) {
       familyScene.setExplode(exploded?.enabled === true ? Number(exploded.amount) || 0 : 0);
-      outputBounds = familyScene.bounds;
+      if (!captureOptions.frameBounds) outputBounds = familyScene.bounds;
     }
     viewport.sceneClip ??= createSceneClip(THREE, { stage: viewport.scene });
     viewport.sceneClip.sync(familyScene, context.displaySettings.clip);
@@ -634,7 +638,7 @@ export async function captureModel(viewport, captureOptions = {}) {
     const outputProjection = resolveOutputCameraProjection(context, cameraSpec);
     const usePerspectiveCamera = outputProjection === CAMERA_PROJECTION.PERSPECTIVE;
     const cameraView = usePerspectiveCamera ? null : resolveView(cameraSpec);
-    const useTightFrame = tightFrameEnabled(job);
+    const useTightFrame = !captureOptions.frameBounds && tightFrameEnabled(job);
     if (usePerspectiveCamera && useTightFrame) {
       viewport.scene.updateMatrixWorld(true);
     }
@@ -664,7 +668,7 @@ export async function captureModel(viewport, captureOptions = {}) {
     if (viewport.studioRuntime) {
       stageStarted = performance.now();
       applyPhotographicStudio(THREE, viewport.studioRuntime, viewport.studioConfiguration, {
-        bounds: outputBounds,
+        bounds: captureOptions.frameBounds ? viewport.model.bounds : outputBounds,
         // The floor and its contact shadow are sized and centred from the REST placement, as the
         // viewer's are (and as `renderModel` placed them), so an exploded view or a pose never
         // rescales or slides them.
@@ -676,12 +680,22 @@ export async function captureModel(viewport, captureOptions = {}) {
       fitDepth();
       if (outputTimings) outputTimings.prepareStudioMs = Math.round(performance.now() - stageStarted);
     }
+    if (captureOptions.cameraCache) {
+      const key = outputs.indexOf(output);
+      const saved = captureOptions.cameraCache.get(key);
+      if (saved) renderCamera.copy(saved);
+      else captureOptions.cameraCache.set(key, renderCamera.clone());
+      renderCamera.updateMatrixWorld(true);
+    }
     stageStarted = performance.now();
     syncViewportAnnotation(viewport, job, { height });
     // Render is drawn through its studio's frame, every sample of it; anything else is one draw, as
     // the scene's own rig blends it.
     const studioFrame = viewport.studioRuntime?.photographicStudio?.frame || null;
-    if (studioFrame) {
+    let capturedCanvas = null;
+    if (captureOptions.renderOutput) {
+      capturedCanvas = await captureOptions.renderOutput(renderCamera);
+    } else if (studioFrame) {
       studioFrame.renderStill(viewport.renderer, viewport.scene, renderCamera, {
         samples: snapshotStudioSamples({ softwareRendering: isSoftwareWebGlRenderer(viewport.renderer) })
       });
@@ -693,7 +707,7 @@ export async function captureModel(viewport, captureOptions = {}) {
     // wait for that work, so this is image readback/encoding, not pure CPU PNG.
     stageStarted = performance.now();
     const viewLabel = String(output.viewLabel || output.label || resolvedCamera.name || "").toUpperCase();
-    const dataUrl = rendererDataUrlWithOptionalLabel(viewport.renderer, viewLabel, job, { width, height });
+    const dataUrl = rendererDataUrlWithOptionalLabel(capturedCanvas ? { domElement: capturedCanvas } : viewport.renderer, viewLabel, job, { width, height });
     if (outputTimings) {
       outputTimings.encodeImageMs = Math.round(performance.now() - stageStarted);
       stageTimings.outputs.push(outputTimings);

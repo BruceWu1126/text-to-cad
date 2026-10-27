@@ -374,7 +374,7 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
         out = Path(options.pop("out"))
         clock = time.perf_counter()
         drawn = snapshot.draw(source, out, **options)
-        files.append({"path": str(out), "kind": "png", "bytes": drawn["bytes"],
+        files.append({"path": str(out), "kind": out.suffix.lstrip("."), "bytes": drawn["bytes"],
                       "seconds": round(time.perf_counter() - clock, 4)})
     if request.get("draw_still"):
         from cadgen.engine.snapshot import Still, _occt

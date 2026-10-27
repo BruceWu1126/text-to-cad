@@ -6,7 +6,7 @@ inputs:
     description: Install requirements-dev.txt.
     default: "true"
   playwright:
-    description: Install Python Playwright's headless Chromium, which the viewer's launch smoke test drives (requires python).
+    description: Install Python Playwright's headless Chromium for snapshot exports and viewer launch tests (requires python).
     default: "true"
   ui-browser:
     description: Install the npm Playwright Chromium used by the shared UI, web and desktop browser tests.
@@ -45,11 +45,11 @@ runs:
       shell: bash
       run: uv pip install --system --python python -r requirements-dev.txt
 
-    - name: Install the launch smoke test's browser
+    - name: Install the snapshot and launch tests' browser
       if: inputs.python == 'true' && inputs.playwright == 'true'
       shell: bash
       run: |
-        # The headless shell is all the viewer's launch smoke test drives; the full Chromium
+        # The headless shell runs raster animation and viewer launch tests; the full Chromium
         # would be ~350 MB more.
         if [ "$RUNNER_OS" = "Linux" ]; then
           python -m playwright install --with-deps --only-shell chromium

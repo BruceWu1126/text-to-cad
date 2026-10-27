@@ -3,7 +3,7 @@
 cadgen serves JavaScript it does not write in Python: the CAD Viewer's built client
 (``cadgen viewer`` serves it) and the CAD app page (``cadgen mcp`` serves it). They ship
 inside the distribution under ``cadgen/_runtime``, and can be pointed elsewhere for
-development. Nothing cadgen runs needs Node.
+development. No system Node installation is required; Playwright carries its own driver.
 
 **Every resolver here is CALL-TIME.** Nothing at import time touches the filesystem: the
 CAD Viewer's long-lived server must import light, and a page that needs an asset asks for
@@ -23,6 +23,7 @@ __all__ = [
     "checkout_root",
     "runtime_build_hint",
     "runtime_root",
+    "snapshot_dist_dir",
     "viewer_dist_dir",
 ]
 
@@ -78,6 +79,11 @@ def _in_source_checkout() -> bool:
 def runtime_root() -> Path:
     """The packaged ``_runtime`` directory. May not exist in a source checkout."""
     return _RUNTIME
+
+
+def snapshot_dist_dir() -> Path:
+    """The packaged shared renderer used for Preview stills and animation frames."""
+    return _RUNTIME / "snapshot"
 
 
 def _env_dir(name: str) -> Path | None:

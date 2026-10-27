@@ -1391,6 +1391,43 @@ with the decorated function itself builds it first, writing what the model decla
 the snapshot nothing but OUT. A picture is never a declaration: no
 decorator and no build flag draws one.
 
+### Browser Preview and authored-animation snapshots
+
+The ordinary PNG modes above retain their OCCT path. `--preview` instead calls the distribution's
+installed browser renderer: the same shared scene builders, studio, progressive path tracer and
+guided RGB/coverage denoiser as Viewer Preview. It waits for the full quality target and refuses
+unsupported scenes, unavailable tracing and exhausted budgets; it never saves a raster fallback.
+The engine's `snapshot.BROWSER_RENDER` hook is supplied by the distribution's host adapter, so the
+standalone engine does not import its enclosing application's browser or runtime resolver.
+
+`preview` in `snapshot(...)` and `Document.snapshot(...)` accepts a boolean or the Viewer's full
+render configuration object. Even `{}` enables Preview. The CLI's `--preview` enables defaults;
+`--preview '{"lighting":{"quality":"final"},"exposure":0}'` supplies a configuration. The browser, page,
+workers, weights and encoder are installed resources; rendering downloads nothing. A missing
+browser is installed explicitly with `cadgen doctor --install-browser`.
+
+`cadgen snapshot SRC OUT.mp4 --animation [NAME] --fps 30` renders an authored routine. Its Python
+form is `snapshot(source, out, animation="swing", fps=30)` (`animation=True` selects the only
+routine). XBF AP242 configuration sequences use the Viewer's exact forward-kinematics timeline;
+glTF clips use their absolute authored time. A routine name or stable clip id selects it; no
+routine or multiple matches are refused, listing the available names. A source without motion is
+not animated. Pose, annotation, measurements, transparent output and packet jobs cannot combine
+with animation.
+
+Every emitted frame is evaluated at `i / fps`, for `ceil(duration * fps)` frames. The camera
+is fitted over that routine's sampled placements once, then held. Without `preview`, the shared
+browser raster renderer draws the animation; with it, every frame waits for complete denoising.
+The report names its renderer and selected animation (`id`, `name`, authored `duration`, `fps`,
+`frames`, and `times`). A Preview report includes its completed sample target. MP4 is opaque: partial coverage is
+composited over the configured background colour (white by default, `#202226` for Dark).
+
+Animation defaults to 1280 × 720; explicit sizes must be even and at most 1920 × 1080. FPS is an
+integer from 1 to 60, at most 3,600 frames, with 300 seconds per browser frame and one hour per
+operation. Frames stream into the distribution's bundled FFmpeg encoder, never a PATH executable.
+A private temporary file replaces OUT only after all frames and encoding succeed. Failure keeps
+an earlier output unchanged and releases the browser, encoder and private source server; no
+intermediate XBF, GLB, PNG sequence or model source is written.
+
 ## Exports
 
 ### Viewer exports

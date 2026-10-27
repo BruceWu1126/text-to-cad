@@ -13,6 +13,8 @@ import {
 import { validateSnapshotRenderJob } from "./snapshotJobValidation.js";
 import { scenePartCount } from "./viewSettings.js";
 import { runHeadlessDrawingJob } from "./headlessDrawingRender.js";
+import { createHeadlessPreview } from "./headlessPreview.js";
+import { openHeadlessSnapshotSession } from "./headlessSnapshotSession.js";
 
 // Each call owns its measurements. Capture reports camera fitting, draw
 // submission and image encoding separately; viewport construction is not a draw.
@@ -32,7 +34,13 @@ async function captureWithModel(model, context, job, stageTimings) {
   stageTimings.prepareViewportMs = Math.round(performance.now() - viewportStarted);
   try {
     const captureStarted = performance.now();
-    const captured = await captureModel(viewport, { job, stageTimings });
+    const preview = job.preview === true ? createHeadlessPreview(viewport) : null;
+    let captured;
+    try {
+      captured = await captureModel(viewport, { job, stageTimings,
+        renderOutput: preview ? camera => preview.renderFrame(camera, { sceneChanged: true }) : null });
+      if (preview) { captured.renderer = 'preview-path-traced'; captured.preview = preview.progress; }
+    } finally { preview?.dispose(); }
     stageTimings.captureMs = Math.round(performance.now() - captureStarted);
     if (captured && typeof captured === "object" && !Array.isArray(captured)) {
       captured.stageTimings = stageTimings;
@@ -90,4 +98,5 @@ export async function runHeadlessRenderJob(job) {
 
 if (typeof window !== "undefined") {
   window.__snapshotRender = runHeadlessRenderJob;
+  window.__snapshotSession = openHeadlessSnapshotSession();
 }

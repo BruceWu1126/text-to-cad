@@ -169,8 +169,11 @@ jobs:
       - name: Set up dependencies
         uses: ./.github/actions/setup-deps
         with:
-          playwright: "false"
+          playwright: "true"
           npm: packages/core
+
+      - name: Bundle the shared snapshot renderer
+        run: node scripts/bundle/snapshot-runtime.mjs
 
       # The engine's stills are drawn by OCCT in an OpenGL context, which on a machine with no
       # screen is made on an X server's: Xvfb, with Mesa's software GL, and the font the
@@ -216,8 +219,11 @@ jobs:
       - name: Set up dependencies
         uses: ./.github/actions/setup-deps
         with:
-          playwright: "false"
+          playwright: "true"
           npm: packages/core
+
+      - name: Bundle the shared snapshot renderer
+        run: node scripts/bundle/snapshot-runtime.mjs
 
       - name: Check cadgen types (basic)
         run: python -m pyrefly check --config packages/cadgen/pyproject.toml --output-format full-text-with-github

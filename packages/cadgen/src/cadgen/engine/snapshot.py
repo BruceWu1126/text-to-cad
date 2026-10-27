@@ -1,5 +1,6 @@
 """``cadgen snapshot SRC OUT.png``: a picture of a document or of a file the viewer opens,
-drawn by OCCT as the CAD Viewer draws it. One dispatcher by SRC's suffix:
+drawn as the CAD Viewer draws it. Normal PNGs use OCCT; Preview and authored-time
+animation delegate to the installed browser through BROWSER_RENDER. One dispatcher by SRC's suffix:
 
 - ``.xbf``, ``.step``: a document, served by the engine (the daemon, so its meshes are the ones
   the viewer and every build share, or with ``daemon=False`` a server in this process; a model's own
@@ -105,6 +106,9 @@ SIZE_PROFILES = {
 }
 DEFAULT_SIZE = SIZE_PROFILES["diagnostic"]
 MAX_SIDE = 8192
+# The distribution supplies the installed browser/runtime/codec adapter.
+BROWSER_RENDER: Callable[..., dict[str, Any]] | None = None
+ANIMATION_SIZE = (1280, 720)
 # ``--job``: a Quick Edit packet (``cadgen.viewer``'s ``.snapshot.json``), a job, or a list of jobs; each job a
 # view, its outputs the pictures it writes, its output settings how they are framed and finished.
 PACKET_KEYS = frozenset({"input", "jobs", "annotation", "measurements", "hidden", "isolated"})
@@ -532,7 +536,7 @@ class Still:
     display: dict[str, Any] = field(default_factory=dict)
     camera: Any = None
     exact: bool = False
-    preview: bool = False
+    preview: Any = False
     size: tuple[int, int] = DEFAULT_SIZE
     pose: Any = None
     annotation: dict[str, Any] | None = None
@@ -541,19 +545,22 @@ class Still:
     tight: bool = True
     transparent: bool = False
     scale: float = 1.0
+    animation: Any = None
+    fps: int = 30
 
     def as_json(self) -> dict[str, Any]:
         return {"display": self.display, "camera": self.camera, "exact": self.exact, "preview": self.preview,
                 "size": list(self.size), "pose": self.pose, "annotation": self.annotation,
                 "measurements": self.measurements, "padding": self.padding, "tight": self.tight,
-                "transparent": self.transparent, "scale": self.scale}
+                "transparent": self.transparent, "scale": self.scale, "animation": self.animation, "fps": self.fps}
 
     @staticmethod
     def from_json(found: dict[str, Any]) -> "Still":
         return Still(dict(found.get("display") or {}), found.get("camera"), bool(found.get("exact")),
-                     bool(found.get("preview")), tuple(found.get("size") or DEFAULT_SIZE), found.get("pose"),
+                     found.get("preview", False), tuple(found.get("size") or DEFAULT_SIZE), found.get("pose"),
                      found.get("annotation"), found.get("measurements"), float(found.get("padding", PADDING)),
-                     bool(found.get("tight", True)), bool(found.get("transparent")), float(found.get("scale") or 1.0))
+                     bool(found.get("tight", True)), bool(found.get("transparent")), float(found.get("scale") or 1.0),
+                     found.get("animation"), found.get("fps", 30))
 
     @property
     def drawn(self) -> tuple[int, int]:
@@ -565,7 +572,7 @@ def refusals(still: Still, structure: dict[str, Any], name: str) -> None:
     """What the document's view does not offer, refused by name before anything renders: Parts and
     Explode colour or move placed parts apart, and a document of one has nothing to part."""
     placed = len(structure.get("instances") or [])
-    if placed >= 2 or still.preview:
+    if placed >= 2 or still.preview is True or isinstance(still.preview, dict):
         return
     count = f"{placed} part{'' if placed == 1 else 's'}"
     if still.display.get("mode") == "parts":
@@ -604,7 +611,7 @@ def stem_of(source: Any) -> str:
 
 
 def picture_path(out: Any, source: Any, *, at: str | None = None, job: tuple[int, int] = (0, 1),
-                 output: tuple[int, int] = (0, 1)) -> Path:
+                 output: tuple[int, int] = (0, 1), animation: Any = None) -> Path:
     """Where a picture is written: OUT as given, or -- OUT a folder (``names_a_folder``) -- a name
     made inside it, ``<stem>[_j<m>][_<n>]_<UTC time>.png`` (``stem_of`` the source; the job's place
     in a packet of several, and the output's in a job of several, where they tell pictures apart;
@@ -614,7 +621,8 @@ def picture_path(out: Any, source: Any, *, at: str | None = None, job: tuple[int
         return Path(text).expanduser().resolve()
     told = [f"j{job[0] + 1}"] if job[1] > 1 else []
     told += [str(output[0] + 1)] if output[1] > 1 else []
-    return (Path(text).expanduser() / f"{'_'.join([stem_of(source), *told, at or stamp()])}.png").resolve()
+    extension = ".mp4" if animation is not None and animation is not False else ".png"
+    return (Path(text).expanduser() / f"{'_'.join([stem_of(source), *told, at or stamp()])}{extension}").resolve()
 
 
 def write_png(out: Path, data: bytes) -> None:
@@ -623,6 +631,22 @@ def write_png(out: Path, data: bytes) -> None:
     with staging(out) as temporary:
         temporary.write_bytes(data)
         replace_atomic(temporary, out)
+
+
+def validate_animation(animation: Any, fps: int = 30) -> None:
+    if animation is None or animation is False:
+        if fps != 30:
+            raise SnapshotRefused("fps requires animation")
+        return
+    if animation is not True and (not isinstance(animation, str) or not animation.strip()):
+        raise SnapshotRefused("animation is true or an authored routine's name")
+    if isinstance(fps, bool) or not isinstance(fps, int) or not 1 <= fps <= 60:
+        raise SnapshotRefused("fps is an integer from 1 to 60")
+
+
+def validate_preview(preview: Any) -> None:
+    if not isinstance(preview, (bool, dict)):
+        raise SnapshotRefused("preview is a boolean or the viewer's render configuration object")
 
 
 def options(display: Any = None, camera: Any = None, grid: bool = False, width: int | None = None,
@@ -637,8 +661,9 @@ def options(display: Any = None, camera: Any = None, grid: bool = False, width: 
 
 
 def draw(source: Any, out: Path, *, display: Any = None, camera: Any = None, grid: bool = False,
-         preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None,
-         size_profile: str | None = None, annotation: Any = None, measurements: Any = None) -> dict[str, Any]:
+         preview: bool | dict[str, Any] = False, pose: Any = None, width: int | None = None, height: int | None = None,
+         size_profile: str | None = None, annotation: Any = None, measurements: Any = None,
+         animation: Any = None, fps: int = 30) -> dict[str, Any]:
     """A build's document (an ``export.Source``, in this process's memory) drawn into ``out``:
     a model's picture (``Model.snapshot``). Served from memory over the process's mesh
     cache, so nothing the build meshed is meshed again."""
@@ -647,14 +672,14 @@ def draw(source: Any, out: Path, *, display: Any = None, camera: Any = None, gri
     return snapshot(path, Path(out), display=shown, camera=framed, preview=preview,
                     size=None if width is None and height is None and size_profile is None else size, pose=pose,
                     source=source, annotation=parse_annotation(annotation), measurements=parse_measurements(measurements),
-                    annotation_source=annotation)
+                    annotation_source=annotation, animation=animation, fps=fps)
 
 
 def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None, camera: Any = None,
-             preview: bool = False, size: tuple[int, int] | None = None, daemon: bool = True,
+             preview: bool | dict[str, Any] = False, size: tuple[int, int] | None = None, daemon: bool = True,
              pose: Any = None, source: Any = None, annotation: dict[str, Any] | None = None,
              measurements: list[dict[str, Any]] | None = None, annotation_source: Any = None,
-             progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+             progress: Callable[[dict[str, Any]], None] | None = None, animation: Any = None, fps: int = 30) -> dict[str, Any]:
     """Draw ``document`` -- an ``.xbf`` or a ``.step`` the engine serves and meshes, or a file its
     reader reads (``FILES``: a mesh, a robot, a drawing) -- into ``out`` (a ``.png``); returns what
     was drawn and how long each stage took. ``pose``: a configuration's name (a robot's group
@@ -674,16 +699,17 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
     document, out = Path(document).resolve(), Path(out).resolve()
     return _snapshot(document, out, display=display, camera=camera, preview=preview, size=size, daemon=daemon,
                      pose=pose, source=source, annotation=annotation, measurements=measurements,
-                     annotation_source=annotation_source, started=started, progress=progress)
+                     annotation_source=annotation_source, started=started, progress=progress, animation=animation, fps=fps)
 
 
-def _checked(document: Path, out: Path, source: Any = None) -> str:
+def _checked(document: Path, out: Path, source: Any = None, animation: Any = None) -> str:
     """What a picture draws and where it goes, checked before anything renders: SRC a file the
     stills draw, and there (unless a build's ``source`` holds it), or a document's id, OUT a
     ``.png``. SRC's suffix (an id's document is drawn as an ``.xbf``)."""
+    extension = ".mp4" if animation is not None and animation is not False else ".png"
     if _by_id(document):
-        if out.suffix.lower() != ".png":
-            raise SnapshotRefused(f"a snapshot is a .png; {out.name} is not one")
+        if out.suffix.lower() != extension:
+            raise SnapshotRefused(f"a snapshot is a {extension}; {out.name} is not one")
         return ".xbf"
     suffix = document.suffix.lower()
     if suffix not in DOCUMENTS and suffix not in FILES:
@@ -691,16 +717,22 @@ def _checked(document: Path, out: Path, source: Any = None) -> str:
                               f"({', '.join(FILES)})")
     if source is None and not document.is_file():
         raise SnapshotRefused(f"no document {document}")
-    if out.suffix.lower() != ".png":
-        raise SnapshotRefused(f"a snapshot is a .png; {out.name} is not one")
+    if out.suffix.lower() != extension:
+        raise SnapshotRefused(f"a snapshot is a {extension}; {out.name} is not one")
+    if animation is not None and animation is not False and suffix not in (*DOCUMENTS, ".glb"):
+        raise SnapshotRefused("animation requires an AP242 document or glTF clip")
     return suffix
 
 
-def _snapshot(document: Path, out: Path, *, display: dict[str, Any] | None, camera: Any, preview: bool,
+def _snapshot(document: Path, out: Path, *, display: dict[str, Any] | None, camera: Any, preview: bool | dict[str, Any],
               size: tuple[int, int] | None, daemon: bool, pose: Any, source: Any, annotation: dict[str, Any] | None,
               measurements: list[dict[str, Any]] | None, annotation_source: Any, started: float,
-              progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
-    suffix = _checked(document, out, source)
+              progress: Callable[[dict[str, Any]], None] | None = None, animation: Any = None, fps: int = 30) -> dict[str, Any]:
+    suffix = _checked(document, out, source, animation)
+    validate_animation(animation, fps)
+    validate_preview(preview)
+    if animation is not None and animation is not False and pose is not None:
+        raise SnapshotRefused("animation cannot combine with pose")
     framed, exact, view = authored(camera, annotation, annotation_source, document)
     display = dict(display or {})
     # What the viewer hid and isolated when the packet was written, unless the display says.
@@ -708,8 +740,8 @@ def _snapshot(document: Path, out: Path, *, display: dict[str, Any] | None, came
         display.setdefault(field, refs)
     if view is not None and view.lens and "camera" not in display:
         display["camera"] = dict(view.lens)  # the view's projection
-    size = size or (view.size if view is not None and view.size else DEFAULT_SIZE)
-    still = Still(display, framed, exact, preview, tuple(size), pose, annotation, measurements)
+    size = size or (view.size if view is not None and view.size else ANIMATION_SIZE if animation is not None and animation is not False else DEFAULT_SIZE)
+    still = Still(display, framed, exact, preview, tuple(size), pose, annotation, measurements, animation=animation, fps=fps)
     if suffix in MESHES and pose is not None:
         raise SnapshotRefused(f"--pose poses a document's mechanism; {document.name} is a mesh and has none")
     if not out.parent.is_dir():
@@ -751,6 +783,10 @@ def _occt(document: Path, out: Path, still: Still, daemon: bool, source: Any, st
                                    "draw_still": {"out": str(out), "still": still.as_json()},
                                    "cwd": os.getcwd()}, spec, lambda _text: None, daemon, progress)["drawn"]
             return {**drawn, "document": str(document)}  # the id it was named by, not the worker's stand-in
+        if still.preview is True or isinstance(still.preview, dict) or (still.animation is not None and still.animation is not False):
+            if BROWSER_RENDER is None:
+                raise SnapshotRefused("the installed distribution provides browser Preview and animation snapshots")
+            return BROWSER_RENDER(document, out, still, source=source, progress=progress)
         if daemon and source is None:
             from cadgen.engine.client import request
 
@@ -875,7 +911,7 @@ def _job_size(output: dict[str, Any], settings: dict[str, Any], flags: tuple[Any
 
 
 def job_pictures(job: Any, source: Any = None, *, display: Any = None, camera: Any = None, grid: bool = False,
-                 preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None,
+                 preview: bool | dict[str, Any] = False, pose: Any = None, width: int | None = None, height: int | None = None,
                  size_profile: str | None = None, annotation: Any = None,
                  measurements: Any = None) -> list[tuple[Path, Path, Still]]:
     """Every picture a job names (``--job``: a Quick Edit packet, a job, or a list of jobs), each
@@ -945,8 +981,14 @@ def job_pictures(job: Any, source: Any = None, *, display: Any = None, camera: A
                 if selection.get(key):
                     shown[field_name] = [*(shown.get(field_name) or []), *selection[key]]
             _visibility(shown)
-        projection = (shown.get("camera") or {}).get("projection") or ("perspective" if preview or view.get("preview")
-                                                                      else "orthographic")
+        view_preview = view.get("preview", False)
+        if view_preview is None:
+            view_preview = False
+        validate_preview(view_preview)
+        validate_preview(preview)
+        chosen_preview = preview if preview is True or isinstance(preview, dict) else view_preview
+        enabled_preview = chosen_preview is True or isinstance(chosen_preview, dict)
+        projection = (shown.get("camera") or {}).get("projection") or ("perspective" if enabled_preview else "orthographic")
         ink = ink_flag if annotation is not None else parse_annotation(view.get("annotation", shared.get("annotation")))
         dimensions = dimensions_flag if measurements is not None else parse_measurements(
             view.get("measurements", shared.get("measurements")))
@@ -955,8 +997,6 @@ def job_pictures(job: Any, source: Any = None, *, display: Any = None, camera: A
             posed = parse_pose(posed)
         if posed is not None and document.suffix.lower() in MESHES:
             raise SnapshotRefused(f"{where}: --pose poses a document's mechanism; {document.name} is a mesh and has none")
-        if view.get("preview") is not None and not isinstance(view["preview"], bool):
-            raise SnapshotRefused(f"{where}.preview is true or false")
         outputs = view.get("outputs")
         if not isinstance(outputs, list) or not outputs:
             raise SnapshotRefused(f"{where}.outputs lists the pictures it writes, at least one")
@@ -980,7 +1020,7 @@ def job_pictures(job: Any, source: Any = None, *, display: Any = None, camera: A
                                                projection, tight))
             if framed == AUTHORED:
                 framed, exact, _view = authored(AUTHORED, ink, given if isinstance(given, dict) else None, document)
-            pictures.append((document, out, Still(shown, framed, exact, bool(preview or view.get("preview")), size,
+            pictures.append((document, out, Still(shown, framed, exact, chosen_preview, size,
                                                   posed, ink, dimensions, padding, tight,
                                                   bool(settings.get("transparent")), scale)))
     written = [out for _document, out, _still in pictures]
@@ -1018,7 +1058,8 @@ def draw_pictures(pictures: list[tuple[Path, Path, Still]], *, daemon: bool = Tr
 def _draw_staged(staged: list[tuple[Path, Path, Path, Still]], daemon: bool,
                  progress: Callable[[dict[str, Any]], None] | None = None) -> list[dict[str, Any]]:
     """Each picture of a job drawn into its staged file (``draw_pictures``)."""
-    if daemon or any(_by_id(document) for document, _out, _stage, _still in staged):
+    if daemon or any(_by_id(document) or still.preview is True or isinstance(still.preview, dict)
+                     for document, _out, _stage, still in staged):
         return [_occt(document, stage, still, daemon, None, time.perf_counter(), progress)
                 for document, _out, stage, still in staged]
     from cadgen.engine.formats import FormatError
@@ -1055,14 +1096,20 @@ def _warn(unmeshed: dict[str, list[int]]) -> dict[str, list[int]]:
     return unmeshed
 
 
+def _preview_argument(value):
+    found = _json_or_file(value, "--preview")
+    validate_preview(found)
+    return found
+
+
 def _arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
-    parser.usage = "%(prog)s SRC OUT.png [options] | --job PACKET [SRC] [options]"
+    parser.usage = "%(prog)s SRC OUT.png [options] | SRC OUT.mp4 --animation [NAME] [options] | --job PACKET [SRC] [options]"
     parser.add_argument("document", metavar="SRC", nargs="?",
                         help="a document (.xbf, .step), a mesh file (.glb, .stl, .3mf), a robot (.urdf, .sdf, .srdf), "
                              "a drawing (.dxf), or a document id (a model's, which python SCRIPT.py prints: drawn "
                              "from what the engine holds); with --job, a file drawn in place of every job's input")
-    parser.add_argument("out", metavar="OUT.png", nargs="?",
-                        help="the .png to write, or a folder (one that is there, or a path ending in a separator) to "
+    parser.add_argument("out", metavar="OUT.png|OUT.mp4", nargs="?",
+                        help="the .png (or --animation .mp4) to write, or a folder (one that is there, or a path ending in a separator) to "
                              "write <SRC's stem>_<UTC time>.png into")
     parser.add_argument("--job", metavar="PACKET",
                         help="a Quick Edit packet (the .snapshot.json the viewer writes), a job or a list of jobs, as "
@@ -1082,7 +1129,10 @@ def _arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
                                          "the viewer's scene coordinates, as a Quick Edit packet carries them: a "
                                          "document's or a GLB's mm, a robot's m, a 3MF's unit), or authored: the "
                                          "view --annotation's ink was drawn in, from its Quick Edit packet, exactly")
-    parser.add_argument("--preview", action="store_true", help="Preview's photographic look instead of the mode")
+    parser.add_argument("--preview", nargs="?", const=True, default=False, type=_preview_argument,
+                        help="the viewer Preview renderer; optionally its full render configuration JSON")
+    parser.add_argument("--animation", nargs="?", const=True, metavar="NAME", help="export an authored routine as MP4; omit NAME only when exactly one exists")
+    parser.add_argument("--fps", type=int, default=30, help="animation frames per second, 1 to 60 (default 30)")
     parser.add_argument("--width", type=int)
     parser.add_argument("--height", type=int)
     parser.add_argument("--size-profile", choices=sorted(SIZE_PROFILES))
@@ -1133,6 +1183,8 @@ def run(args: argparse.Namespace, prog: str = "cadgen snapshot") -> int:
     from cadgen.engine.cli import Failed
 
     if args.job is not None:
+        if args.animation is not None or args.fps != 30:
+            raise Failed("animation and fps require a single source/output, not --job", 2)
         return _run_job(args, prog)
     if args.document is None or args.out is None:
         raise Failed("the following arguments are required: SRC, OUT.png (or --job PACKET)", 2)
@@ -1146,7 +1198,7 @@ def run(args: argparse.Namespace, prog: str = "cadgen snapshot") -> int:
         report = api.snapshot(Path(args.document), args.out, display=args.display, camera=args.camera, grid=args.grid,
                               preview=args.preview, pose=args.pose, width=args.width, height=args.height,
                               size_profile=args.size_profile, annotation=args.annotation,
-                              measurements=args.measurements).report
+                              measurements=args.measurements, animation=args.animation, fps=args.fps).report
     except SnapshotRefused as error:
         raise Failed(str(error), 2) from None
     except ConnectionError:
@@ -1172,7 +1224,7 @@ def _run_held(args: argparse.Namespace, prog: str) -> int:
         drawn = api.snapshot(args.document, args.out, display=args.display, camera=args.camera, grid=args.grid,
                              preview=args.preview, pose=args.pose, width=args.width, height=args.height,
                              size_profile=args.size_profile, annotation=args.annotation,
-                             measurements=args.measurements)
+                             measurements=args.measurements, animation=args.animation, fps=args.fps)
     except (SnapshotRefused, ValueError) as error:
         raise Failed(str(error), 2) from None
     except api.EngineError as error:

@@ -266,3 +266,49 @@ test('admission budgets actual atlas page shape and colorspace variants', async 
   assert.equal(previewSceneBudget(admission, { sceneBytes: 1024 * 1024 }), 'scene budget', 'a thin texture still allocates a full atlas page');
   geometry.dispose(); root.children[0].material.dispose(); strip.dispose(); second.dispose();
 });
+
+test('pose-only synchronization updates private instances without changing their prototype', async () => {
+  const { groupPreviewMeshes, createPreviewObjects, syncPreviewSceneTransforms } = await import('./scene.js');
+  const root = new THREE.Group(), geometry = new THREE.BoxGeometry(), material = new THREE.MeshStandardMaterial();
+  const first = new THREE.Mesh(geometry, material), second = new THREE.Mesh(geometry, material);
+  root.add(first, second); root.updateMatrixWorld(true);
+  const groups = groupPreviewMeshes([first, second]);
+  const privateGeometry = geometry.clone(), objects = createPreviewObjects(groups, new Map([[geometry, privateGeometry]]));
+  const scene = new THREE.Scene(); scene.add(...objects); scene.userData.previewGroups = groups; scene.userData.previewObjects = objects;
+  first.position.set(3, 2, 1); second.rotation.z = 0.4;
+  assert.equal(syncPreviewSceneTransforms(scene, root), true);
+  const matrix = new THREE.Matrix4();
+  objects[0].getMatrixAt(0, matrix); assert.deepEqual(matrix.elements, first.matrixWorld.elements);
+  objects[0].getMatrixAt(1, matrix); assert.ok(matrix.elements.every((value, i) => Math.abs(value - second.matrixWorld.elements[i]) < 1e-6));
+  assert.equal(objects[0].geometry, privateGeometry);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(), material), privateGround = new THREE.Mesh(new THREE.PlaneGeometry(), material);
+  root.add(ground); scene.add(privateGround); scene.userData.previewGround = privateGround;
+  // Ground is a studio sibling, not a member of the model source root.
+  root.remove(ground); ground.position.z = -3;
+  assert.equal(syncPreviewSceneTransforms(scene, root, ground), true);
+  assert.equal(privateGround.matrix.elements[14], -3, 'studio floor follows the posed model');
+  ground.geometry.dispose(); privateGround.geometry.dispose();
+  delete scene.userData.previewGround;
+  second.scale.x = -1;
+  assert.equal(syncPreviewSceneTransforms(scene, root), false, 'a newly mirrored placement requires whole-scene rebuilding');
+  objects[0].dispose(); geometry.dispose(); privateGeometry.dispose(); material.dispose();
+});
+
+test('fully collapsed STEP hide poses are omitted and show transitions rebuild the trace scene', async () => {
+  const { groupPreviewMeshes, createPreviewObjects, syncPreviewSceneTransforms } = await import('./scene.js');
+  const root = new THREE.Group(), geometry = new THREE.BoxGeometry(), material = new THREE.MeshStandardMaterial();
+  const visible = new THREE.Mesh(geometry, material), hidden = new THREE.Mesh(geometry, material);
+  hidden.scale.set(0, 0, 0); root.add(visible, hidden);
+  let admission = inspectPreviewScene(root);
+  assert.equal(admission.reason, null); assert.deepEqual(admission.meshes, [visible]);
+  const copy = geometry.clone(), groups = groupPreviewMeshes(admission.meshes), objects = createPreviewObjects(groups, new Map([[geometry, copy]]));
+  const privateScene = new THREE.Scene(); privateScene.add(...objects); privateScene.userData.previewGroups = groups; privateScene.userData.previewObjects = objects;
+  hidden.scale.set(1, 1, 1);
+  assert.equal(syncPreviewSceneTransforms(privateScene, root), false, 'a revealed instance needs a new TLAS');
+  visible.scale.set(0, 0, 0); hidden.scale.set(0, 0, 0);
+  admission = inspectPreviewScene(root);
+  assert.equal(admission.reason, null, 'a wholly hidden assembly can still trace the stage');
+  hidden.scale.set(1, 1, 0);
+  assert.equal(inspectPreviewScene(root).reason, 'singular transform', 'a flattened visible surface is never silently omitted');
+  objects[0].dispose(); copy.dispose(); geometry.dispose(); material.dispose();
+});

@@ -859,7 +859,7 @@ def status_text(answer: dict[str, Any]) -> str:
 VERBS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[[argparse.Namespace, str], int]]] = {
     "export": ("write an .xbf or a .step to STEP, GLB, STL, 3MF, DXF or xbf files, by suffix; a GLB carries the "
                "document's motions as clips, a DXF draws a planar one", _export_arguments, _export),
-    "snapshot": ("draw a document or a file the viewer opens as the CAD Viewer does, into a PNG", _snapshot_arguments,
+    "snapshot": ("draw a viewer PNG or an authored-animation MP4", _snapshot_arguments,
                  _snapshot),
     "serve": ("serve a document over HTTP and print its URL", _serve_arguments, _serve),
     "inspect": ("what a document holds -- its state, parts, bounds, volume, materials, joints, couplings, states, "

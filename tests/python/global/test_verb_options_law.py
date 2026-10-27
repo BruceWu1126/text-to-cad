@@ -61,7 +61,7 @@ class ExportTakesADocumentAndDestinations(unittest.TestCase):
 
 class SnapshotTakesThePictureAlone(unittest.TestCase):
     PICTURE = ("display", "camera", "grid", "preview", "pose", "width", "height", "size_profile", "daemon",
-               "annotation", "measurements")
+               "annotation", "measurements", "animation", "fps")
 
     def test_a_handle_s_snapshot_takes_the_verb_s_picture_options_by_name(self) -> None:
         verb = inspect.signature(cadgen.snapshot).parameters

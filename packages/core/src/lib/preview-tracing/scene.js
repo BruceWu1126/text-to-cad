@@ -85,17 +85,24 @@ function validMaterialGroups(geometry, material) {
   return Array.isArray(material) || end === total;
 }
 
+function collapsedTransform(matrix) {
+  const e = matrix.elements;
+  return [0, 1, 2, 4, 5, 6, 8, 9, 10].every(index => e[index] === 0);
+}
+
 export function inspectPreviewScene(root, limits = PREVIEW_LIMITS) {
   const geometries = new Set(), materials = new Set(), textures = new Map(), meshes = [];
   // The studio floor's plane has uv even when the model has none. The tracer
   // packs the union of channels across the whole scene into every vertex.
   const uvChannels = new Set(['uv']);
-  let triangles = 0, vertices = 0, groups = 0, texturePixels = 0, cloneBytes = 0, reason = null;
+  let triangles = 0, vertices = 0, groups = 0, texturePixels = 0, cloneBytes = 0, collapsed = 0, reason = null;
   root.updateMatrixWorld(true);
   root.traverseVisible(object => {
     if (reason) return;
     if (object.isLine || object.isPoints || object.isSprite) { reason = 'unsupported primitive'; return; }
     if (!object.isMesh) return;
+    if (collapsedTransform(object.matrixWorld)) { collapsed++; return; }
+    if (!Number.isFinite(object.matrixWorld.determinant()) || object.matrixWorld.determinant() === 0) { reason = 'singular transform'; return; }
     if (object.isSkinnedMesh || object.isInstancedMesh || object.morphTargetInfluences?.length) { reason = 'animated geometry'; return; }
     const geometry = object.geometry, position = geometry?.getAttribute('position');
     if (!position || !geometry.getAttribute('normal') || Object.values(geometry.attributes).some(attr => attr.isInterleavedBufferAttribute) || geometry.index?.isInterleavedBufferAttribute ||
@@ -123,7 +130,7 @@ export function inspectPreviewScene(root, limits = PREVIEW_LIMITS) {
     groups += Math.max(geometry.groups.length, 1);
 
   });
-  if (!reason && !meshes.length) reason = 'empty scene';
+  if (!reason && !meshes.length && !collapsed) reason = 'empty scene';
   const canonical = canonicalPreviewGeometries(meshes);
   for (const geometry of canonical.values()) {
     if (geometries.has(geometry)) continue;
@@ -335,6 +342,41 @@ export function createPreviewObjects(groups, geometries) {
   });
 }
 
+// Pose-only changes preserve the packed scene and prototype BVHs. Refuse a
+// transform that no longer satisfies the original instance admission rules so
+// the caller can rebuild the private scene instead.
+export function syncPreviewSceneTransforms(scene, sourceRoot, sourceGround = null) {
+  const groups = scene?.userData.previewGroups, objects = scene?.userData.previewObjects;
+  const ground = scene?.userData.previewGround;
+  if (!groups || !objects || groups.length !== objects.length || Boolean(ground) !== Boolean(sourceGround?.visible)) return false;
+  sourceRoot.updateWorldMatrix(true, true);
+  const original = new Set(groups.flatMap(group => group.meshes));
+  const visible = [];
+  let invalid = false;
+  sourceRoot.traverseVisible(object => {
+    if (object.isLine || object.isPoints || object.isSprite) invalid = true;
+    if (!object.isMesh || collapsedTransform(object.matrixWorld)) return;
+    if (!Number.isFinite(object.matrixWorld.determinant()) || object.matrixWorld.determinant() === 0) invalid = true;
+    visible.push(object);
+  });
+  if (invalid || visible.length !== original.size || visible.some(mesh => !original.has(mesh))) return false;
+  for (const group of groups) if (group.instancingSafe && group.meshes.some(mesh => mesh.matrixWorld.determinant() <= 0 || hasShear(mesh.matrixWorld))) return false;
+  if (ground) {
+    sourceGround.updateWorldMatrix(true, false);
+    ground.matrix.copy(sourceGround.matrixWorld);
+    ground.matrixWorldNeedsUpdate = true;
+  }
+  groups.forEach((group, index) => {
+    const object = objects[index];
+    if (object.isInstancedMesh) {
+      group.meshes.forEach((source, at) => object.setMatrixAt(at, source.matrixWorld));
+      object.instanceMatrix.needsUpdate = true;
+    } else object.matrix.copy(group.meshes[0].matrixWorld);
+    object.matrixWorldNeedsUpdate = true;
+  });
+  return true;
+}
+
 export async function preparePreviewScene(runtime, admission, signal, cache, deviceLimits) {
   const scene = new THREE.Scene(), copied = new Map();
   const worker = new GenerateMeshBVHWorker();
@@ -367,6 +409,7 @@ export async function preparePreviewScene(runtime, admission, signal, cache, dev
     const objects = createPreviewObjects(groups, copied);
     scene.add(...objects);
     scene.userData.previewObjects = objects;
+    scene.userData.previewGroups = groups;
     const ground = runtime.photographicStudio?.ground;
     if (ground?.visible && ground.material?.isMeshStandardMaterial) {
       const copy = new THREE.Mesh(ground.geometry.clone(), createPreviewFloorMaterial(ground.material, runtime.previewConfiguration));

@@ -103,7 +103,11 @@ const XBF_FAMILY = Object.freeze({
   // The document the xbf renderer loads (`useXbfScene`): its structure and part buffers, read
   // from the engine that serves it (`resolved.url`, the document's API URL).
   load: job => loadXbfDocument(jobUrl(job)),
-  build: (THREE, document) => createXbfScene(THREE, document),
+  build(THREE, document, job) {
+    const scene = createXbfScene(THREE, document);
+    if (job?.jointValues != null) scene.setPose(job.jointValues);
+    return scene;
+  },
   release: document => document.release()
 });
 

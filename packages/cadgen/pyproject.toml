@@ -65,6 +65,11 @@ dependencies = [
   # The engine's stills rasterise what they draw over the picture (annotation ink,
   # measurements) with Pillow.
   "pillow",
+  # Preview snapshots use the same bundled JavaScript renderer as the viewer.
+  # Playwright drives a locally installed Chromium; snapshot never downloads one.
+  "playwright==1.63.0",
+  # Platform wheels carry the MP4 encoder, so exports need no system ffmpeg.
+  "imageio-ffmpeg==0.6.0",
   "shapely",
 ]
 

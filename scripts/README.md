@@ -27,18 +27,19 @@ where those files ship, so these scripts are what produces them.
   metadata (which IS committed) rather than writing it. `--clean` removes the
   `_runtime` tree first. Called by `test.yml`, `release-publish.yml`,
   `check-builds.sh`, the pre-commit hook.
-- `cadgen-runtime.sh` — builds the two runtime stages: `--viewer` (vite build of
-  `apps/web`) and `--mcp` (vite build of `apps/mcp`, one `index.html`), first removing any
-  entry under `_runtime` that neither stage builds, and saying so.
+- `cadgen-runtime.sh` — builds three runtime stages: `--viewer` (vite build of
+  `apps/web`), `--mcp` (vite build of `apps/mcp`, one `index.html`) and `--snapshot`
+  (the shared headless renderer from compiled core). It removes entries under
+  `_runtime` that no stage builds.
   `--print-outputs` lists the directories a bundle always produces; `--check`
-  builds both and asserts each stage's `index.html` and the `THIRD_PARTY_LICENSES.txt` its
+  builds all and asserts each stage's entry page and the `THIRD_PARTY_LICENSES.txt` its
   build writes (`@text-to-cad/core/third-party-licenses`). Called by `bundle.sh` and
   `check-builds.sh`; pinned by `test_js_runtime_reproducibility.py`. Call it
   directly only to debug one stage.
-- `lib/snapshot_runtime.sh [OUT_DIR]` — the OCCT parity bench's snapshot page,
-  never part of the wheel: esbuilds `@text-to-cad/core`'s headless render entry
-  with `three`/`meshoptimizer` pinned from `package-lock.json` into the ignored
-  `tmp/bench/snapshot-page` (or `OUT_DIR`). Run by `bench/occt_parity.py`.
+- `snapshot-runtime.mjs [OUT_DIR]` — Vite bundles the shared headless renderer,
+  workers, decoder, denoising weights and notices into `_runtime/snapshot`.
+  `lib/snapshot_runtime.sh [OUT_DIR]` builds the same page in the ignored
+  `tmp/bench/snapshot-page` (or `OUT_DIR`) for `bench/occt_parity.py`.
 
 `test/` — test runners.
 

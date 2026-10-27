@@ -139,8 +139,9 @@ dependencies"](CONTRIBUTING.md#development-dependencies)). In a checkout, instal
   (the release stamps every pin); no skill installs cadgen
   any other way (no `requirements.txt` naming it), because a second installation
   is a second daemon. Skills do not vendor it: a skill script is a thin entrypoint whose
-  parser and behaviour live in `cadgen.cli`. The engine draws every snapshot with
-  OCCT, so no skill has a browser step. cadgen carries the JavaScript it serves too
+  parser and behaviour live in `cadgen.cli`. cadgen owns snapshot rendering: OCCT for
+  CAD stills, its packaged shared viewer renderer for Preview and animation, so no
+  skill drives a browser. cadgen carries the JavaScript it serves too
   (the CAD Viewer client, the CAD app page), so a skill ships no runtime of its own. Not every
   skill needs cadgen (bambu-labs, dfam-check, dfm, gcode, sendcutsend,
   step-parts are cadgen-free); do not add the dependency to a skill that never invokes it.

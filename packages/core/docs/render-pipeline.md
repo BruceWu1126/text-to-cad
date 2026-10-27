@@ -63,8 +63,8 @@ The stages keep ownership narrow:
   as the other: three sorts each object back to front and draws a two-sided one back faces first,
   OCCT draws them as they were displayed, which is most of what still differs.
 - `captureModel` draws the scene headless and returns its pictures, with no filesystem
-  writes. cadgen's stills are OCCT's (`cadgen snapshot`); this headless scene is what the
-  renderer parity measurement drives beside OCCT (`scripts/bench/occt_parity.py`).
+  writes. cadgen's regular stills are OCCT's; Preview stills and animation frames use this
+  headless scene, which the renderer parity measurement also drives beside OCCT.
 
 ## Modules
 
@@ -86,8 +86,7 @@ Preview's photographic look (Render) is no mode: it is asked for on its own, by 
 viewer's Preview and a snapshot's `preview`, over the same display. Its own settings
 (`PreviewSettings`: `parts`, `lighting`, `background`, `floor`) are the viewer's,
 kept beside the display, never in it (`normalizePreviewSettings`,
-`resolvePreviewSettings`, `previewSettingsChanged`); a snapshot draws Preview at its
-defaults. `readViewSettings` and `readPreviewSettings` read a stored record setting
+`resolvePreviewSettings`, `previewSettingsChanged`); a snapshot accepts the same settings and defaults. `readViewSettings` and `readPreviewSettings` read a stored record setting
 by setting, leaving out what this build cannot read, without rewriting it.
 
 `resolveViewSettings` returns the established renderer groups. Solid is shaded with
@@ -156,10 +155,9 @@ the origin visible. Depth fitting includes the actual floor elevation;
 orthographic views can use a signed near plane when the floor crosses the eye.
 
 Lighting quality is `preview` or `final`, mapping to standard/high scene policy.
-The viewer passes `lightingQuality: "preview"`; the CLI baseline is `final`.
-That environment default also feeds Preview's default comparison and does not pin a saved
-override. An explicit Preview `lighting.quality` wins in the viewer; a snapshot's `preview`
-is always `final`.
+The viewer and Preview snapshots default to `lightingQuality: "preview"`; an explicit
+Preview `lighting.quality` selects `final` in either caller. The path tracer converges
+at 128 samples for Preview or 256 for Final before its headless capture.
 Final is the High scene preset: 4096px spotlight shadows, a 512px procedural environment
 and 2x snapshot capture, and a still view in the viewer converges over 64 samples of the
 studio's frame (Preview: 32). `output.renderScale` is an explicit raster override; every
@@ -196,7 +194,7 @@ interactive viewer's Preview. It leaves the raster studio available during prepa
 motion, replaces its picture after a completed denoising pass, and stops scheduling after
 its sample/work budget. Camera, pose, material, lighting and viewport changes invalidate
 accumulation. Failures restore the raster picture; a late preparation cannot attach to a
-closed view. Engine snapshots continue to use OCCT.
+closed view. A headless Preview frame drives this same controller to its complete denoised sample budget; it reports failure instead of returning a raster approximation. A persistent session reuses the device, networks, environment and prototype BVHs across rigid animation frames, refitting their transforms. Native XBF animation uses AP242 configuration-sequence motions; GLB animation uses its authored glTF clips. Traced snapshots reject annotations, measurements, clipping and unsupported deformed geometry instead of omitting them; ordinary stills keep their existing OCCT path.
 
 `scene.js` adapts the visible PBR meshes, preserving material arrays, face groups, vertex
 colours and world transforms. BVHs are prepared in a worker over private prototype copies;
@@ -581,8 +579,7 @@ that rest box.
 
 It does not write files: its caller does. Consumers use compiled `@text-to-cad/core`
 exports; the OCCT parity bench bundles this entrypoint into a snapshot page of its own, built
-on demand outside the wheel, and loads it in a headless Chromium to compare with OCCT's stills.
-cadgen's own snapshots are drawn by OCCT and never load it.
+on demand and loads it in headless Chromium to compare with OCCT's stills. cadgen bundles the same entry for Preview stills and animation; regular stills use OCCT.
 
 ### `common/headlessScene.js`
 

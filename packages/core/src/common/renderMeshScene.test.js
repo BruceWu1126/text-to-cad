@@ -130,10 +130,10 @@ test("snapshot scene policy composes display Render quality with technical quali
 
   const rendered = renderJobContext(twoPartMeshData(), { preview: true });
   assert.equal(rendered.sceneSettings.render.enabled, true);
-  assert.equal(rendered.quality.id, "high");
+  assert.equal(rendered.quality.id, "standard");
   assert.equal(rendered.projection, "perspective");
   assert.equal(rendered.displayMode, "shaded");
-  assert.equal(rendered.quality.renderScale, 2);
+  assert.equal(rendered.quality.renderScale, 1);
 });
 
 test("per-output views inherit the photographic lens without inheriting a conflicting pose", () => {
@@ -335,7 +335,7 @@ test("an exploded Render snapshot keeps its floor and floor shadow on the rest p
 test("a snapshot drawn at a render scale above 1 spreads its floor's dither by it", async () => {
   // Final draws twice the pixels it keeps: each kept pixel averages four, and the dither
   // must be drawn twice as wide to survive that, or the dark floor's bands come back.
-  const job = glbJob({ mode: "view", preview: true, outputs: [{ path: "final.png", width: 64, height: 64, camera: "iso" }] });
+  const job = glbJob({ mode: "view", preview: true, previewSettings: { lighting: { quality: "final" } }, outputs: [{ path: "final.png", width: 64, height: 64, camera: "iso" }] });
   const { context, model, scene } = await pairCapture(job);
   const configuration = context.sceneSettings.render.configuration;
   const renderer = { ...studioRendererStub(), getPixelRatio() { return context.quality.renderScale; } };
@@ -431,4 +431,11 @@ test("a snapshot's Render still converges over every sample of its studio frame;
   assert.equal(snapshotStudioSamples(), PHOTOGRAPHIC_STUDIO_FRAME.stillSamples);
   assert.ok(PHOTOGRAPHIC_STUDIO_FRAME.stillSamples > 1);
   assert.equal(snapshotStudioSamples({ softwareRendering: true }), 1);
+});
+
+
+test("snapshot Preview defaults to the viewer sample quality and honors an explicit Final setting", () => {
+  const model = { bounds: { min: [0,0,0], max: [1,1,1] } };
+  assert.equal(renderJobContext(model, { preview: true }).sceneSettings.render.configuration.quality, "preview");
+  assert.equal(renderJobContext(model, { preview: true, previewSettings: { lighting: { quality: "final" } } }).sceneSettings.render.configuration.quality, "final");
 });

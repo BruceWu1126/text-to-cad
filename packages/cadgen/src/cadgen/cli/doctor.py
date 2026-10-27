@@ -370,7 +370,28 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
         action="store_true",
         help="Do everything but start the engine: say only whether one is running.",
     )
+    parser.add_argument(
+        "--install-browser", action="store_true",
+        help="Download this installation's Chromium for Preview snapshots and animation export, then exit. "
+             "Snapshots themselves never download a browser. Requires network access during setup.",
+    )
     args = parser.parse_args(argv)
+    if args.install_browser:
+        if args.prune or args.all_versions or args.skill:
+            parser.error("--install-browser is a separate setup operation")
+        # Use this interpreter's pinned Playwright, including when cadgen was
+        # launched through its version proxy. Do not replace a person's Chrome.
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                timeout=600, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            sys.stderr.write(f"Browser installation failed: {error}\n")
+            return 1
+        return result.returncode
     if args.all_versions and not args.prune:
         parser.error("--all-versions goes with --prune")
 

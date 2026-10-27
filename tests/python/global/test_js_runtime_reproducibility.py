@@ -144,7 +144,7 @@ class StaleRuntimeEntriesArePrunedTest(unittest.TestCase):
         self.assertIsNotNone(prune, "prune_stale_runtime is gone from the runtime bundler")
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime = Path(temp_dir) / "_runtime"
-            for kept in ("viewer/index.html", "mcp/index.html"):
+            for kept in ("viewer/index.html", "mcp/index.html", "snapshot/render.html"):
                 (runtime / kept).parent.mkdir(parents=True, exist_ok=True)
                 (runtime / kept).write_text("built", encoding="utf-8")
             (runtime / "browser").mkdir()
@@ -155,7 +155,7 @@ class StaleRuntimeEntriesArePrunedTest(unittest.TestCase):
                 check=True, capture_output=True, text=True,
                 env={**os.environ, "RUNTIME_DIR": str(runtime)},
             )
-            self.assertEqual(sorted(path.name for path in runtime.iterdir()), ["mcp", "viewer"])
+            self.assertEqual(sorted(path.name for path in runtime.iterdir()), ["mcp", "snapshot", "viewer"])
             self.assertEqual((runtime / "viewer" / "index.html").read_text(encoding="utf-8"), "built")
             self.assertIn("_runtime/browser: no stage builds it", result.stdout)
             self.assertIn("_runtime/.stale: no stage builds it", result.stdout)

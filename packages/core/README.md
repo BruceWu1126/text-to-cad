@@ -3,10 +3,9 @@
 The shared JavaScript half of cadgen: everything the distribution and its
 clients need to turn the meshes the engine made into pixels and motion.
 Source builds to ordinary ESM and package-owned declarations in `dist/`.
-Apps and UI consume compiled exports; the OCCT parity bench bundles the
-headless entry into a snapshot page of its own, outside the Python
-distribution. Consumers neither alias
-this package's source nor supply ambient module declarations.
+Apps and UI consume compiled exports; cadgen bundles the headless entry for
+Preview snapshots and animation, and the OCCT parity bench also uses it.
+Consumers neither alias this package's source nor supply ambient module declarations.
 
 **May depend on:** Three.js, three-mesh-bvh, meshoptimizer and framework-independent
 helpers. Never React, ReactDOM, Electron, Next.js, UI or application source.
@@ -88,8 +87,7 @@ protocol relationship never imports Python or discovers an interpreter.
   `common/sceneSettings.js`) and a robot opens at one pose: the opening of the
   articulation cadgen resolved for it (`cadgen.robot_payload`, played by
   `common/articulation.js`). The
-  parity page therefore cannot draw one of them differently from the viewer (cadgen's own
-  stills are OCCT's), and none is flattened into mesh data for a render. They are cut, exploded and measured the same
+  parity page therefore cannot draw one of them differently from the viewer (cadgen's regular stills are OCCT's and Preview stills use the shared tracer), and none is flattened into mesh data for a render. They are cut, exploded and measured the same
   way in both, too: Clip through `lib/viewer/sceneClip.js`, Explode through the scene's
   `setExplode` (`lib/viewer/sceneExplode.js`, a GLB's), Measure's snapping through
   `lib/viewer/meshMeasure.js`, every number in the FILE's unit (`lib/viewer/sceneUnits.js`)

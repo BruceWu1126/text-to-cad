@@ -1,5 +1,5 @@
 import { normalizeAnnotation } from "./annotation.js";
-import { normalizeViewSettings } from "./viewSettings.js";
+import { normalizePreviewSettings, normalizeViewSettings } from "./viewSettings.js";
 
 export function validateSnapshotRenderJob(job = {}) {
   const mode = String(job.mode || "view").trim().toLowerCase();
@@ -12,6 +12,10 @@ export function validateSnapshotRenderJob(job = {}) {
   // Preview is its own request beside the display, never a display mode: `preview: true`.
   if (Object.hasOwn(job, "preview") && typeof job.preview !== "boolean") throw new Error("preview must be a boolean");
   normalizeViewSettings(Object.hasOwn(job, "display") ? job.display : {});
+  if (Object.hasOwn(job, "previewSettings")) normalizePreviewSettings(job.previewSettings);
+  if (job.preview === true && (job.annotation != null || job.measurements != null)) {
+    throw new Error('Preview tracing does not yet support snapshot annotations or measurements');
+  }
   // The ink drawn over the model (`annotation.js`): refused before anything loads, by what is wrong.
   if (job.annotation != null) normalizeAnnotation(job.annotation);
   for (const camera of [job.camera, ...(Array.isArray(job.outputs) ? job.outputs.map(output => output.camera) : [])]) {

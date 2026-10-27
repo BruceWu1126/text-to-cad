@@ -5,7 +5,7 @@ import { initUNetFromURL } from 'oidn-webgpu/dist/oidn.js';
 import { PreviewDenoiser } from './previewDenoiser.js';
 import { OIDN_WEIGHTS_URL } from './weights/index.js';
 import { drawPreviewBackdrop } from './backdrop.js';
-import { inspectPreviewScene, preparePreviewScene, disposePreviewScene, createPreviewGeometryCache, previewSceneBudget, PREVIEW_LIMITS } from './scene.js';
+import { inspectPreviewScene, preparePreviewScene, disposePreviewScene, createPreviewGeometryCache, previewSceneBudget, syncPreviewSceneTransforms, PREVIEW_LIMITS } from './scene.js';
 
 const FRAME_PATH_BUDGET = 250000;
 const RAY_STATE_BYTES = 224;
@@ -27,7 +27,7 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
   let state = 'idle', reason = null, generation = 0, cameraEpoch = 0, abort = null, tracer = null;
   let gpu = null, scene = null, camera = null, canvas = null, background = null, capture = null, frames = 0, visible = false;
   let rasterOpacity = null;
-  let started = false, disposed = false, cameraDirty = false, measuring = null, sample = 0, frameBudget = FRAME_PATH_BUDGET;
+  let started = false, disposed = false, cameraDirty = false, transformsDirty = false, measuring = null, sample = 0, frameBudget = FRAME_PATH_BUDGET;
   let inFlight = null, denoiser = null, denoisedSamples = 0, denoisingSamples = 0, budgetExhausted = false;
   const cache = createPreviewGeometryCache();
   let maxSamples = rawReferenceSamples ?? (runtime.previewConfiguration?.quality === 'final' ? FINAL_SAMPLES : PREVIEW_SAMPLES);
@@ -59,7 +59,7 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
       else if (!disposed && state === 'ready') requestRender();
     });
   };
-  const invalidate = ({ sceneChanged = false } = {}) => {
+  const invalidate = ({ sceneChanged = false, transformsChanged = false } = {}) => {
     hide(); cameraEpoch++; measuring = null;
     const wasDenoising = denoiser?.running;
     denoiser?.reset(); denoisedSamples = 0; denoisingSamples = 0;
@@ -68,9 +68,9 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
       generation++;
       // Abort also rejects an in-flight worker task, so its private geometry is released.
       abort?.abort(); abort = null;
-      started = false; state = 'idle'; reason = null; frames = 0; sample = 0; measuring = null; budgetExhausted = false;
+      transformsDirty = false; started = false; state = 'idle'; reason = null; frames = 0; sample = 0; measuring = null; budgetExhausted = false;
     } else {
-      cameraDirty = true;
+      cameraDirty = true; transformsDirty ||= transformsChanged;
     }
   };
   const fail = (error, token) => {
@@ -184,6 +184,17 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
     // raster as soon as the current batch finishes instead of draining a backlog.
     if (inFlight) return { refining: false, visible };
     try {
+      if (transformsDirty) {
+        transformsDirty = false;
+        if (!scene || !syncPreviewSceneTransforms(scene, runtime.modelGroup, runtime.photographicStudio?.ground)) {
+          invalidate({ sceneChanged: true });
+          void prepare(sourceCamera);
+          return { refining: false, visible: false };
+        }
+        tracer.updateTransforms();
+        // Guide meshes are ordinary private copies, so rebuild them over the new matrices.
+        denoiser.setScene(scene, camera);
+      }
       const rasterCanvas = runtime.renderer.domElement;
       const width = Math.max(1, rasterCanvas.width || rasterCanvas.clientWidth);
       const height = Math.max(1, rasterCanvas.height || rasterCanvas.clientHeight);

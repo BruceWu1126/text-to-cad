@@ -1,4 +1,4 @@
-"""``cadgen snapshot SRC OUT.png``: a document, a mesh file, a robot or a drawing drawn by OCCT
+"""``cadgen snapshot SRC OUT.png``: a document, mesh, robot or drawing rendered as the viewer does
 as the CAD Viewer draws it (``cadgen.engine.cli``).
 
 The parser and the run are the engine's (``cadgen.engine.cli.parser_for``, ``run``), the same
