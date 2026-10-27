@@ -1326,6 +1326,14 @@ output and moved into place only when all are drawn, and a failed snapshot leave
 of the file's warm render process; `daemon=False` serves each file once for all its pictures.
 `--json` prints `{"ok": true, "pictures": [what each drew]}`.
 
+**Native KiCad stills.** A `.kicad_pcb` is a file source, with no XCAF document or model worker.
+`formats/kicad/plot.py` rereads the board and its sibling project on each request, discarding
+the index after creating the plot payload. `render/board.py` paints the same layer primitives
+with Pillow in sheet millimetres, including top/bottom mirroring, Display presets, saved
+plan cameras, annotation and measurements. Its render-service handle holds only a path; no
+board plot or parsed model is persisted. It refuses Preview, pose and transparent output.
+No KiCad installation is required to view a board; KiCad's own CLI performs DRC and exports.
+
 **The OCCT stills.** A document is drawn by OCCT's own OpenGL renderer from the engine's meshes
 (`render/`): one presentation per part and look, each
 instance a connected object of it; the modes, the camera fit, clip, grid and Preview are the
