@@ -1,3 +1,4 @@
+import { useI18n } from "@text-to-cad/ui/i18n";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@text-to-cad/ui/utils";
 import { BOARD_OVERLAY_COLORS, drawBoardOverlay } from "@text-to-cad/core/lib/board2d/boardOverlay.js";
@@ -58,16 +59,16 @@ const SAVE_DELAY_MS = 180;
 const BOARD_SURFACE = Object.freeze({ "data-board-surface": "", "data-cad-dark-picture": "" });
 // The file's slices: the board's Display and what is isolated, kept across rebuilds.
 const SLICES = Object.freeze({ board: "1", isolated: "1" });
-const BOARD_UPDATE_STATUS = Object.freeze({ pending: true, label: "Updating board…" });
+
 const BOARD_LIVE = Object.freeze({ commands: Object.freeze(["select", "clearSelection"]), declined: Object.freeze({}) });
 const KIND_ICONS = Object.freeze({ parts: PartKindIcon, pads: PadKindIcon, nets: NetKindIcon });
-const KIND_LABELS = Object.freeze({ parts: "Parts", pads: "Pads", nets: "Nets" });
+const KIND_LABELS = Object.freeze({ parts: "board.text.parts", pads: "board.text.pads", nets: "board.text.nets" });
 // Select's menu, one choice (`kit/tools/select/SelectFilterMenu.jsx`): All, then each kind alone.
 const SELECT_MODES = [
-  { id: "all", label: "All", kinds: BOARD_SELECT_KINDS, icon: modeGlyphIcon("all") },
+  { id: "all", labelKey: "pick.all", kinds: BOARD_SELECT_KINDS, icon: modeGlyphIcon("all") },
   ...BOARD_SELECT_KINDS.map(id => {
     const Icon = KIND_ICONS[id];
-    return { id, label: KIND_LABELS[id], kinds: [id], icon: <Icon className="size-3.5" /> };
+    return { id, labelKey: KIND_LABELS[id], kinds: [id], icon: <Icon className="size-3.5" /> };
   })
 ];
 const NO_SELECTION = Object.freeze({ hovered: [], selected: [] });
@@ -85,6 +86,7 @@ function readTransform(raw) {
 const viewDisplay = display => ({ mode: display.mode, side: display.side, poured: display.poured, ...(display.layers ? { layers: [...display.layers] } : {}) });
 
 function BoardSurface({ view, data }) {
+  const { t } = useI18n();
   const host = useViewerHost();
   const mobile = useViewerMobile();
   const workspace = useWorkspaceDocument({ view, data });
@@ -154,7 +156,7 @@ function BoardSurface({ view, data }) {
   const hoveredInkRef = useRef([]);
   const paintRef = useRef(() => {});
   const requestPaint = useCallback(() => paintRef.current(), []);
-  const scene = useMemo(() => (index ? createBoardScene(index, { onHighlight: ink => { highlightRef.current = ink; } }) : null), [index]);
+  const scene = useMemo(() => (index ? createBoardScene(index, { t, onHighlight: ink => { highlightRef.current = ink; } }) : null), [index, t]);
   const selection = useSceneSelection({ scene, requestRender: requestPaint });
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
@@ -370,7 +372,7 @@ function BoardSurface({ view, data }) {
   const handover = useFlatHandover({
     view, data, workspace, file, shown, ready, alert, tools, selection, references, chips, nameReference,
     capture, currentView, annotationDocument: boardAnnotationDocument, runtime, live: BOARD_LIVE,
-    copySelection: index ? copySelection : null, fit, captureFailed: "Couldn’t capture the board"
+    copySelection: index ? copySelection : null, fit, captureFailed: t("alert.captureDrawingFailed")
   });
 
   // ---- the frame ---------------------------------------------------------------
@@ -379,9 +381,9 @@ function BoardSurface({ view, data }) {
   const failed = Boolean(alert) && !shown;
   const compact = Boolean(view.appearance?.compact);
   const chromeHidden = document.loading || failed;
-  const selectMenu = <SelectFilterMenu value={filter} onChange={changeFilter} modes={SELECT_MODES} disabled={!shown} />;
-  const { strip, row } = flatViewTools(tools, { colorScheme, shown, selectMenu });
-  const views = layered ? [boardDisplayControl({ display, sheet, onChange: setDisplay, disabled: !shown })] : [];
+  const selectMenu = <SelectFilterMenu value={filter} onChange={changeFilter} modes={SELECT_MODES.map(mode => ({ ...mode, label: t(mode.labelKey) }))} disabled={!shown} />;
+  const { strip, row } = flatViewTools(tools, { colorScheme, shown, selectMenu, t });
+  const views = layered ? [boardDisplayControl({ t, display, sheet, onChange: setDisplay, disabled: !shown })] : [];
   const sidebar = layered || index ? <>
     {index ? <BoardSection index={index} selection={selection} isolated={isolation.isolated} onIsolate={isolation.toggle}
       onSelect={() => selectTool(BOARD_TOOL.SELECT)} /> : null}
@@ -394,12 +396,12 @@ function BoardSurface({ view, data }) {
 
   return (
     <FlatViewFrame surface={BOARD_SURFACE} containerRef={containerRef} busy={document.loading || document.updating}
-      file={file} mobile={mobile} compact={compact} chromeHidden={chromeHidden} loading={document.loading} loadingLabel="Reading board"
-      updating={document.updating} updateStatus={BOARD_UPDATE_STATUS} tools={index ? strip : []} toolRow={index ? row : null} views={views}
+      file={file} mobile={mobile} compact={compact} chromeHidden={chromeHidden} loading={document.loading} loadingLabel={t("board.text.reading_board")}
+      updating={document.updating} updateStatus={{ pending: true, label: t("board.text.updating_board") }} tools={index ? strip : []} toolRow={index ? row : null} views={views}
       sidebar={sidebar} toolStack={handover.toolStack} onToolStackChange={handover.changeToolStack} notice={view.notice}
       quickEdit={index ? handover.quickEdit : null} alert={alert} cardAlert={handover.cardAlert} alertDismissal={handover.alertDismissal}
       shown={shown} onReload={view.reload}>
-      <canvas ref={canvasRef} aria-label={`Board: ${view.file.name}`} role="img" data-board-tool={toolMode}
+      <canvas ref={canvasRef} aria-label={t("board.text.board_file", { file: view.file.name })} role="img" data-board-tool={toolMode}
         className={cn("absolute inset-0 block touch-none select-none", cursor)} />
       {/* Measure's layer, over the board and under the tools: the pointer stays the board's. */}
       <canvas ref={measureCanvasRef} className="pointer-events-none absolute inset-0 z-[1] h-full w-full" aria-hidden="true" data-scene-measure="" />

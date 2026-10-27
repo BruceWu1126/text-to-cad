@@ -59,7 +59,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 /** One pane: a host, a workspace with one board, a live binding, and the tab. */
-async function open(name = 'blinky.kicad_pcb', { strict = false, promptFiles = undefined as any } = {}) {
+async function open(name = 'blinky.kicad_pcb', { strict = false, promptFiles = undefined as any, locale = "en" } = {}) {
   const file = `/models/${name}`;
   const fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
@@ -77,7 +77,7 @@ async function open(name = 'blinky.kicad_pcb', { strict = false, promptFiles = u
     promptFiles,
     files: { id: 'one', stat: async (path: string) => ({ path, name: path.split('/').pop(), kind: 'file', size: 400, extension: 'kicad_pcb' }) },
     navigation: { openFile: noop },
-    environment: { colorScheme: 'light' },
+    environment: { colorScheme: 'light', locale },
     clipboard: { writeText: async (text: string | Promise<string>) => { copied.push(await text); }, readText: async () => '', writeImage: async () => {} },
     promptContext: { getSnapshot: () => DESTINATION, subscribe: () => noop, deliver: async () => ({ status: 'copied', partIds: [] }) },
   };
@@ -129,6 +129,19 @@ it("a board's strip is a drawing's — Select (in hand), Pencil, Shapes, Measure
   expect(within(pane.querySelector<HTMLElement>('[data-file-sidebar-tools]')!).getAllByRole('button').map(button => button.getAttribute('aria-label')))
     .toEqual(['Board', 'Layers']);
   expect(box(pane)).toBeNull();
+  dispose();
+});
+
+it('a native board uses the host language for its controls, tree and accessible canvas', async () => {
+  const { pane, dispose } = await open('blinky.kicad_pcb', { locale: 'zh-CN' });
+  await opened(pane);
+  expect(pane.querySelector('canvas')?.getAttribute('aria-label')).toBe('电路板：blinky.kicad_pcb');
+  expect(within(pane).getByRole('button', { name: '电路板' })).toBeTruthy();
+  fireEvent.click(within(pane).getByRole('button', { name: '电路板' }));
+  expect(within(pane).getByRole('textbox', { name: '筛选电路板' })).toBeTruthy();
+  expect(within(pane).getByRole('button', { name: '选择', exact: true })).toBeTruthy();
+  expect(within(pane).getByText('元件')).toBeTruthy();
+  expect(within(pane).queryByText('Parts')).toBeNull();
   dispose();
 });
 

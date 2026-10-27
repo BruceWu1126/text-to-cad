@@ -1,3 +1,4 @@
+import { useI18n } from "@text-to-cad/ui/i18n";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Eye } from "lucide-react";
 import { Button } from "@text-to-cad/ui/primitives/button";
@@ -34,10 +35,11 @@ const additive = event => event.shiftKey || event.metaKey || event.ctrlKey;
  * never selects the row.
  */
 function IsolateEye({ node, on, onToggle }) {
-  const action = on ? "Exit isolate" : "Isolate";
+  const { t } = useI18n();
+  const action = on ? t("tree.exitIsolate") : t("tree.isolate");
   return <div data-row-actions="" className={treeRowActionsClass(on)}>
     <TooltipHint content={action}>
-      <Button type="button" variant="ghost" size="icon-xs" aria-label={`${action} ${node.label}`} aria-pressed={on}
+      <Button type="button" variant="ghost" size="icon-xs" aria-label={t(on ? "tree.exitIsolateNamed" : "tree.isolateNamed", { name: node.label })} aria-pressed={on}
         className={cn("h-5 w-4", on ? "text-foreground" : "text-muted-foreground")} data-board-isolate={node.id}
         onClick={event => { event.stopPropagation(); onToggle(node.selector); }}>
         <Eye className="size-3" aria-hidden="true" />
@@ -63,17 +65,18 @@ function visibleRows(roots, expanded) {
 // One row of the tree: a group (Parts, a kind, Nets), a part, a net or a pad, with one glyph in one
 // column — a branch's chevron, a pad's own — its name, its muted detail, and a part's or net's eye.
 function BoardRow({ node, depth, branch, open, selected, isolated, toggle, choose, hover, onIsolate }) {
+  const { t } = useI18n();
   const pickable = node.kind !== "group";
   const eye = isolable(node);
   return <TreeRowSurface dense active={selected} className="group/row relative gap-0 pr-0" data-board-row={node.id}
     style={{ paddingLeft: TREE_ROW_INSET_PX + depth * TREE_INDENT_PX, ...(eye ? { "--row-actions": ROW_ACTIONS_WIDTH } : {}) }}
     onMouseEnter={() => hover(node.selector || "")} onMouseLeave={() => hover("")}>
     <TreeRowGuides depth={depth} inset={TREE_ROW_INSET_PX} />
-    {branch ? <button type="button" aria-label={`${open ? "Collapse" : "Expand"} ${node.label}`} aria-expanded={open}
+    {branch ? <button type="button" aria-label={t(open ? "tree.collapse" : "tree.expand", { name: node.label })} aria-expanded={open}
       className="grid h-6 w-3 shrink-0 place-items-center rounded focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggle(node)}>
       <TreeRowChevron expanded={open} />
     </button> : null}
-    <button type="button" aria-label={pickable ? `Select ${node.label}` : node.label} aria-pressed={pickable ? selected : undefined}
+    <button type="button" aria-label={pickable ? t("tree.select", { name: node.label }) : node.label} aria-pressed={pickable ? selected : undefined}
       onClick={event => (pickable ? choose(node, event) : toggle(node))}
       className={cn("flex h-full min-w-0 flex-1 items-center gap-1 rounded pr-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         branch && "pl-1", eye && (isolated ? ROW_NAME_UNDER_ACTIONS.shown : ROW_NAME_UNDER_ACTIONS.hover))}>
@@ -88,11 +91,12 @@ const MemoBoardRow = memo(BoardRow);
 
 // A search hit is the row without its place in the tree: its name, then what it is under, muted.
 function BoardSearchRow({ match, selected, isolated, cursor, choose, hover, onIsolate }) {
+  const { t } = useI18n();
   const { entry, indices, alias } = match, { node } = entry;
   const eye = isolable(node);
   return <TreeRowSurface dense active={selected} cursor={cursor} className="group/row relative gap-0 pr-0"
     style={eye ? { "--row-actions": ROW_ACTIONS_WIDTH } : undefined} onMouseEnter={() => hover(node.selector || "")} onMouseLeave={() => hover("")}>
-    <button type="button" aria-label={`Select ${node.label}`} aria-pressed={selected} onClick={event => choose(node, event)} style={{ paddingLeft: TREE_ROW_INSET_PX }}
+    <button type="button" aria-label={t("tree.select", { name: node.label })} aria-pressed={selected} onClick={event => choose(node, event)} style={{ paddingLeft: TREE_ROW_INSET_PX }}
       className={cn("flex h-full min-w-0 flex-1 items-center gap-1 rounded pr-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         eye && (isolated ? ROW_NAME_UNDER_ACTIONS.shown : ROW_NAME_UNDER_ACTIONS.hover))}>
       <KindGlyph kind={node.kind} />
@@ -121,7 +125,8 @@ const MemoBoardSearchRow = memo(BoardSearchRow);
  *   `onSelect`: a row pressed takes Select up, as a pick in any tree does.
  */
 export default function BoardSection({ index, selection, isolated = EMPTY, onIsolate, onSelect }) {
-  const tree = useMemo(() => buildBoardTree(index), [index]);
+  const { t } = useI18n();
+  const tree = useMemo(() => buildBoardTree(index, t), [index, t]);
   const rowHeight = useTreeRowHeight();
   // Untouched, the tree is the rule's shape for the board it shows; the person's from their first change.
   const opened = useMemo(() => openUntilChoice(tree.roots, node => node.children), [tree]);
@@ -180,19 +185,19 @@ export default function BoardSection({ index, selection, isolated = EMPTY, onIso
       choose={choose} hover={hover} onIsolate={onIsolate} />;
   };
   // Headed by its filter, always there: Escape or its X clears it.
-  return <ToolPanel id="board" label="Board" fit="tree" resizable collapsible={false}
-    header={<TreeFilterInput label="Filter board" placeholder="Filter…" value={query} onChange={changeQuery} onKeyDown={onKeyDown} dense
+  return <ToolPanel id="board" label={t("board.text.board")} fit="tree" resizable collapsible={false}
+    header={<TreeFilterInput label={t("board.text.filter_board")} placeholder={t("tree.filterPlaceholder")} value={query} onChange={changeQuery} onKeyDown={onKeyDown} dense
       yieldWhileTyping className="px-0 shadow-none" />}>
-    <div className="flex flex-col text-tiny" aria-label="Board parts and nets">
+    <div className="flex flex-col text-tiny" aria-label={t("board.text.board_parts_and_nets")}>
       <div ref={listRef} className="px-1 py-1" onClick={event => { if (!event.target.closest("li,button,input")) clear(); }}>
         {searching ? <p role="status" className="px-2 py-1 text-muted-foreground">
-          {found.total > matches.length ? `First ${matches.length} of ${found.total.toLocaleString("en-US")} matches` : `${found.total} ${found.total === 1 ? "match" : "matches"}`}
+          {found.total > matches.length ? t("tree.firstMatches", { shown: matches.length, total: found.total.toLocaleString() }) : t(found.total === 1 ? "tree.match" : "tree.matches", { count: found.total })}
         </p> : null}
         {searching ? matches.length
-          ? <VirtualRows key="search" aria-label="Board search results" count={matches.length} rowHeight={rowHeight} pinned={searchPinned}
+          ? <VirtualRows key="search" aria-label={t("board.text.board_search_results")} count={matches.length} rowHeight={rowHeight} pinned={searchPinned}
             rowKey={at => matches[at].entry.node.id} rowProps={at => ({ className: "min-w-0", "data-search-row": matches[at].entry.node.id })} renderRow={renderSearchRow} />
-          : deferredQuery.trim() ? <p className="px-3 py-6 text-center text-muted-foreground">{`Nothing on the board matches “${deferredQuery.trim()}”`}</p> : null
-        : <VirtualRows key="tree" aria-label="Board" count={rows.length} rowHeight={rowHeight} pinned={treePinned}
+          : deferredQuery.trim() ? <p className="px-3 py-6 text-center text-muted-foreground">{t("board.text.nothing_on_the_board_matches_query", { query: deferredQuery.trim() })}</p> : null
+        : <VirtualRows key="tree" aria-label={t("board.text.board")} count={rows.length} rowHeight={rowHeight} pinned={treePinned}
           rowKey={at => rows[at].node.id} rowProps={at => ({ className: "min-w-0", "aria-level": rows[at].depth + 1 })}
           renderRow={renderTreeRow} registerRow={registerRow} />}
       </div>

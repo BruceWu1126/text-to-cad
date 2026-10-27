@@ -1,3 +1,4 @@
+import { useI18n } from "@text-to-cad/ui/i18n";
 import { useMemo } from "react";
 import { createBoardIndex } from "@text-to-cad/core/lib/board2d/boardIndex.js";
 import { boardLoadAlert, useBoardPayload } from "./useBoardPayload.js";
@@ -11,6 +12,7 @@ import { boardLoadAlert, useBoardPayload } from "./useBoardPayload.js";
  * @param {{ workspace: ReturnType<typeof import("../workspace/useWorkspaceDocument.js").useWorkspaceDocument>, path: string }} options
  */
 export function useBoardDocument({ workspace, path }) {
+  const { t } = useI18n();
   const file = workspace.entry?.file || path;
   const payload = useBoardPayload({ client: workspace.client, file, revision: workspace.resource.revision });
   const { plot } = payload;
@@ -24,15 +26,15 @@ export function useBoardDocument({ workspace, path }) {
   const alert = useMemo(() => {
     if (workspace.catalogError && !shown) {
       return {
-        severity: "error", kind: "status", title: "Couldn’t open the board",
-        message: "The viewer couldn’t retrieve this file’s information.",
-        recovery: "Try again. If this continues, check that the viewer is running.",
+        severity: "error", kind: "status", title: t("board.text.couldn_t_open_the_board"),
+        message: t("alert.catalogFailed"),
+        recovery: t("alert.catalogRecovery"),
         details: String(workspace.catalogError), reload: true
       };
     }
-    const failed = boardLoadAlert(workspace.modelKey || file, payload.error);
-    return failed && shown ? { ...failed, blocking: false, message: `${failed.message} The existing board remains visible.` } : failed;
-  }, [workspace.catalogError, workspace.modelKey, file, payload.error, shown]);
+    const failed = boardLoadAlert(workspace.modelKey || file, payload.error, t);
+    return failed && shown ? { ...failed, blocking: false, message: t("board.text.message_the_existing_board_remains_visible", { message: failed.message }) } : failed;
+  }, [workspace.catalogError, workspace.modelKey, file, payload.error, shown, t]);
 
   return { file, plot, index, sheet, layered, shown, alert, loading: payload.loading, updating: payload.updating };
 }

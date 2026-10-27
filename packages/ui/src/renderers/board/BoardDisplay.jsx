@@ -1,3 +1,4 @@
+import { useI18n, english } from "@text-to-cad/ui/i18n";
 import { FlipHorizontal2, PaintBucket, SlidersHorizontal } from "lucide-react";
 import {
   BOARD_DISPLAY_DEFAULTS, boardDisplayDrawsCopper, boardDisplayIsCustom, readBoardDisplay, selectBoardMode
@@ -29,17 +30,17 @@ import { AssemblyModeIcon, BoardModeIcon, CopperModeIcon, PlacementModeIcon } fr
 export { BOARD_DISPLAY_DEFAULTS, readBoardDisplay };
 
 export const BOARD_MODE_OPTIONS = Object.freeze([
-  Object.freeze({ value: "board", label: "Board", Icon: BoardModeIcon }),
-  Object.freeze({ value: "copper", label: "Copper", Icon: CopperModeIcon }),
-  Object.freeze({ value: "assembly", label: "Assembly", Icon: AssemblyModeIcon }),
-  Object.freeze({ value: "placement", label: "Placement", Icon: PlacementModeIcon }),
+  Object.freeze({ value: "board", labelKey: "board.text.board", Icon: BoardModeIcon }),
+  Object.freeze({ value: "copper", labelKey: "board.text.copper", Icon: CopperModeIcon }),
+  Object.freeze({ value: "assembly", labelKey: "board.text.assembly", Icon: AssemblyModeIcon }),
+  Object.freeze({ value: "placement", labelKey: "board.text.placement", Icon: PlacementModeIcon }),
 ]);
 const CUSTOM = "custom";
 const keepOpen = event => event.preventDefault();
 
 /** The mode on screen, or Custom, as the Display tile and its rows name it. */
 export function boardDisplayChoice(display, sheet) {
-  if (boardDisplayIsCustom(display, sheet)) return { value: CUSTOM, label: "Custom", Icon: SlidersHorizontal };
+  if (boardDisplayIsCustom(display, sheet)) return { value: CUSTOM, labelKey: "board.text.custom", Icon: SlidersHorizontal };
   return BOARD_MODE_OPTIONS.find(option => option.value === display.mode) || BOARD_MODE_OPTIONS[0];
 }
 
@@ -48,46 +49,48 @@ export function boardDisplayChoice(display, sheet) {
  * @param {{ display: ReturnType<typeof readBoardDisplay>, sheet: object | null, onChange(display: object): void }} props
  */
 export function BoardDisplayItems({ display, sheet, onChange }) {
+  const { t } = useI18n();
   const choice = boardDisplayChoice(display, sheet);
   return <>
-    <DropdownMenuLabel className="text-muted-foreground">Display modes</DropdownMenuLabel>
-    <DropdownMenuRadioGroup aria-label="Board display mode" value={choice.value}
+    <DropdownMenuLabel className="text-muted-foreground">{t("board.text.display_modes")}</DropdownMenuLabel>
+    <DropdownMenuRadioGroup aria-label={t("board.text.board_display_mode")} value={choice.value}
       onValueChange={value => { if (value !== CUSTOM) onChange(selectBoardMode(display, value)); }}>
-      {BOARD_MODE_OPTIONS.map(({ value, label, Icon }) => <DropdownMenuRadioItem key={value} value={value} data-board-mode-option={value}>
-        <Icon className="size-4" />{label}
+      {BOARD_MODE_OPTIONS.map(({ value, labelKey, Icon }) => <DropdownMenuRadioItem key={value} value={value} data-board-mode-option={value}>
+        <Icon className="size-4" />{t(labelKey)}
       </DropdownMenuRadioItem>)}
       {choice.value === CUSTOM ? <DropdownMenuRadioItem value={CUSTOM} data-board-mode-option={CUSTOM}>
-        <SlidersHorizontal className="size-4" />Custom
+        <SlidersHorizontal className="size-4" />{t("board.text.custom")}
       </DropdownMenuRadioItem> : null}
     </DropdownMenuRadioGroup>
     <DropdownMenuSeparator />
-    <DropdownMenuLabel className="text-muted-foreground">Settings</DropdownMenuLabel>
+    <DropdownMenuLabel className="text-muted-foreground">{t("preview.settingsTitle")}</DropdownMenuLabel>
     {/* Ticking leaves the menu open, as every checkbox row in a menu does: the board is seen changing. */}
     {boardDisplayDrawsCopper(display, sheet) ? <DropdownMenuCheckboxItem checked={display.poured} onSelect={keepOpen}
       onCheckedChange={value => onChange({ ...display, poured: value === true })} data-board-pours="">
-      <PaintBucket className="size-4" />Copper pours
+      <PaintBucket className="size-4" />{t("board.text.copper_pours")}
     </DropdownMenuCheckboxItem> : null}
     <DropdownMenuCheckboxItem checked={display.side === "bottom"} onSelect={keepOpen}
       onCheckedChange={value => onChange({ ...display, side: value === true ? "bottom" : "top" })} data-board-side="">
-      <FlipHorizontal2 className="size-4" />View from below
+      <FlipHorizontal2 className="size-4" />{t("board.text.view_from_below")}
     </DropdownMenuCheckboxItem>
   </>;
 }
 
 /** The Display tile: the mode on screen's glyph, opening Display's rows (`BoardDisplayItems`). */
 export function BoardDisplayPopover({ display, sheet, onChange, disabled = false }) {
+  const { t } = useI18n();
   const tileClass = useStripButtonClass();
   const choice = boardDisplayChoice(display, sheet);
   const Icon = choice.Icon;
   return <DropdownMenu modal={false}>
     <DropdownMenuTrigger asChild>
-      <ToolbarButton label={`Display mode: ${choice.label}`} tooltip="Display" tooltipSide="top" disabled={disabled}
+      <ToolbarButton label={t("display.modeCurrent", { mode: t(choice.labelKey) })} tooltip={t("display.label")} tooltipSide="top" disabled={disabled}
         className={tileClass} data-board-display={choice.value}>
         <Icon />
       </ToolbarButton>
     </DropdownMenuTrigger>
     {/* Closes with no exit animation, so a quick second press always reaches the tile. */}
-    <DropdownMenuContent align="center" sideOffset={6} collisionPadding={8} aria-label="Display"
+    <DropdownMenuContent align="center" sideOffset={6} collisionPadding={8} aria-label={t("display.label")}
       className={cn(FLOATING_SURFACE_CLASS, "w-44 data-[state=closed]:animate-none!")}>
       <BoardDisplayItems display={display} sheet={sheet} onChange={onChange} />
     </DropdownMenuContent>
@@ -95,10 +98,10 @@ export function BoardDisplayPopover({ display, sheet, onChange, disabled = false
 }
 
 /** The strip's view control for a board: its tile, and in a phone's More, a submenu of the same rows. */
-export function boardDisplayControl({ display, sheet, onChange, disabled }) {
+export function boardDisplayControl({ display, sheet, onChange, disabled, t = english }) {
   const Icon = boardDisplayChoice(display, sheet).Icon;
   return {
-    id: "display", label: "Display", icon: <Icon />, disabled,
+    id: "display", label: t("display.label"), icon: <Icon />, disabled,
     tile: <BoardDisplayPopover display={display} sheet={sheet} onChange={onChange} disabled={disabled} />,
     submenu: () => <BoardDisplayItems display={display} sheet={sheet} onChange={onChange} />
   };

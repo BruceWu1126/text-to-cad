@@ -1,7 +1,8 @@
+import { english } from "@text-to-cad/ui/i18n";
 import { useLayoutEffect, useRef } from "react";
 import { MousePointer2 } from "lucide-react";
 import { cn } from "@text-to-cad/ui/utils";
-import { AnnotationToolbar, DRAWING_TOOLS, annotationToolIcon, drawingToolVariant } from "../../../annotation/toolbar.jsx";
+import { AnnotationToolbar, DRAWING_TOOLS, annotationToolIcon, drawingToolVariant, drawingToolLabel } from "../../../annotation/toolbar.jsx";
 import ViewerAlertCard from "../status/ViewerAlertCard.jsx";
 import ViewerLoadingOverlay from "../status/ViewerLoadingOverlay.js";
 import { ViewUpdateStatus } from "../status/ViewUpdateStatus.jsx";
@@ -46,21 +47,22 @@ const SIDEBAR_POSITION_PHONE = Object.freeze({ top: INSET, left: INSET, bottom: 
  * after its button, where the view offers one.
  *
  * @param {ReturnType<typeof import("./useFlatView.js").useFlatTools>} tools
- * @param {{ colorScheme: "light" | "dark", shown: boolean, selectMenu?: import("react").ReactNode }} options
+ * @param {{ colorScheme: "light" | "dark", shown: boolean, t?: Function, selectMenu?: import("react").ReactNode }} options
  */
-export function flatViewTools(tools, { colorScheme, shown, selectMenu = null }) {
+export function flatViewTools(tools, { colorScheme, shown, selectMenu = null, t = english }) {
   const { toolMode, selectTool, annotation, annotating, measuring, measure, toolKeys } = tools;
   const stripTool = (id, label, icon, extra = {}) => ({ id, label, icon, active: toolMode === id, disabled: !shown, onSelect: () => selectTool(id), ...extra });
   const strip = [
-    stripTool(FLAT_TOOL.SELECT, "Select", SELECT_ICON, { shortcut: TOOL_SHORTCUTS.select, ...(selectMenu ? { menu: selectMenu } : {}) }),
+    stripTool(FLAT_TOOL.SELECT, t("tool.select"), SELECT_ICON, { shortcut: TOOL_SHORTCUTS.select, ...(selectMenu ? { menu: selectMenu } : {}) }),
     // Pencil and Shapes: plain buttons, each the tool last chosen in it, its tooltip that tool and its key; the tools are the row's.
-    ...DRAWING_TOOLS.map(({ id, label, entries }) => {
+    ...DRAWING_TOOLS.map(({ id }) => {
+      const label = drawingToolLabel(id, t);
       const variant = drawingToolVariant(id, annotation);
       const Icon = annotationToolIcon(variant);
       return stripTool(id, label, <Icon className="size-3" strokeWidth={2} aria-hidden="true" />,
-        { tooltip: entries.find(entry => entry.id === variant)?.label ?? label, shortcut: DRAWING_SHORTCUTS[variant] });
+        { tooltip: drawingToolLabel(variant, t), shortcut: DRAWING_SHORTCUTS[variant] });
     }),
-    stripTool(FLAT_TOOL.MEASURE, "Measure", MEASURE_ICON, { shortcut: TOOL_SHORTCUTS.measure })
+    stripTool(FLAT_TOOL.MEASURE, t("tool.measure"), MEASURE_ICON, { shortcut: TOOL_SHORTCUTS.measure })
   ];
   toolKeys.current = strip;
   const row = annotating

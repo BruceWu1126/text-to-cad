@@ -1,3 +1,4 @@
+import { english } from "@text-to-cad/ui/i18n";
 /**
  * The board on screen: one `GET /__cad/plot` for the file, laid out.
  *
@@ -70,16 +71,16 @@ export function useBoardPayload({ client, file, revision = "" }) {
  * @param {string} modelKey
  * @param {any} error
  */
-export function boardLoadAlert(modelKey, error) {
+export function boardLoadAlert(modelKey, error, t = english) {
   if (!error) {
     return null;
   }
   if (error instanceof BoardSchemaError || error?.name === "BoardSchemaError") {
     return {
-      severity: "error", kind: "version", summary: "Version mismatch",
-      title: "This app and cadgen disagree about boards",
+      severity: "error", kind: "version", summary: t("alert.schema.summary"),
+      title: t("board.text.this_app_and_cadgen_disagree_about_boards"),
       message: error.message,
-      recovery: "Update cadgen and the app together, then reload. They ship from one release for exactly this reason.",
+      recovery: t("alert.schema.recovery"),
       details: `File: ${modelKey}\nOperation: plotting\n${error.message}`,
       reload: true
     };

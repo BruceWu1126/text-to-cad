@@ -3,8 +3,7 @@
 A GENERATED CLI over :func:`cadgen.pcb.drc`: everything the command accepts
 is derived from the verb function's signature by
 :mod:`cadgen._internal.cli_from_function`, so a flag cannot drift from a
-parameter. DRC is the one check KiCad's API does not offer, so this door runs
-``kicad-cli`` on a staged copy of the board.
+parameter. This command runs ``kicad-cli`` on the saved board and its companion project rules.
 """
 
 from __future__ import annotations

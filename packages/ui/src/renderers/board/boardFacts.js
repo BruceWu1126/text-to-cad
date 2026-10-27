@@ -1,3 +1,5 @@
+import { english } from "@text-to-cad/ui/i18n";
+const FACT_KEYS = {"Value": "board.text.value", "Footprint": "board.text.footprint", "Side": "board.text.side", "Position": "position.title", "Rotation": "render.rotation", "Net": "board.text.net", "Number": "board.text.number", "Pin": "board.text.pin", "Type": "robot.type", "Class": "board.text.class", "Pads": "board.text.pads", "Layer": "drawing.layer", "Width": "board.text.width", "Length": "measure.length", "Diameter": "board.text.diameter", "Drill": "board.text.drill"};
 /**
  * What the viewer says of one board reference: its name, as a chip names it (`R1`, `R1.2`,
  * `net VBUS`, `VBUS · track`, a point) — never the raw selector, which its card shows as its ID —
@@ -13,7 +15,6 @@
 const mm = (value) => `${Number(value).toLocaleString("en-US", { maximumFractionDigits: 3 })} mm`;
 const coordinate = (value) => Number(value).toLocaleString("en-US", { maximumFractionDigits: 3 });
 const position = ([x, y]) => `x ${coordinate(x)}, y ${coordinate(y)}`;
-const titleCase = (text) => (text ? text[0].toUpperCase() + text.slice(1) : text);
 const FIELD_ROWS = ["MPN", "Manufacturer", "LCSC", "Description"];
 const pinName = (pad) => (pad.name && pad.name !== pad.number && pad.name !== "~" ? pad.name : "");
 
@@ -35,9 +36,9 @@ export const boardReferenceId = (selector) => String(selector || "").replace(/^#
  * @param {{ toScript(point: number[]): number[] }} index
  * @returns {{ name: string, glyph: string, facts: { label: string, value: string }[] } | null}
  */
-export function describeBoardReference(resolved, index) {
+export function describeBoardReference(resolved, index, t = english) {
   if (!resolved) return null;
-  const row = (label, value) => ({ label, value: String(value) });
+  const row = (label, value) => ({ label: FACT_KEYS[label] ? t(FACT_KEYS[label]) : label, value: String(value) });
   if (resolved.kind === "part") {
     const part = resolved.part;
     return {
@@ -45,11 +46,11 @@ export function describeBoardReference(resolved, index) {
       facts: [
         ...(part.value ? [row("Value", part.value)] : []),
         row("Footprint", part.footprint.split(":").pop() || part.footprint),
-        row("Side", titleCase(part.side)),
+        row("Side", t(part.side === "bottom" ? "viewCube.face.bottom" : "viewCube.face.top")),
         row("Position", position(index.toScript(part.at))),
         row("Rotation", `${Number(part.rotation).toLocaleString("en-US", { maximumFractionDigits: 2 })}°`),
         ...FIELD_ROWS.filter((key) => part.fields[key]).map((key) => row(key, part.fields[key])),
-        ...(part.dnp ? [row("DNP", "Not assembled")] : []),
+        ...(part.dnp ? [row("DNP", t("board.text.not_assembled"))] : []),
         // The line of the board's script that placed it, where the index carries one.
         ...(part.script ? [row("Script", part.script)] : [])
       ]
@@ -60,7 +61,7 @@ export function describeBoardReference(resolved, index) {
     return {
       name: `${pad.ref}.${pad.number}`, glyph: "face",
       facts: [
-        row("Net", pad.net || "None"),
+        row("Net", pad.net || t("robot.none")),
         row("Number", pad.number),
         ...(pinName(pad) ? [row("Pin", pinName(pad))] : []),
         ...(pad.type ? [row("Type", pad.type.replaceAll("_", " "))] : []),
@@ -71,13 +72,13 @@ export function describeBoardReference(resolved, index) {
   if (resolved.kind === "net") {
     const net = resolved.net;
     return {
-      name: `net ${net.name}`, glyph: "edge",
+      name: t("board.text.net_name", { name: net.name }), glyph: "edge",
       facts: [...(net.class ? [row("Class", net.class)] : []), row("Pads", String(net.pads.length))]
     };
   }
   if (resolved.kind === "copper") {
     const item = resolved.item;
-    const what = item?.kind === "via" ? "via" : item?.kind === "zone" ? "pour" : "track";
+    const what = item?.kind === "via" ? t("board.text.via") : item?.kind === "zone" ? t("board.text.pour") : t("board.text.track");
     const facts = [row("Net", resolved.net.name)];
     if (item?.kind === "track") facts.push(row("Layer", item.layer), row("Width", mm(item.width)), row("Length", mm(trackLength(item))));
     if (item?.kind === "via") facts.push(row("Diameter", mm(item.diameter)), row("Drill", mm(item.drill)));
@@ -86,7 +87,7 @@ export function describeBoardReference(resolved, index) {
     return { name: `${resolved.net.name} · ${what}`, glyph: "edge", facts };
   }
   if (resolved.kind === "point") {
-    return { name: `point ${coordinate(resolved.at[0])}, ${coordinate(resolved.at[1])}`, glyph: "vertex", facts: [row("Position", position(resolved.at))] };
+    return { name: t("board.text.point_x_y", { x: coordinate(resolved.at[0]), y: coordinate(resolved.at[1]) }), glyph: "vertex", facts: [row("Position", position(resolved.at))] };
   }
   return null;
 }

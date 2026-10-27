@@ -1,9 +1,9 @@
 """A small KiCad board for the tests that read boards, in the file format KiCad 11 writes.
 
-Written as KiCad's headless API saves a board (``(kicad_pcb (version 20260901)
+Written in KiCad 11's native board syntax (``(kicad_pcb (version 20260901)
 (generator "pcbnew") (generator_version "10.99")``, footprints placed by a
-``transform``, zone fills saved), so the readers are held to the format the
-``@pcb`` build produces -- and no test needs KiCad or a board of its own.
+``transform``, zone fills saved), so the readers cover the newer transform and net syntax without needing
+a KiCad process or the sample corpus.
 
 The board, in KiCad's frame (millimetres, y down; no drill/place origin, so the
 script frame is the same x and y up), 40 x 30 mm, its outline from (0, 0):

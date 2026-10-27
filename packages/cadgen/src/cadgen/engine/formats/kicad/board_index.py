@@ -1,7 +1,6 @@
 """Any KiCad board, read as what a person can point at, and board references answered.
 
-:func:`read_index` reads a ``.kicad_pcb`` -- one cadgen wrote or one drawn in
-KiCad -- into its parts (footprints, with their fields and outlines), pads,
+:func:`read_index` reads a saved ``.kicad_pcb`` into its parts (footprints, with their fields and outlines), pads,
 tracks, vias, pours, unplated holes, ``Edge.Cuts`` outline and nets, from the
 file alone: no KiCad runs. :func:`read_board` (``pcb.read_board``) answers
 board references (:mod:`cadgen.engine.formats.kicad.refs`) against that index:
@@ -10,9 +9,8 @@ board references (:mod:`cadgen.engine.formats.kicad.refs`) against that index:
 Frames
 ------
 A board file is in KiCad's frame: millimetres, y down, on its page -- the frame
-a ``@pcb`` script writes in (``Vector2.from_xy_mm``), and the frame every
-reference and every answer of :func:`read_board` is in, so a point the viewer
-copies pastes straight into a kipy call. :meth:`BoardIndex.mapped` moves the
+every reference and every answer of :func:`read_board` is in, so a point
+the viewer copies can be used directly in a native board edit. :meth:`BoardIndex.mapped` moves the
 index into the plot's SHEET frame (:mod:`cadgen.engine.formats.kicad.plot`): KiCad's frame moved
 so the board's top-left corner is (0, 0); ``origin`` is where KiCad's (0, 0)
 lands. Angles are degrees counter-clockwise as seen from the top, in every frame.

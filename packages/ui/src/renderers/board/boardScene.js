@@ -13,11 +13,11 @@ import { describeBoardReference } from "./boardFacts.js";
  * @param {ReturnType<typeof import("@text-to-cad/core/lib/board2d/boardIndex.js").createBoardIndex>} index
  * @param {{ onHighlight(ink: { hovered: object[], selected: object[] }): void }} options
  */
-export function createBoardScene(index, { onHighlight }) {
+export function createBoardScene(index, { onHighlight, t }) {
   const resolved = ids => ids.map(id => index.resolve(id)).filter(Boolean);
   return {
     hasPart: id => Boolean(index.resolve(id)),
-    describePart: id => describeBoardReference(index.resolve(id), index),
+    describePart: id => describeBoardReference(index.resolve(id), index, t),
     setHighlight({ hovered = [], selected = [] } = {}) {
       onHighlight({ hovered: resolved(hovered), selected: resolved(selected) });
     }

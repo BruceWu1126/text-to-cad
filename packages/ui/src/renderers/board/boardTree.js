@@ -1,3 +1,5 @@
+import { english } from "@text-to-cad/ui/i18n";
+const GROUP_KEYS = {"ICs": "board.text.ics", "Transistors": "board.text.transistors", "Diodes": "board.text.diodes", "Resistors": "board.text.resistors", "Capacitors": "board.text.capacitors", "Inductors": "board.text.inductors", "Ferrite beads": "board.text.ferrite_beads", "Connectors": "board.text.connectors", "Jumpers": "board.text.jumpers", "Switches": "board.text.switches", "Crystals": "board.text.crystals", "Fuses": "board.text.fuses", "Relays": "board.text.relays", "Transformers": "board.text.transformers", "Batteries": "board.text.batteries", "Test points": "board.text.test_points", "Holes": "board.text.holes", "Fiducials": "board.text.fiducials", "Motors": "board.text.motors", "Buzzers": "board.text.buzzers", "Speakers": "board.text.speakers", "Other": "board.text.other"};
 /**
  * A board's Select tree: its parts, by kind, each with its pads, and its nets, each with the pads
  * on it. Nodes are what the kit's tree search
@@ -45,7 +47,7 @@ function padNode(pad, { underNet = false } = {}) {
 /**
  * @param {ReturnType<typeof import("@text-to-cad/core/lib/board2d/boardIndex.js").createBoardIndex>} index
  */
-export function buildBoardTree(index) {
+export function buildBoardTree(index, t = english) {
   const byKind = new Map();
   for (const part of [...index.parts.values()].sort((a, b) => naturalCompare(a.ref, b.ref))) {
     const kind = partKind(part.ref);
@@ -60,7 +62,7 @@ export function buildBoardTree(index) {
     });
   }
   const parts = KIND_ORDER.filter((kind) => byKind.has(kind)).map((kind) => ({
-    id: `kind:${kind}`, kind: "group", label: kind, detail: String(byKind.get(kind).length), children: byKind.get(kind),
+    id: `kind:${kind}`, kind: "group", label: t(GROUP_KEYS[kind]), detail: String(byKind.get(kind).length), children: byKind.get(kind),
   }));
   const nets = [...index.nets.values()]
     .filter((net) => net.pads.length || net.tracks.length)
@@ -69,12 +71,12 @@ export function buildBoardTree(index) {
     .sort((a, b) => naturalCompare(a.name, b.name))
     .map((net) => ({
       id: `net:${net.name}`, kind: "net", selector: formatBoardRefSelector({ kind: "net", net: net.name }), label: net.name,
-      detail: `${net.pads.length} pad${net.pads.length === 1 ? "" : "s"}`, selectionId: `net:${net.name}`, searchAliases: [],
+      detail: t(net.pads.length === 1 ? "board.text.count_pad" : "board.text.count_pads", { count: net.pads.length }), selectionId: `net:${net.name}`, searchAliases: [],
       children: net.pads.map((pad) => ({ pad, key: `${pad.ref}.${pad.number}` })).sort((a, b) => naturalCompare(a.key, b.key)).map(({ pad }) => padNode(pad, { underNet: true })),
     }));
   const roots = [
-    { id: "group:parts", kind: "group", label: "Parts", detail: String(index.parts.size), children: parts },
-    { id: "group:nets", kind: "group", label: "Nets", detail: String(nets.length), children: nets },
+    { id: "group:parts", kind: "group", label: t("board.text.parts"), detail: String(index.parts.size), children: parts },
+    { id: "group:nets", kind: "group", label: t("board.text.nets"), detail: String(nets.length), children: nets },
   ];
   const nodesById = new Map();
   const parents = new Map();

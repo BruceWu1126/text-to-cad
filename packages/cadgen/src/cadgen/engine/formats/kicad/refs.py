@@ -17,8 +17,7 @@ when its path needs it). The selector language is chosen by the file's suffix:
 ======================  ===================================================
 
 Points are millimetres in KiCad's frame, y down, as the board file holds them and
-as a script's ``Vector2.from_xy_mm`` takes them: a point the viewer copies pastes
-straight into a kipy call. They carry no comma, because a token joins several
+as native board edits use them: a copied point needs no coordinate conversion. They carry no comma, because a token joins several
 selectors with commas, as STEP tokens do;
 a net name holding a comma, whitespace, a quote, ``@`` or ``#`` is JSON-quoted
 (``#net:"a,b"``). The canonical form writes a point to three decimals at most,
