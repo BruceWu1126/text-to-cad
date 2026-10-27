@@ -11,6 +11,13 @@ engine, then forwards JSON-RPC to `/mcp` using its installation token. Each shim
 negotiates a separate MCP session. Closing a shim releases that session and leaves
 the engine, its workers and other clients alive.
 
+Every presentation's initialization instructions explain project authoring as well as viewing:
+install the server's exact cadgen release in the chosen project Python environment, set
+`CADGEN_PORT` to the server's selected port, run a no-argument `@model` with that interpreter,
+and pass its printed document id to `cad_show`. The instructions include pip and no-pip uv
+installation commands and a minimal runnable model. MCP owns engine bootstrap; project
+scripts attach to it and use their own dependencies.
+
 Hosts present it in one of two ways, which `initialize` selects (`cadgen/mcp/host.py`):
 a host can declare the `dev.texttocad/tabs` extension with the `global`, `thread` and `file`
 entrypoints, and an MCP Apps host advertises the `io.modelcontextprotocol/ui` extension.

@@ -1145,6 +1145,32 @@ class ToolArgumentsTest(unittest.TestCase):
     def call(self, server: Server, name: str, arguments: dict) -> dict:
         return server.handle("tools/call", {"name": name, "arguments": arguments}, RequestContext(1, {"threadId": "t"}))
 
+    def test_initialize_teaches_project_python_matching_release_and_selected_port_in_every_presentation(self) -> None:
+        from cadgen import __version__
+        from cadgen.mcp.server import INSTRUCTIONS, INLINE_INSTRUCTIONS, TEXT_INSTRUCTIONS
+
+        presentation = {"tabs": INSTRUCTIONS, "inline": INLINE_INSTRUCTIONS, "text": TEXT_INSTRUCTIONS}
+        for port in (3245, 54321):
+            with mock.patch.dict(os.environ, {"CADGEN_PORT": str(port)}):
+                for catalog, (client, offered) in CATALOGS.items():
+                    with self.subTest(port=port, presentation=catalog):
+                        server = self.served(catalog)
+                        reply = server.handle("initialize", initialize_params({"capabilities": offered,
+                                              "clientInfo": client}, None), None)
+                        instructions = reply["instructions"]
+                        self.assertIn(f"python -m pip install cadgen=={__version__}", instructions)
+                        self.assertIn(f"uv pip install --python <project-python> cadgen=={__version__}", instructions)
+                        self.assertIn(f"CADGEN_PORT={port}", instructions)
+                        self.assertIn("run `python model.py`", instructions)
+                        self.assertIn("already starts or attaches", instructions)
+                        self.assertIn("no-argument function returning a build123d shape", instructions)
+                        self.assertIn("live document id; pass that id to `cad_show`", instructions)
+                        self.assertTrue(instructions.endswith(presentation[catalog]))
+                        self.assertNotIn("cadgen run", instructions)
+                        sample = instructions.split("```python\n", 1)[1].split("```", 1)[0]
+                        compile(sample, "model.py", "exec")
+                        self.assertIn('if __name__ == "__main__":\n    part()', sample)
+
     def sample(self, key: str, schema: dict):
         """A value the schema takes for ``key``, as an agent would send it."""
         named = {"requestId": "agreement-request-01", "operationId": "operation", "epoch": "epoch", "view": "v",
