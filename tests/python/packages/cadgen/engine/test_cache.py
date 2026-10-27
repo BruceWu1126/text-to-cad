@@ -374,36 +374,6 @@ class CacheTest(unittest.TestCase):
         with urllib.request.urlopen(request, timeout=30) as answer:
             return json.loads(answer.read())["version"]
 
-    def test_a_start_moves_an_earlier_closure_in_place_and_its_model_runs_nothing(self) -> None:
-        from cadgen.engine import document, previous
-
-        ident = self.said()
-        self.assertIn("the body ran", self.run_script("cube").stderr)
-        self.cached(ident)
-        self.assertEqual(self.cli("stop").returncode, 0)
-        # What an engine before the toolchain was keyed cached of it: closure/1 on an xbf/7 writer, its
-        # key over the format, the libraries and the code alone -- and its record saying so.
-        data = self.file(ident).read_bytes()
-        closure = json.loads(previous._head(data, previous.SCHEMA)[1])
-        held = {name: value for name, value in closure.items() if name != "platform"}
-        held.update(schema=previous.EARLIER_SCHEMA, engine={**closure["engine"], "format": previous.EARLIER_FORMAT})
-        libs = {name: held["libs"].get(name) for name in previous.KEYED_LIBRARIES}
-        held["key"] = previous._digest([previous.EARLIER_SCHEMA, previous.EARLIER_FORMAT, libs, held["source"],
-                                        held["modules"], held["inputs"]])
-        writer = document.WRITER.format(format=previous.EARLIER_FORMAT, release=previous.version())
-        earlier = document.relabel(data, {document.WRITER_GUID: writer, document.CLOSURE_GUID: previous.text(held)})
-        self.file(ident).write_bytes(earlier)
-        registry = Registry(self.state, self.cache)
-        registry.update(ident, lambda found: {**found, "revision": held["key"],
-                                              "cache": {"revision": held["key"], "bytes": len(earlier)}})
-        # The next run starts the engine, which moves it before anything reaches it: nothing runs.
-        self.assert_taken()
-        record, moved = self.record(ident), previous.of(self.file(ident))
-        self.assertEqual((moved["schema"], record["revision"], record["cache"]),
-                         (previous.SCHEMA, moved["key"], {"revision": moved["key"], "bytes": self.file(ident).stat().st_size}))
-        self.assertEqual(self.file(ident).read_bytes(), data, "the bytes the engine cached of its own build")
-        self.assertEqual(self.ask({"op": "status"})["cache"]["moved"], 1)
-        self.assertIn(" · 1 moved to this engine's closure at its start", self.cli("status").stdout)
 
     def test_two_unchanged_runs_leave_one_generation_and_the_page_idle(self) -> None:
         # A document is what its last run made: nothing ran, nothing changed, so a page has nothing to fetch.
@@ -461,6 +431,83 @@ class CacheTest(unittest.TestCase):
         self.assertEqual(self.cli("stop").returncode, 0)
         self.assertEqual(self.cli("export", ident, str(out)).returncode, 0, "the next restart reads it")
         self.assertGreater(out.stat().st_size, 0)
+
+    def legacy_cache(self, data: bytes) -> tuple[str, dict]:
+        """Install historical bytes in a real registered model's cache, with its source gone."""
+        ident = self.write("cube")
+        self.run_script("cube")
+        self.cached(ident)
+        self.assertEqual(self.cli("stop").returncode, 0)
+        self.file(ident).write_bytes(data)
+        Registry(self.state).update(ident, lambda record: {
+            **record, "cache": {**record["cache"], "bytes": len(data)},
+        })
+        (self.project / "cube.py").unlink()
+        (self.project / "cube.ran").unlink()
+        return ident, self.record(ident)
+
+    def test_legacy_cached_snapshot_opens_after_restart_without_source_or_rewriting_cache(self) -> None:
+        from cadgen.engine import document, document_migrations, previous
+
+        fixture = Path(__file__).with_name("fixtures") / "xbf8_materials.xbf"
+        original = fixture.read_bytes()
+        ident, record = self.legacy_cache(original)
+        original_closure = previous.read_record(document.read_bytes(original))[1]
+        partial = self.folder / "must-not-write.step"
+        refused = self.cli("export", ident, str(partial), str(self.file(ident)))
+        self.assertEqual(refused.returncode, 2, refused.stderr)
+        self.assertIn("cached document is preserved", refused.stderr)
+        self.assertFalse(partial.exists())
+        self.assertEqual(self.file(ident).read_bytes(), original)
+        self.assertEqual(self.record(ident), record)
+        for suffix in ("step", "glb", "xbf"):
+            out = self.folder / f"migrated.{suffix}"
+            exported = self.cli("export", ident, str(out))
+            self.assertEqual(exported.returncode, 0, exported.stderr)
+            self.assertGreater(out.stat().st_size, 0)
+        loaded = document.Loaded(self.folder / "migrated.xbf")
+        self.assertEqual(document.written_format(loaded.writer), previous.FORMAT)
+        self.assertEqual(previous.read_record(loaded.doc)[1], original_closure)
+        self.assertEqual(document_migrations.provenance(loaded.doc)["origin"], {
+            "kind": "document", "id": ident, "script": str(self.project / "cube.py"), "closure_base": None,
+        })
+        launched = engine_daemon.run([sys.executable, "-m", "cadgen.viewer", "--json", "--api-only", ident],
+                                     cwd=self.project, env=self.env)
+        self.assertEqual(launched.returncode, 0, launched.stderr)
+        self.assertEqual([row["id"] for row in json.loads(launched.stdout)["documents"]], [ident])
+        status, shown = self.page(ident)
+        self.assertEqual(status, 200, shown)
+        self.assertEqual(self.cli("stop").returncode, 0)
+        # The next daemon still opens the original snapshot; no migration cache/revision churn.
+        out = self.folder / "again.step"
+        exported = self.cli("export", ident, str(out))
+        self.assertEqual(exported.returncode, 0, exported.stderr)
+        self.assertEqual(self.file(ident).read_bytes(), original)
+        self.assertEqual(self.record(ident), record)
+        self.assertFalse(self.ran("cube"))
+
+    def test_unsupported_cached_format_is_preserved_across_restarts(self) -> None:
+        from OCP.Standard import Standard_GUID
+        from OCP.TDataStd import TDataStd_AsciiString
+        from OCP.TCollection import TCollection_AsciiString
+        from cadgen.engine import document
+
+        fixture = Path(__file__).with_name("fixtures") / "xbf8_materials.xbf"
+        doc = document.read_bytes(fixture.read_bytes())
+        TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(document.WRITER_GUID),
+                                 TCollection_AsciiString("cadgen.engine xbf/99 (cadgen 99.0.0)"))
+        original = document.to_bytes(doc)
+        ident, record = self.legacy_cache(original)
+        out = self.folder / "unsupported.step"
+        for _ in range(2):
+            exported = self.cli("export", ident, str(out))
+            self.assertEqual(exported.returncode, 2, exported.stderr)
+            self.assertIn("unsupported document format xbf/99", exported.stderr)
+            self.assertFalse(out.exists())
+            self.assertEqual(self.file(ident).read_bytes(), original)
+            self.assertEqual(self.record(ident), record)
+            self.assertEqual(self.cli("stop").returncode, 0)
+        self.assertFalse(self.ran("cube"))
 
     def test_failed_revisions_before_a_restart_leave_the_cache_to_take(self) -> None:
         self.use(self.folder / "state", self.folder / "cache", CADGEN_ENGINE_CACHE_IDLE="600")  # saved at the stop, as a person's is
@@ -542,7 +589,7 @@ class CacheTest(unittest.TestCase):
                "every document out of memory and held on disk alone")
         self.assertTrue(all(self.file(ident).is_file() for ident in idents), "nothing evicts a document")
         cache = self.ask({"op": "status"})["cache"]
-        self.assertEqual(sorted(cache), ["bytes", "documents", "enabled", "failures", "idleSeconds", "moved", "root",
+        self.assertEqual(sorted(cache), ["bytes", "documents", "enabled", "failures", "idleSeconds", "root",
                                          "written"], "no cap, no evictions")
         self.assertEqual((cache["documents"], cache["root"]), (3, str(self.cache)))
         total = sum(self.file(ident).stat().st_size for ident in idents)

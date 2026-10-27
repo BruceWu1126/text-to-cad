@@ -48,17 +48,8 @@ with no backend), one of the few CAD files Git holds
 frames it, draws each part's folds and outline in the hero's edge colour, and plays the
 clip slowed to a display pace. The site and its checks read only that committed file;
 nothing in the docs app's build or `npm run check` reads the sample corpus. Refresh it
-by hand after changing the model:
-
-```
-node apps/docs/scripts/sync-hero-glb.mjs
-```
-
-That hand step reads `models/` on purpose. It builds the model with this checkout's
-cadgen (`PYTHON_BIN`, default the repository's `.venv`), exports the document the model
-wrote, and checks the new file against the model's source (the motion's name and
-duration) and the page (the clip it plays), then reads it and plays the clip through
-@text-to-cad/core's GLB path. Commit the GLB it writes.
+by hand after changing the model using `cadgen export`. Preserve the `meshCycle`
+clip and verify playback before committing the refreshed GLB.
 
 ## The shape of the app
 
@@ -67,7 +58,7 @@ src/app/         # routes
 src/components/  # site components incl. the CAD hero renderers
 src/lib/         # site utilities
 public/hero/     # the hero's GLB, a plain file (never LFS)
-scripts/         # the hero's hand sync (sync-hero-glb.mjs) and the icon's
+scripts/         # loading-icon export and verification
 ```
 
 ## Brand and loading icon
@@ -83,11 +74,10 @@ SVGs, PNGs and animated SVGs, followed by the original animated loading-icon pla
 is the SVG's own SMIL, inside a `<picture>` whose reduced-motion source is the static mark. The
 original mesh, animation and the shared UI loading assets stay unchanged.
 
-The vectors in `public/brand/` come from `node scripts/brand/generate-logos.mjs` and
-`node scripts/brand/animate-logos.mjs`; `node scripts/brand/export-logos.mjs` then
-refreshes the PNGs, favicons and every app's copy (run all three from the repository root). See [the brand recipe](../../scripts/brand/README.md)
-for the letters, projection and palette. These are checked-in assets; ordinary
-builds do not regenerate them.
+The source vectors are committed in `public/brand/`. After editing them, run
+`node scripts/brand/export-logos.mjs` from the repository root to refresh PNGs,
+favicons and app copies. See [the export instructions](../../scripts/brand/README.md).
+Artwork authoring stays local; ordinary builds use the committed assets.
 
 The loading-icon playground retains play/pause, speed, five palettes, drag to
 rotate, zoom, and PNG/GLB downloads. It starts paused for reduced motion.
@@ -158,12 +148,39 @@ of the full install instructions, which the CAD app's update button links to.
 `tests/python/global/test_plugin_manifests.py` holds the description, the install
 message, what it sends and every install, update and remove command to one text. The unboxed wordmark and one prominent tagline
 sit above the independently framed CAD demo. “100% open source and free.” follows
-“Give your agent CAD superpowers.” in blue, using a lighter brand shade on dark
+“Design physical products with AI.” in blue, using a lighter brand shade on dark
 surfaces. The app owns
 its tokens and primitives in `src/app/globals.css` and `src/components/ui/`,
 without importing another app or the CAD UI package. Keep the palette aligned
 with `packages/ui/src/styles/tokens.css` when the viewer's base theme changes.
 
+
+## Social previews
+
+`public/social-preview-products.png` is the static share image, paired with
+`public/social-preview-products.mp4`: a 12-second, 1200×630 recording of the
+animated TEXTTOCAD SVG and the planetary GLB's existing `meshCycle` clip
+at half speed. The recording uses the real exported model at `public/hero/planetary.glb`.
+The composition uses a large animated wordmark, the byline “Design physical
+products with AI.”, the blue subtitle “100% open source and free.”, and an enlarged
+gear assembly. Both text blocks use the same font size. A smooth caret-led mask
+reveals the typeset lines at 60 fps, preserving kerning. The byline begins at
+2.35 seconds and finishes at 3.35; after a 0.2-second pause, the subtitle begins
+at 3.55 and finishes at 4.42. The caret fades between lines and disappears when
+finished. The gears fade and scale in over 0.65 seconds from the byline's start,
+during the SVG's build animation. `[[ texttocad.dev ]]` sits in the bottom-left
+corner at 25px, with the two text blocks raised to balance the space. It reveals
+from 4.62 to 5.22 seconds, 0.2 seconds after the subtitle finishes, with a matching
+caret. There are no format labels.
+It is made for link previews rather than captured from the homepage.
+
+`src/app/layout.tsx` declares the image fallback and the direct MP4 through
+Open Graph video metadata. Video playback depends on the receiving client;
+the X card remains a large-image card. Keep the MP4 below the repository's
+5 MiB file limit, use H.264/yuv420p with fast-start metadata, and preserve the
+image fallback. Rename preview assets when replacing them so social caches
+can fetch the new versions; update the structured-data image in `src/app/page.tsx`
+as well.
 
 ## api.texttocad.dev
 

@@ -4,11 +4,12 @@ This is a hand-migration playbook. Work through it top to bottom with a 0.7 proj
 and you will end with a working 0.8 project. An agent with the CAD skill installed is
 pointed here by the skill's short `references/migrations.md` and can do most of this for
 you: ask it to follow this guide. A project still on 0.4 first follows
-[Migrating 0.4 to 0.5](migrating-0.4-to-0.5.md), which ends here.
+[Migrating 0.4 to 0.5](migrating-0.4-to-0.5.md), which ends here. This guide targets
+cadgen 0.8.1 with build123d 0.13.
 
-## Read this first: there is no compatibility layer
+## Read this first: there is no authoring compatibility layer
 
-0.8 ships no backwards compatibility, on purpose:
+0.8 ships no backwards compatibility for authoring and runtime APIs, on purpose:
 
 - No shims, no aliases, no deprecated keyword arguments, and no codemod.
 - **No teaching errors.** A retired flag is an unrecognized argument, a retired name an
@@ -56,17 +57,18 @@ are gone.
 
 ## Prerequisites
 
-1. **Update the plugin, or the pin.** The CAD plugin and its skills run cadgen as
-   `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen`; a
-   project that pins cadgen itself moves its pin to `cadgen==0.8.0`. The Python floor is
-   unchanged (3.11). cadgen no longer depends on Playwright: snapshots are drawn by
-   OCCT, so no headless browser is downloaded.
+1. **Update the plugin, or the pin.** The plugin starts its server through
+   `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.1 cadgen mcp`,
+   which installs and registers cadgen. Skills then run commands as `cadgen +0.8.1 ...`
+   and model scripts as `cadgen +0.8.1 run SCRIPT.py`, through that installation's
+   launcher. A project that pins cadgen itself moves its pin to `cadgen==0.8.1`.
+   The Python floor is unchanged (3.11). cadgen no longer depends on Playwright:
+   snapshots are drawn by OCCT, so no headless browser is downloaded.
 
 2. **Run cadgen through the `cadgen` command.** 0.8 installs one, `~/.local/bin/cadgen`,
    written by `cadgen doctor` and by the CAD app's server. It runs a registered
-   installation, picked by the first of: a version named (`cadgen +0.8.0 ...`), the
-   `CADGEN_VERSION` variable, a `cadgen.toml` in the project or a folder above it
-   (`version = "0.8.0"`), the engine the shell's agent app holds, a running engine, and the
+   installation, picked by the first of: a version named (`cadgen +0.8.1 ...`), the
+   `CADGEN_VERSION` variable, the engine the shell's agent app holds, a running engine, and the
    newest installation registered. `cadgen run SCRIPT.py` runs a model script with that
    installation's Python, so the scripts, the commands and the CAD app share one engine:
 
@@ -75,10 +77,14 @@ are gone.
    | `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.21 python src/model.py` | `cadgen run src/model.py` |
    | `uvx ... --from cadgen==0.7.21 cadgen <verb>` | `cadgen <verb>` |
    | `uvx ... python -m unittest ...` | `cadgen run -m unittest ...` |
-   | a version kept in step with the plugin by hand | nothing (the plugin's), or a `cadgen.toml` with `version = "0.8.0"` |
+   | a version kept in step with the plugin by hand | nothing (the plugin's), or `cadgen +0.8.1 ...` for an explicit version |
 
-   If `cadgen` is not on your PATH, or says 0.8.0 is not installed, run
-   `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen doctor` once.
+   If `cadgen` is not on your PATH, or says 0.8.1 is not installed, run
+   `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.1 cadgen doctor` once.
+
+   A project's old venv may shadow the launcher with its own `cadgen`, even when
+   `~/.local/bin` is on PATH. Run `~/.local/bin/cadgen +0.8.1 doctor` to see which
+   executable wins, and use the full launcher path until PATH is corrected.
 
 3. **Set `PYTHONPATH` where the project's import root needs it**, as for `python SCRIPT`:
    `PYTHONPATH=src cadgen run src/camera/payload.py`.
@@ -86,7 +92,7 @@ are gone.
 4. **Confirm what you have.**
 
    ```bash
-   cadgen --version          # cadgen 0.8.0
+   cadgen --version          # cadgen 0.8.1
    cadgen doctor             # the installation in use, the CAD kernel, the engine
    ```
 
@@ -135,8 +141,8 @@ computed its kinematics at import (`KINEMATICS = kinematics()` for the decorator
 every no-op; once the mates are in the body (step 4), compute them there. Measured on a
 628-part arm: 1.3 s of the calling process's CPU per run at module level, 0.1 s in the body.
 
-**The root holds exactly eighteen names**: `model`, the file decorators `xbf`, `step`,
-`glb`, `stl`, `threemf` and `dxf`, `memo`, `Material`, `materials`, `paint`,
+**The root holds exactly sixteen names**: `model`, the file decorators `xbf`, `step`,
+`glb`, `stl`, `threemf` and `dxf`, `memo`, `paint`,
 `read_step`, `read_xbf`, `read_mesh`, the operations `export`, `snapshot` and
 `inspect`, and `__version__`. Two namespaces hold the standards' vocabulary:
 `cadgen.ap242` (`mechanism_state`, `configuration_sequence`, `gear_pair`,
@@ -506,38 +512,73 @@ deformation; `.visible(false)` is `.hide`. Snapshots never play motion: 0.7's
 
 ### 6. Move materials into the body; make colours hex
 
-`materials=` on the decorator is gone. A material is a value on the part, set in the
-body after the part's last operation:
+`materials=` on the decorator is gone. Use `bd_materials`, build123d's native material
+library. Set a material in the body after the part's last geometric operation, then
+assign any explicit colour:
 
 ```python
 # 0.7
 @step(materials={"definitions": {"cast": {"name": "As-cast steel", "roughness": 0.85, "metalness": 0.2}},
                  "assignments": [{"targets": ["#housing"], "material": "cast"}]})
 
-# 0.8, in the body
-from cadgen import Material, materials, paint
+# 0.8.1, in the body
+from bd_materials import metals
+from cadgen import paint
 
-housing.material = materials.steel.but(name="As-cast steel", roughness=0.85, metallic=0.2)
+cast = metals.mild_steel()
+cast.pbr = cast.pbr.override(roughness=0.85, metalness=0.2)
+housing.material = cast
+housing.color = "#2E3742"  # material assignment sets colour; apply an override after it
 ```
 
-`materials` is a catalogue of 44 common engineering materials (`materials.aluminium_6061`,
-`materials("6061-T6")`), and `Material(...)` makes a project's own. A definition's
-`metalness` is `metallic`, its `baseColor` the `color` as its hex, `clearcoat` and
-`clearcoatRoughness` are `coat` and `coat_roughness`, and `opacity` is the colour's alpha.
-An assignment to a group is the material set on that assembly, the default of every part
-below it that has none. `paint(part, faces, colour_or_material)` gives faces their own.
+**Choose the material and its look.** Catalogue factories such as `metals.aluminum()`,
+`metals.brass()` and `plastics.abs_()` return a native `FinishedMaterial` (`plastics` is
+also imported from `bd_materials`). Its `.material` holds physics; `.pbr` is a native
+`threejs_materials.PbrProperties`. Edit the look with `.pbr.override(...)` and assign
+that result back before giving the material to the shape. Its controls include
+`color`, `metalness`, `roughness`, `ior`, `clearcoat`, `clearcoat_roughness`, `anisotropy`,
+`anisotropy_rotation` (radians), `transmission`, `attenuation_color`,
+`attenuation_distance` (metres), `emissive`, `emissive_intensity`, and `opacity`.
 
-**Colours are sRGB, as you pick them.** `shape.color`, `paint` and `Material(color=)`
-take a hex string (`"#2E3742"`, `"#38414D6B"` with alpha as a byte) or 0-255 integers;
-the engine stores them linear. Floats are refused by `paint` and `Material`.
+For custom physics, use a native family factory:
 
-| 0.7 | 0.8 |
+```python
+from bd_materials.core import Range
+
+alloy = metals.custom_metal(
+    "Project alloy", density=2700,
+    modulus_of_elasticity=Range(68, 72), tensile_strength=Range(280, 320))
+```
+
+Density is a single value in kg/m³. Mechanical properties are native ranges, with
+modulus in GPa and strengths in MPa; a custom factory also accepts a number as an exact
+range. `shape.mass()` and the physical material's `mass(volume_mm3)` return grams by
+default; `cadgen inspect` reports kilograms.
+
+**Assign materials before colour overrides.** Native material assignment sets the shape's
+colour, including an inferred preview alpha for transmission (`transmission=1` gives
+alpha `0.3`), even with PBR `opacity=1`. To keep an opaque base colour with physical
+transmission, assign an opaque `housing.color` after its material, as above. An assembly
+material is inherited by children without one; assign it before reading their materials.
+`paint(part, faces, colour_or_material)` gives faces their own colour or native material.
+
+**Colours are sRGB, as you pick them.** Shape colours and plain paints take hex strings
+(`"#2E3742"`, `"#38414D6B"` with alpha as a byte), 0–255 integer tuples or build123d
+`Color`. Native PBR base-colour floats are sRGB ratios; emission and attenuation floats
+are linear. Hex strings avoid that distinction.
+
+| 0.7 | 0.8.1 |
 | --- | --- |
 | `srgb("#2E3742")` | `"#2E3742"` |
 | `srgb("#38414D", 0.42)` | `"#38414D6B"` |
-| `Material(color=(0.2, 0.3, 0.9))` (linear floats), `transmission_color=`, `emissive=` | `Material(color="#7c95f3")`, the hex of what you see, or 0-255 integers |
-| `paint(shape, faces, (1, 0, 0))`, `paint(..., "orange")` | `paint(shape, faces, "#ff0000")`: a hex string, 0-255 integers, a build123d `Color` or a `Material` |
+| A linear base colour `(0.2, 0.3, 0.9)` in a material definition | Set the look with `material.pbr = material.pbr.override(color="#7c95f3")` before assigning the material; the sRGB hex preserves the same look |
+| `paint(shape, faces, (1, 0, 0))`, `paint(..., "orange")` | `paint(shape, faces, "#ff0000")` or `"#ffa500"`: a hex string, 0–255 integers, a build123d `Color` or a native `FinishedMaterial` |
 | `shape.color = bd.Color(0.5, 0.5, 0.5)` meant as linear | read as build123d defines it, sRGB: `#808080`. For the old look, give the hex of the linear value (`"#bcbcbc"` for 0.5) |
+
+XBF keeps native physics and the complete resolved PBR look. The viewer and GLB retain
+scalar PBR controls; OCCT snapshots use their documented approximations. Native texture
+maps survive XBF, but the viewer, GLB export and snapshots refuse them until UV mapping
+is supported.
 
 ### 7. Learn the one engine: ids, pages, links and commands
 
@@ -712,7 +753,11 @@ the viewer, or take the names `cadgen inspect` prints. Code of your own that add
 occurrences by tree position (`o1.2.15`) for its own purposes may keep doing so; cadgen no
 longer reads them.
 
-**A check calls the model and measures what it returns:**
+**A check calls the model and measures what it returns.** Copy the project helpers
+`world_parts` and `find_part` from
+[Opening geometry](../../skills/cad/references/inspection-and-validation.md#opening-geometry)
+into the check first. They accumulate each parent's placement before measuring and
+refuse a missing or ambiguous leaf label:
 
 ```python
 # 0.7                                         # 0.8
@@ -720,8 +765,9 @@ from cadgen import read_scene                 from cadgen.geometry import closes
 scene = read_scene("STEP/kit.step")
 ...                                           from kit import kit
 
-                                              parts = {p.label: p for p in kit().shape.leaves}
-                                              print(closest_points(parts["plate"], parts["post"]).distance)
+                                              tree = kit().shape
+                                              plate, post = find_part(tree, "plate"), find_part(tree, "post")
+                                              print(closest_points(plate, post).distance)
 ```
 
 `cadgen.geometry` (`closest_points`, `overlap_volume`, `mass_properties`, the topology
@@ -736,8 +782,10 @@ modules (`cadgen.store.trees.capture_tree`, `cadgen.store.objects.read_object`,
 `cadgen._internal.doors.document_tree`). The sidecar is never written and the modules are
 gone. Read instead:
 
-- the geometry from the model, `robot().shape` (its `.leaves` in world coordinates, or
-  `.children` and `.location` for the tree), or from an exported STEP with `read_step`;
+- the geometry from the model, `robot().shape`, or from an exported STEP with `read_step`.
+  Both keep a tree of `.children` and parent-relative `.location` values; `.leaves`
+  alone does not apply ancestors' placements. Use `world_parts` above for measurements
+  in world coordinates;
 - the mechanism from your own data (step 1's records), or from `cadgen inspect <id> --json`,
   whose summary lists the joints, their ranges, the states and the sequences.
 
@@ -882,21 +930,36 @@ second declaration of it is refused, naming both `file:line`, until the file tha
 is gone or has run again without it (`cadgen run <that file>`). Moving a name to another
 file of its folder keeps its document.
 
-**The first start of 0.8.0 moves what the pre-release saved, and builds nothing.** Two passes
-run as the engine starts, before it can be reached, and have nothing left to do at the next
-start. Neither loads the CAD kernel, and `cadgen status` says what each did:
+**Saved XBF documents remain usable.** cadgen 0.8.1 writes `xbf/9` and reads both
+`xbf/8` and `xbf/9`. Opening an `xbf/8` file or cached snapshot automatically converts its
+material metadata in memory, so viewing, inspection, snapshots, imports and exports need
+no model source or execution. Source and cache bytes, the cache record and revision, and
+the original build closure and toolchain provenance remain unchanged. A separate migration
+record describes the conversion. Reading an upgraded document again is idempotent.
 
-- Cached documents written under the pre-release's earlier build closure (`closure/1`,
-  `xbf/7`) are moved in place to `closure/2` (`xbf/8`). The new closure names the toolchain:
-  its key covers the system and the architecture, beside the format, build123d and OCP, the
-  code and the inputs (the cadgen release and Python are recorded, not keyed). A moved
-  document is taken as it is (`took ... nothing ran`); one whose build123d or OCP changed
-  since builds once and says what moved (`build123d 0.10.0 became 0.11.1`). A document of an
-  older format builds once.
-- Each record gets its namespace and its name, and a model's record the fingerprint of its
-  script. A record that a `key=` named moves, with its saved document, to the id its folder
-  and name give. A record that cannot be read or moved stays as it is, is never deleted, and
-  is counted by `cadgen status`.
+To save the upgraded document, choose a different XBF path:
+
+```bash
+cadgen export saved-v8.xbf upgraded-v9.xbf
+```
+
+The complete upgraded XCAF document is saved atomically; exporting over the source path is
+refused. Exporting a cached document by id to XBF also saves its upgraded form. The viewer's
+original-file XBF download still returns the original bytes; use the command above to save
+an upgrade. Ordinary current-format XBF-to-XBF translation remains refused. Unsupported
+formats or failed conversions preserve the original bytes and cache record and report a
+clear error.
+
+When you explicitly run a model's source, its original build key is compared with the
+current one and the model builds normally when they differ. Saved-document access does
+not imply build-cache reuse. See the
+[persisted-document policy](../../packages/cadgen/README.md#the-design-laws).
+
+The independent startup identity pass still gives each JSON record its namespace and
+name, and a model's record the fingerprint of its script. A record that a `key=` named
+moves, with its saved document, to the id its folder and name give. This changes identity,
+not the saved document's format. A record that cannot be read or moved stays as it is,
+is never deleted, and is counted by `cadgen status`.
 
 Rename `key=` to `name=` in the scripts. The models keep their ids. The other names the
 release renamed or removed:

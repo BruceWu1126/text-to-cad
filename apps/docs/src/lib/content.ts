@@ -19,7 +19,7 @@ export const support = {
 // How a model is made, under the overview: the README's How it works, step for step. Code is in
 // backticks, which the page sets as code.
 export const howItWorks = [
-  "Your agent writes each model as a Python script, with build123d.",
+  "Your agent writes each model as a Python script with build123d, built on Open CASCADE.",
   "Running the script, `python model.py`, builds the model with cadgen's engine into an `.xbf` document (its parts, names, colours, materials and joints) and the STEP, GLB, STL or 3MF files the script declares. The engine keeps each model's work in memory, so an edit rebuilds only what it changed.",
   "The CAD viewer shows the model in your agent app or your browser, and follows every rebuild.",
 ];
@@ -33,7 +33,7 @@ export const agentInstallMessage = "Install text-to-cad from https://github.com/
 // not updated yet is never told less than it sends; the cadgen a person runs says the rest itself. The
 // README says it word for word. The command is in backticks, which the page sets as code.
 export const telemetryNote =
-  "By default, text-to-cad sends usage stats and crash reports, tagged with a random ID and never including your files, paths or prompts; turn them off with `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen telemetry off`, or ask your agent to.";
+  "By default, text-to-cad sends usage stats and crash reports, tagged with a random ID and never including your files, paths or prompts; turn them off with `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.1 cadgen telemetry off`, or ask your agent to.";
 // The same message, opened in an agent app with its composer prefilled, never sent: Claude Code in
 // Claude Desktop (claude://code/new, Claude's help center, "Open Claude Desktop with a link"), the
 // Codex app (codex://threads/new, its commands reference) and Cursor (its prompt deeplink, Cursor's

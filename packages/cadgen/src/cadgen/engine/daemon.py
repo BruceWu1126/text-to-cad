@@ -1892,7 +1892,11 @@ class Daemon:
                         "via": worker.script}, b""
             held = self.held_document(ident)
             if held is not None:
-                return held
+                source, data = held
+                # Historical caches did not persist the folder relative closure paths used.
+                # Keep the known identity/source anchor without inventing that missing base.
+                return {**source, "origin": {"kind": "document", "id": ident,
+                                             "script": record["source"]["script"], "closure_base": None}}, data
         if server is not None and ident in server.served and not isinstance(server.served[ident].path, str):
             return {"path": str(server.served[ident].path)}, b""
         known = server.file_of(ident) if server is not None else None
@@ -2090,6 +2094,13 @@ class Daemon:
         if op == "export" and "id" in (request.get("source") or {}):
             ident = str(request["source"]["id"])
             try:
+                cached = self.models.cache.registry()
+                if cached is not None:
+                    original = cached.cache.path(self.models.cache.inside(ident)).resolve()
+                    if any(Path(path).resolve() == original for path in request["destinations"]):
+                        from cadgen.engine.export import ExportRefused
+
+                        raise ExportRefused("export to a different path; the engine's cached document is preserved")
                 source, payload = self.document(ident)
             except ValueError as error:
                 send(refused(error))
@@ -2720,9 +2731,7 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
     # The files of engines that died without removing theirs, swept while this one starts.
     threading.Thread(target=sweep_dead, daemon=True).start()
     daemon = Daemon(port=port)
-    # Before it can be reached: a cached document of the closure before this engine's is moved to
-    # it in place, once, so no build meets one (``cache.Cache.migrate``).
-    daemon.models.cache.migrate()
+
     # And the records from before namespace/name identity brought to it, once (``identity.migrate``:
     # JSON and file names, no XBF, independent of the closure's pass). It never keeps the engine
     # from starting.

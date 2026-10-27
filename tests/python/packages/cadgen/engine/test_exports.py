@@ -22,14 +22,16 @@ from xml.etree import ElementTree
 
 import numpy as np
 
-from cadgen.engine import api, document, export, materials, mesh
+from cadgen.engine import api, document, export, mesh
+from bd_materials import metals
 from cadgen.engine import build as engine_build
 from cadgen.engine.export import ExportRefused, Source, translate
 
 BOARD = """
 import build123d as bd
 from cadgen.ap242 import mechanism_state
-from cadgen.engine import glb, materials, paint, step, stl, threemf, xbf
+from cadgen.engine import glb, paint, step, stl, threemf, xbf
+from bd_materials import metals
 
 
 @xbf("XBF/peg.xbf")
@@ -46,10 +48,10 @@ def peg():
 @threemf("board.3mf")
 def board():
     plate = bd.Pos(0, -20, 0) * bd.Box(30, 10, 2)
-    plate.color = bd.Color(0.2, 0.3, 0.9)
     plate = paint(plate, plate.faces().sort_by(bd.Axis.Z)[-1], "#ff0000")
-    plate = paint(plate, plate.faces().sort_by(bd.Axis.Z)[0], materials.steel)
-    plate.material = materials.aluminium
+    plate = paint(plate, plate.faces().sort_by(bd.Axis.Z)[0], metals.mild_steel(metals.MildSteel.G1018_COLD_DRAWN))
+    plate.material = metals.aluminum()
+    plate.color = bd.Color(0.2, 0.3, 0.9)
     plate.label = "plate"
     pegs = [peg().shape.moved(bd.Location((x, 0, 0))) for x in (-10, 0, 10)]
     for index, placed in enumerate(pegs):
@@ -72,7 +74,8 @@ def board():
 # seventh: a colour presentation per styled shape, which OCCT's writer keeps in a map.
 KIT = """
 import build123d as bd
-from cadgen.engine import materials, paint, xbf
+from cadgen.engine import paint, xbf
+from bd_materials import metals
 
 
 @xbf("XBF/kit.xbf")
@@ -81,9 +84,9 @@ def kit():
     parts = []
     for index, rgb in enumerate(looks):
         part = bd.Pos(index * 20, 0, 0) * bd.Box(10, 10, 4 + index)
-        part.color = bd.Color(*rgb)
         part = paint(part, part.faces().sort_by(bd.Axis.Z)[-1], bd.Color(rgb[2], rgb[0], rgb[1]))
-        part.material = (materials.aluminium, materials.steel)[index % 2]
+        part.material = (metals.aluminum(), metals.mild_steel(metals.MildSteel.G1018_COLD_DRAWN))[index % 2]
+        part.color = bd.Color(*rgb)
         part.label = f"part{index}"
         parts.append(part)
     peg = bd.Cylinder(2, 10)
@@ -186,7 +189,7 @@ def _facts(loaded: document.Loaded, prototype: document.Prototype) -> dict[str, 
     from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
     from OCP.TopExp import TopExp
     from OCP.TopoDS import TopoDS
-    from OCP.TopTools import TopTools_IndexedMapOfShape
+    from OCP.collections import IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher
 
     def where(kind: int, shape) -> tuple:
         if kind == TopAbs_FACE:
@@ -194,17 +197,17 @@ def _facts(loaded: document.Loaded, prototype: document.Prototype) -> dict[str, 
             BRepGProp.SurfaceProperties_s(shape, props)
             point = props.CentreOfMass()
         elif kind == TopAbs_EDGE:
-            curve = BRepAdaptor_Curve(TopoDS.Edge_s(shape))
+            curve = BRepAdaptor_Curve(TopoDS.Edge(shape))
             point = curve.Value((curve.FirstParameter() + curve.LastParameter()) / 2)
         else:
-            point = BRep_Tool.Pnt_s(TopoDS.Vertex_s(shape))
+            point = BRep_Tool.Pnt_s(TopoDS.Vertex(shape))
         return tuple(round(value, 4) for value in (point.X(), point.Y(), point.Z()))
 
     found = {}
     for kind, names, label in ((TopAbs_FACE, prototype.face_names, "faces"),
                                (TopAbs_EDGE, prototype.edge_names, "edges"),
                                (TopAbs_VERTEX, prototype.vertex_names, "vertices")):
-        mapped = TopTools_IndexedMapOfShape()
+        mapped = IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher()
         TopExp.MapShapes_s(prototype.shape, kind, mapped)
         found[label] = {where(kind, mapped.FindKey(ordinal)): name for ordinal, name in names.items()}
     return found
@@ -254,15 +257,15 @@ class ExportTest(unittest.TestCase):
             self.assertEqual(_facts(step, other), _facts(self.loaded, prototype), name)
             self.assertTrue(prototype.face_names and prototype.edge_names, name)
         plate, read_plate = ours["plate"], theirs["plate"]
-        self.assertEqual((read_plate.material.name, read_plate.material.density),
-                         (plate.material.name, plate.material.density), "a material's name and density")
+        self.assertEqual((read_plate.material.name, read_plate.material.material.density),
+                         (plate.material.name, plate.material.material.density), "a material's name and density")
         # A painted colour is a face's colour in the STEP as in the xbf.
         red = [rgba for rgba in plate.face_colors.values() if rgba == (1.0, 0.0, 0.0, 1.0)]
         self.assertEqual(red, [rgba for rgba in read_plate.face_colors.values() if rgba == (1.0, 0.0, 0.0, 1.0)])
         # What OCCT's STEP writer drops: the PBR look (metallic, roughness), a face's material
         # (its colour stays), and the mechanism.
-        self.assertEqual(plate.material.metallic, 1.0)
-        self.assertEqual(read_plate.material.metallic, 0.0)
+        self.assertEqual(plate.material.pbr.values.metalness, 1.0)
+        self.assertEqual(read_plate.material.pbr.values.metalness, 0.0)
         self.assertEqual(len(plate.face_materials), 1)
         self.assertEqual(read_plate.face_materials, {})
         [ordinal] = plate.face_materials
@@ -281,8 +284,8 @@ class ExportTest(unittest.TestCase):
         looks = [gltf["materials"][primitive["material"]] for primitive in plate["primitives"]]
         self.assertEqual(len(looks), 3, "the part's own look, a painted colour and a painted material")
         by_name = {look.get("name"): look for look in looks}
-        self.assertEqual(by_name[materials.aluminium.name]["pbrMetallicRoughness"]["metallicFactor"], 1.0)
-        self.assertIn(materials.steel.name, by_name)
+        self.assertEqual(by_name[metals.aluminum().name]['pbrMetallicRoughness']['metallicFactor'], 1.0)
+        self.assertIn(metals.mild_steel(metals.MildSteel.G1018_COLD_DRAWN).name, by_name)
         self.assertIn([1.0, 0.0, 0.0, 1.0], [look["pbrMetallicRoughness"]["baseColorFactor"] for look in looks])
         rack = next(node for node in placed if node["name"] == "rack/peg0")
         self.assertEqual(rack["matrix"][12:15], [-10.0, 0.0, 6.0])
@@ -304,7 +307,7 @@ class ExportTest(unittest.TestCase):
         bases = model.findall(f"{core}resources/{core}basematerials/{core}base")
         metallic = model.findall(f"{core}resources/{extension}pbmetallicdisplayproperties/{extension}pbmetallic")
         self.assertEqual(len(metallic), len(bases), "one display property per base material")
-        self.assertIn(materials.aluminium.name, [base.get("name") for base in bases])
+        self.assertIn(metals.aluminum().name, [base.get('name') for base in bases])
         plate = next(entry for entry in objects if entry.get("name") == "plate")
         painted = [t for t in plate.iter(f"{core}triangle") if t.get("p1") is not None]
         self.assertEqual(len(painted), 4, "the two painted faces' triangles name their own looks")
@@ -723,24 +726,25 @@ def _usages(doc) -> dict[tuple, dict]:
     usage's, else its product's), its product's name, its usage's own colour, a part's colour
     (its label's, else the one colour its solids are given: what the XCAF reader makes of a STEP
     styling each solid) and a part's placement."""
-    from OCP.TDF import TDF_Label, TDF_LabelSequence
+    from OCP.TDF import TDF_Label
+    from OCP.collections import Sequence_TDF_Label
     from OCP.TopAbs import TopAbs_FACE
     from OCP.TopExp import TopExp
-    from OCP.TopTools import TopTools_IndexedMapOfShape
+    from OCP.collections import IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher
     from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
 
     def part_color(label) -> tuple | None:
         own = document._label_color(label)
         if own is not None:
             return own
-        faces = TopTools_IndexedMapOfShape()
+        faces = IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher()
         TopExp.MapShapes_s(XCAFDoc_ShapeTool.GetShape_s(label), TopAbs_FACE, faces)
-        given, subs = {}, TDF_LabelSequence()
+        given, subs = {}, Sequence_TDF_Label()
         XCAFDoc_ShapeTool.GetSubShapes_s(label, subs)
         for at in range(1, subs.Length() + 1):
             held, rgba = XCAFDoc_ShapeTool.GetShape_s(subs.Value(at)), document._label_color(subs.Value(at))
             if rgba is not None and held.ShapeType() != TopAbs_FACE:
-                inner = TopTools_IndexedMapOfShape()
+                inner = IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher()
                 TopExp.MapShapes_s(held, TopAbs_FACE, inner)
                 given.update((faces.FindIndex(inner.FindKey(k)), rgba) for k in range(1, inner.Extent() + 1))
         return given[1] if len(given) == faces.Extent() and len(set(given.values())) == 1 else None
@@ -752,7 +756,7 @@ def _usages(doc) -> dict[tuple, dict]:
         own = document._label_color(usage) if usage is not None else None
         if XCAFDoc_ShapeTool.IsAssembly_s(label):
             found[path] = {"name": name, "product": document._label_name(label), "own": own}
-            components = TDF_LabelSequence()
+            components = Sequence_TDF_Label()
             XCAFDoc_ShapeTool.GetComponents_s(label, components, False)
             for at in range(1, components.Length() + 1):
                 component, referred = components.Value(at), TDF_Label()
@@ -764,7 +768,7 @@ def _usages(doc) -> dict[tuple, dict]:
         found[path] = {"name": name, "product": document._label_name(label), "own": own,
                        "color": part_color(label), "matrix": document._matrix(location.Multiplied(shape.Location()))}
 
-    free = TDF_LabelSequence()
+    free = Sequence_TDF_Label()
     XCAFDoc_DocumentTool.ShapeTool_s(doc.Main()).GetFreeShapes(free)
     visit(free.Value(1), None, document._identity(), ())
     return found
@@ -851,13 +855,13 @@ class StepUsagesTest(unittest.TestCase):
     @classmethod
     def components(cls) -> list:
         """Each component of the held document with its placement, the datum it holds."""
-        from OCP.TDF import TDF_LabelSequence
+        from OCP.collections import Sequence_TDF_Label
         from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
 
-        labels, found = TDF_LabelSequence(), []
+        labels, found = Sequence_TDF_Label(), []
         XCAFDoc_DocumentTool.ShapeTool_s(cls.held.doc.Main()).GetShapes(labels)
         for at in range(1, labels.Length() + 1):
-            components = TDF_LabelSequence()
+            components = Sequence_TDF_Label()
             XCAFDoc_ShapeTool.GetComponents_s(labels.Value(at), components, False)
             found += [(document._entry(component), XCAFDoc_ShapeTool.GetLocation_s(component))
                       for component in (components.Value(place) for place in range(1, components.Length() + 1))]

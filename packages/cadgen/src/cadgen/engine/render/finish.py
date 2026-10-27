@@ -218,19 +218,22 @@ def finish(rgba: Any, material: dict[str, Any] | None) -> dict[str, Any]:
         return {"color": tuple(value ** LOOK.colour_power for value in colour), "alpha": alpha,
                 "metallic": LOOK.plain.metallic, "roughness": LOOK.plain.roughness, "ior": LOOK.plain.ior,
                 "emission": (0.0, 0.0, 0.0)}
+    if material["pbr"].get("textures"):
+        raise ValueError("OCCT snapshots of native material texture maps require UV mapping; use a scalar PBR look")
+    material = material["pbr"]["values"]
     roughness = float(material.get("roughness") if material.get("roughness") is not None else 0.5)
-    coat = float(material.get("coat") or 0.0)
+    coat = float(material.get("clearcoat") or 0.0)
     if coat > 0:
-        target = float(material.get("coatRoughness") or 0.0)
+        target = float(material.get("clearcoatRoughness") or 0.0)
         roughness += (target - roughness) * COAT_ROUGHNESS * coat
     transmission = float(material.get("transmission") or 0.0)
     if transmission > 0:
-        tint = material.get("transmissionColor") or (1.0, 1.0, 1.0)
+        tint = material.get("attenuationColor") or (1.0, 1.0, 1.0)
         colour = tuple(c * float(t) for c, t in zip(colour, tint))
         alpha *= 1 - TRANSMISSION_OPACITY * transmission
-    strength = float(material.get("emissiveStrength") if material.get("emissiveStrength") is not None else 1.0)
+    strength = float(material.get("emissiveIntensity") if material.get("emissiveIntensity") is not None else 1.0)
     emission = tuple(float(value) * strength for value in (material.get("emissive") or (0.0, 0.0, 0.0)))
-    return {"color": colour, "alpha": alpha, "metallic": float(material.get("metallic") or 0.0),
+    return {"color": colour, "alpha": alpha, "metallic": float(material.get("metalness") or 0.0),
             "roughness": roughness, "ior": float(material.get("ior") or 1.5), "emission": emission}
 
 
@@ -238,7 +241,7 @@ def aspect(found: dict[str, Any]) -> Any:
     """``finish``'s answer as an OCCT material: a PHYSIC aspect whose PBR material is the finish."""
     from OCP.Graphic3d import (Graphic3d_MaterialAspect, Graphic3d_NameOfMaterial, Graphic3d_PBRMaterial,
                                Graphic3d_TypeOfMaterial)
-    from OCP.gp import gp_Vec3f
+    from OCP.collections import Vec3_float
     from OCP.Quantity import Quantity_Color, Quantity_ColorRGBA, Quantity_TOC_RGB
 
     colour = Quantity_Color(*found["color"], Quantity_TOC_RGB)
@@ -251,7 +254,7 @@ def aspect(found: dict[str, Any]) -> Any:
     pbr.SetMetallic(found["metallic"])
     pbr.SetRoughness(occt_roughness(found["roughness"]))
     pbr.SetIOR(found["ior"])
-    pbr.SetEmission(gp_Vec3f(*(float(value) for value in found["emission"])))
+    pbr.SetEmission(Vec3_float(*(float(value) for value in found["emission"])))
     pbr.SetAlpha(found["alpha"])
     material.SetPBRMaterial(pbr)
     if found["alpha"] < 1:

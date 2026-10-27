@@ -89,7 +89,7 @@ Laws 1 to 13 and 19 to 23 are the engine's; 14 to 18 hold for the whole package.
    after it. Explicit viewer exports write only the requested
    artifact to managed temporary storage for delivery; no source or intermediate XBF
    is written (the engine's **Viewer exports**).
-3. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself: OCP, build123d (and
+3. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself: OCP, build123d, bd_materials, threejs_materials (and
    ezdxf, build123d's own DXF library), numpy, Pillow and the standard library only. cadgen
    reaches into it, never the other way: its telemetry is an observer the engine calls with
    plain facts (`engine.api.observers`).
@@ -173,13 +173,28 @@ Laws 1 to 13 and 19 to 23 are the engine's; 14 to 18 hold for the whole package.
     someone who only ran `pip install cadgen`. Naming a bundled thing ("the JavaScript runtime
     bundled at build time") passes; a repository path to its source, a repository script, or a
     repository workflow does not.
-15. **No backwards compatibility.** Hard cutovers only. A retired surface does not exist: no
+15. **No backwards compatibility for authoring and runtime APIs.** Hard cutovers only.
+    A retired surface does not exist: no
     alias, no shim, and no error that recognizes its old spelling to explain what replaced it. A
     removed command, flag, argument, key, module or name gets what the current contract's
     ordinary validation says -- an unknown command, an unrecognized argument, an unknown key, an
     `ImportError`, an `AttributeError`.
     *Pressure-test*: use a removed spelling; the error must read exactly as it would for a name
     that never existed.
+
+    **Persisted-document exception.** Saved documents have a separate compatibility contract:
+    opening, viewing, importing and exporting supported formats must not require their source or
+    a rebuild just because cadgen was upgraded. The engine reads `xbf/8` and `xbf/9`; it converts
+    `xbf/8` material metadata in memory, without executing model code or changing source or cache
+    bytes. A separate migration record identifies the conversion while the original build closure
+    and toolchain provenance remain unchanged. Explicit export to a different XBF path can save
+    the upgraded document atomically; opening it does not rewrite it. Unsupported formats and
+    failed conversions preserve the original bytes and cache record and give a clear error.
+    Build-cache reuse is separate: explicitly running a model compares the current key and may
+    rebuild it. This exception retains no retired authoring APIs or classes. The engine's
+    [Build closure](src/cadgen/engine/README.md#build-closure) describes the supported conversion
+    and export behavior.
+
 16. **Closed vocabularies.** Every declaration surface has a closed key/kind set. An unknown key
     is an error naming the supported set, never silently ignored.
 17. **Loud failure or correct output, nothing between.** The cardinal sin is plausible-wrong
@@ -325,9 +340,9 @@ build metadata. File metadata does not imply a live worker.
 ```
 src/cadgen/
   __init__.py            # the root, exactly: model, the decorators (xbf, step, glb, stl,
-                         #   threemf, dxf), memo, Material, materials, paint, read_step,
+                         #   threemf, dxf), memo, paint, read_step,
                          #   read_xbf, read_mesh, and the operations on documents (export,
-                         #   snapshot, inspect), every name loaded on first use; the font
+                         #   snapshot, inspect), and __version__, loaded on first use; the font
                          #   guard and the lazy kernel, first
   ap242.py               # the mechanism's AP242 names: mechanism_state,
                          #   configuration_sequence, gear_pair, rack_and_pinion_pair,
@@ -397,9 +412,8 @@ registered, cache folders no record names; none written in the last seven days);
 `cadgen mcp` the stateless proxy an agent host starts; and `cadgen telemetry` the person's answer. A
 model builds by running its script: `python model.py`, or `cadgen +<version> run model.py` through
 the `cadgen` command, which picks the installation by the first that names one, in this order
-(`_internal/proxy.py`): `+<version>`, `CADGEN_VERSION`, a project's `cadgen.toml` (`version =
-"<version>"`), the engine held by this shell's host, any running engine (the newest version
-first), and the newest installation registered.
+(`_internal/proxy.py`): `+<version>`, `CADGEN_VERSION`, the engine held by this shell's host,
+any running engine (the newest version first), and the newest installation registered.
 
 Coming from 0.7: cadgen 0.7.x kept a cache store, which can hold gigabytes, at
 `~/.cache/cadgen` (macOS and Linux; `$XDG_CACHE_HOME/cadgen` when that is set),

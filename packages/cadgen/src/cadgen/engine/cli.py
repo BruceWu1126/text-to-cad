@@ -440,7 +440,7 @@ def weighed(structure: dict[str, Any], hit: Any, volumes: dict[str, float]) -> d
         prototype = prototypes[instance["prototype"]]
         volume = volumes[prototype["key"]]
         total_volume += volume
-        density = (prototype.get("material") or {}).get("density")
+        density = ((prototype.get("material") or {}).get("material") or {}).get("density")
         if density is None:
             unweighed.append(path)
             continue
@@ -450,7 +450,7 @@ def weighed(structure: dict[str, Any], hit: Any, volumes: dict[str, float]) -> d
                              "mass": mass if weighed_any else None, "unweighed": unweighed}
     if len(held) == 1:
         instance, path = held[0]
-        material = prototypes[instance["prototype"]].get("material")
+        material = (prototypes[instance["prototype"]].get("material") or {}).get("material")
         found.update(part=prototypes[instance["prototype"]]["name"], path=path,
                      material=material["name"] if material else None,
                      density=material.get("density") if material else None)
@@ -570,8 +570,10 @@ def summary_text(summary: dict[str, Any]) -> str:
                 continue
             weight = f"{_number(row['mass'])} kg" if row["mass"] is not None else "no density"
             lines.append(f"  {row['name']}: {weight}, {', '.join(row['parts'])}")
-        if summary["unweighed"]:
-            lines.append(f"  no material: {', '.join(summary['unweighed'])}")
+        assigned = {part for row in summary["materials"] for part in row["parts"]}
+        missing = [part for part in summary["unweighed"] if part not in assigned]
+        if missing:
+            lines.append(f"  no material: {', '.join(missing)}")
     else:
         lines.append("materials   none set")
 
@@ -824,9 +826,7 @@ def status_text(answer: dict[str, Any]) -> str:
     cache = answer.get("cache") or {}
     if cache.get("enabled"):
         failures = cache.get("failures") or []
-        moved = cache.get("moved")
         lines.append("cache " + cache_text(cache.get("root"), cache.get("documents"), cache.get("bytes"))
-                     + (f" · {moved} moved to this engine's closure at its start" if moved else "")
                      + (f" · last save failed: {failures[0]['error']}" if failures else ""))
     elif cache:
         lines.append("cache off: no cache folder")
