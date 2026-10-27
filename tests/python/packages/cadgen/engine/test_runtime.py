@@ -229,6 +229,28 @@ finally:
                 worker._result({"script": "model.py", "name": "cube"})
         source.shape_data.assert_not_called()
 
+    def test_windows_change_query_closes_its_handle_on_failure_and_never_masks_failure(self):
+        import ctypes
+
+        class Basic(ctypes.Structure):
+            _fields_ = [("ChangeTime", ctypes.c_longlong)]
+
+        opened = mock.Mock(return_value=123)
+        query = mock.Mock(return_value=False)
+        close = mock.Mock(return_value=True)
+        refused = mock.Mock(side_effect=lambda path: OSError(f"cannot verify dependency: {path}"))
+        with mock.patch.object(runtime, "_windows_files", return_value=(opened, query, close, Basic, refused)):
+            with self.assertRaisesRegex(OSError, "cannot verify dependency"):
+                runtime._windows_change(Path("dependency.py"))
+        close.assert_called_once_with(123)
+        self.assertEqual(opened.call_args.args[1:7], (0x80, 7, None, 3, 0, None))
+        opened.return_value = ctypes.c_void_p(-1).value
+        close.reset_mock()
+        with mock.patch.object(runtime, "_windows_files", return_value=(opened, query, close, Basic, refused)):
+            with self.assertRaisesRegex(OSError, "cannot verify dependency"):
+                runtime._windows_change(Path("dependency.py"))
+        close.assert_not_called()
+
 
 class CrossVenvTest(unittest.TestCase):
     def test_two_project_venvs_share_server_and_documents_but_keep_their_dependencies(self):

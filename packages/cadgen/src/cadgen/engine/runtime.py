@@ -6,6 +6,7 @@ process never conceals an installed dependency changed since its last run.
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import importlib.metadata as metadata
 import importlib.util
@@ -29,12 +30,66 @@ def digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+@functools.cache
+def _windows_files() -> tuple[Any, Any, Any, Any, Any]:
+    """Read-only Win32 bindings; Python's Windows ctime is creation time, not mutation time."""
+    import ctypes
+    from ctypes import wintypes
+
+    class Basic(ctypes.Structure):
+        _fields_ = [("CreationTime", ctypes.c_longlong), ("LastAccessTime", ctypes.c_longlong),
+                    ("LastWriteTime", ctypes.c_longlong), ("ChangeTime", ctypes.c_longlong),
+                    ("FileAttributes", wintypes.DWORD)]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    opened = kernel.CreateFileW
+    opened.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                       wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    opened.restype = wintypes.HANDLE
+    query = kernel.GetFileInformationByHandleEx
+    query.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    query.restype = wintypes.BOOL
+    close = kernel.CloseHandle
+    close.argtypes = [wintypes.HANDLE]
+    close.restype = wintypes.BOOL
+
+    def refused(path: Path) -> OSError:
+        why = ctypes.WinError(ctypes.get_last_error())
+        return OSError(f"cannot verify Windows dependency change time for {path}: {why}; "
+                       "check file permissions and filesystem support")
+
+    return opened, query, close, Basic, refused
+
+
+def _windows_change(path: Path) -> int:
+    """FILE_BASIC_INFO.ChangeTime survives a last-write timestamp restored with os.utime."""
+    import ctypes
+
+    opened, query, close, basic, refused = _windows_files()
+    name = os.path.abspath(path)
+    if not name.startswith("\\\\?\\"):
+        name = "\\\\?\\UNC\\" + name[2:] if name.startswith("\\\\") else "\\\\?\\" + name
+    # FILE_READ_ATTRIBUTES, all sharing modes, OPEN_EXISTING: no data read and no write access.
+    handle = opened(name, 0x80, 7, None, 3, 0, None)
+    if handle is None or handle == ctypes.c_void_p(-1).value:
+        raise refused(path)
+    try:
+        info = basic()
+        if not query(handle, 0, ctypes.byref(info), ctypes.sizeof(info)):  # FileBasicInfo
+            raise refused(path)
+        return int(info.ChangeTime) * 100  # FILETIME units are 100 ns; its epoch is immaterial here
+    finally:
+        if not close(handle):
+            raise refused(path)
+
+
 def _stamp(path: Path) -> list[Any]:
     try:
         found = path.stat()
-        return [str(path), found.st_size, found.st_mtime_ns, found.st_ctime_ns]
     except OSError:
         return [str(path), None]
+    changed = _windows_change(path) if os.name == "nt" else found.st_ctime_ns
+    return [str(path), found.st_size, found.st_mtime_ns, changed]
 
 
 def _editable(root: Path) -> list[list[Any]]:
