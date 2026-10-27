@@ -115,6 +115,7 @@ class SnapshotAnimationTest(unittest.TestCase):
                                    "camera": {"projection": "orthographic"}},
                           size=SIZE, daemon=False)
         self.assertEqual(report["renderer"], "raster")
+        self.assertEqual([output["mimeType"] for output in report["outputs"]], ["video/mp4"])
         animation = report["animation"]
         self.assertAlmostEqual(animation["duration"], DURATION)
         self.assertEqual((animation["frames"], animation["fps"]), (FRAME_COUNT, FPS))

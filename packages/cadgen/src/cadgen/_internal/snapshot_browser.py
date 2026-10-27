@@ -411,6 +411,8 @@ async def _render(job, runtime, document, native, stage):
                     raise RuntimeError("MP4 encoder failed: " + errors.decode("utf-8", "replace"))
                 await stderr_task
                 report["animation"] = movie
+                for output in report.get("outputs", []):
+                    output["mimeType"] = "video/mp4"
             failures.check()
             say("write", detail=stage.name)
             await failures.wait(page.evaluate("() => window.__snapshotSession.close()"), 10)
