@@ -45,7 +45,9 @@ the slower reference pass; `--profiles reference --reference-samples 512` adds i
 later in the same output folder. `--quality preview|final` selects production
 quality. `--transparent` uses a transparent backdrop and the studio's 0.6 floor
 opacity to expose residual alpha grain; the report composites transparent pixels
-over charcoal. Width is bounded 256–2400, height 256–1800, and raw references 1–1024
+over charcoal. This diagnostic saves the controller's unflattened foreground,
+because the host screenshot API paints its CSS backdrop. Width is bounded
+256–2400, height 256–1800, and raw references 1–1024
 samples. Use only ignored `tmp/` or an external temporary output directory.
 
 `--fit-rest` uses an explicit camera fitted to the loaded GLB's current geometry,

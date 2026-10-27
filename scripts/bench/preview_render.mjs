@@ -95,13 +95,18 @@ const browser = await chromium.launch({headless:true,args:process.platform==='da
 const rows = await readFile(join(options.out,'renders.json'),'utf8').then(s=>JSON.parse(s).rows||[]).catch(()=>[]);
 let current;
 
-async function capture(page,path) {
-  const encoded = await page.evaluate(async () => {
+async function capture(page,path,profile) {
+  const encoded = await page.evaluate(async ({transparent,profile}) => {
+    // The host screenshot intentionally paints its CSS backdrop. Alpha review
+    // needs the production controller's unflattened foreground instead.
+    const foreground=transparent?window.__previewReviewController?.captureCanvas:null;
+    if(foreground)return foreground.toDataURL('image/png').split(',')[1];
+    if(transparent&&profile!=='raster')throw new Error('Transparent candidate/reference foreground is unavailable');
     const blob = await window.cadHarness.a.controller.capture();
     const data = new Uint8Array(await blob.arrayBuffer());
     let binary='';for(const byte of data)binary+=String.fromCharCode(byte);
     return btoa(binary);
-  });
+  },{transparent:Boolean(options.transparent),profile});
   await writeFile(path,Buffer.from(encoded,'base64'));
 }
 
@@ -147,15 +152,15 @@ async function render(file,profile) {
       if(progress.trace?.state==='fallback')throw new Error(`${file}/${profile}: ${JSON.stringify(progress.trace)}`);
       if(progress.trace?.budgetExhausted)throw new Error(`${file}/${profile}: sample budget exhausted before convergence`);
       if(progress.trace?.denoise==='failed')throw new Error(`${file}/${profile}: denoising failed`);
-      if(profile==='candidate'&&!firstSaved&&progress.trace?.denoisedSamples>=32){await capture(page,join(options.out,`${basename(file,'.glb')}-first-denoised.png`));firstSaved=true;milestones.push({name:'first-denoised',elapsed_ms:Date.now()-started,progress:progress.trace});}
+      if(profile==='candidate'&&!firstSaved&&progress.trace?.denoisedSamples>=32){await capture(page,join(options.out,`${basename(file,'.glb')}-first-denoised.png`),profile);firstSaved=true;milestones.push({name:'first-denoised',elapsed_ms:Date.now()-started,progress:progress.trace});}
       if(progress.trace?.sample>=progress.trace?.samples&&(profile==='reference'||progress.trace?.denoisedSamples>=progress.trace?.samples))break;
     }
     if(Date.now()-started>600000)throw new Error(`${file}/${profile}: render did not finish`);
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   }
-  await capture(page,join(options.out,`${basename(file,'.glb')}-${profile}.png`));
+  await capture(page,join(options.out,`${basename(file,'.glb')}-${profile}.png`),profile);
   const detail=await page.evaluate(()=>({camera:window.__cadCamera(),stage:window.__cadStage(),progress:window.__previewReviewController?.progress,tasks:window.__reviewTasks,configuration:window.__previewReviewRuntime?.previewConfiguration,admission:window.__previewReviewAdmission()}));
-  const row={file,profile,elapsed_ms:Date.now()-started,...detail,milestones,errors,...provenance,fixtureSHA256:hash(corpus.get(file))};
+  const row={file,profile,captureMode:options.transparent&&profile!=='raster'?'controller-foreground':'host-composited',elapsed_ms:Date.now()-started,...detail,milestones,errors,...provenance,fixtureSHA256:hash(corpus.get(file))};
   const previous=rows.findIndex(row=>row.file===file&&row.profile===profile);
   if(previous>=0)rows.splice(previous,1);
   rows.push(row);

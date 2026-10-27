@@ -59,7 +59,22 @@ window.previewTest = {
   move: () => { moving=true; repeat.position.x=2; controller.invalidate({sceneChanged:true}); draw(); },
   orbit: () => { camera.position.set(6,-6,5); camera.lookAt(0,0.6,0.4); camera.updateMatrixWorld(); controller.invalidate({sceneChanged:false}); draw(); },
   stop: () => { moving=false; requestRender(); },
-  transparent: () => { scene.background=null; renderer.setClearAlpha(0); floor.visible=false; controller.invalidate({sceneChanged:true}); requestRender(); },
+  transparent: () => { scene.background=null; renderer.setClearAlpha(0); floor.material.opacity=0.6; floor.material.transparent=true; runtime.photographicStudio.floorFade={value:0.8}; controller.invalidate({sceneChanged:true}); requestRender(); },
+  floorPatch: () => {
+    // Find an unobstructed patch inside the floor's constant-opacity region.
+    const ray = new THREE.Raycaster();
+    scene.updateMatrixWorld(true);
+    for (let y=8; y<176; y+=8) for (let x=8; x<240; x+=8) {
+      let valid=true;
+      for (const dy of [0,8,15]) for (const dx of [0,8,15]) {
+        ray.setFromCamera(new THREE.Vector2((x+dx+0.5)/128-1, 1-(y+dy+0.5)/96), camera);
+        const hit=ray.intersectObject(floor)[0];
+        if (!hit || Math.hypot(hit.uv.x*2-1,hit.uv.y*2-1)>0.65 || ray.intersectObject(modelGroup,true).length) valid=false;
+      }
+      if (valid) return {x,y,size:16};
+    }
+    return null;
+  },
   dispose: () => { controller.dispose(); },
   source: () => ({ sameGeometry: painted.geometry===repeat.geometry, material: red.color.getHexString(), boundsTree: !!box.boundsTree }),
   canvases: () => host.querySelectorAll('canvas').length,
@@ -278,6 +293,15 @@ test('hardware Preview converges on authored parts, resets for motion and releas
     if (transparentImage.data[i] > 200) covered++;
   }
   assert.ok(clear > 100 && covered > 100, `transparent background and model coverage survive denoising: ${JSON.stringify({clear, covered})}`);
+  const patch = await page.evaluate(() => window.previewTest.floorPatch());
+  assert.ok(patch, 'fixture provides an unobstructed constant-opacity floor patch');
+  const alpha = [];
+  for (let y=patch.y; y<patch.y+patch.size; y++) for (let x=patch.x; x<patch.x+patch.size; x++) {
+    alpha.push(transparentImage.data[(y*transparentImage.width+x)*4+3]);
+  }
+  const mean = alpha.reduce((sum, value) => sum+value, 0)/alpha.length;
+  const deviation = Math.sqrt(alpha.reduce((sum, value) => sum+(value-mean)**2, 0)/alpha.length);
+  assert.ok(Math.abs(mean/255-0.6)<0.02 && deviation<2, `guided floor coverage retains opacity without grain: ${JSON.stringify({mean, deviation, patch})}`);
   for (let visit = 0; visit < 2; visit++) {
     await page.evaluate(() => window.previewTest.dispose());
     assert.equal(await page.evaluate(() => window.previewTest.canvases()), 1, 'exit detaches the traced canvas');

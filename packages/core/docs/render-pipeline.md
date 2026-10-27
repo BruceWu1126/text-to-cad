@@ -221,8 +221,10 @@ the floor's radial fade is represented as an alpha map. Screenshot capture compo
 
 The first picture is denoised after 32 samples, then refined to 128 samples for Preview
 lighting quality or 256 for Final, with up to 12 surface bounces. `previewDenoiser.js` runs
-Open Image Denoise on linear HDR color with clean albedo and normal guides. It keeps the
-previous completed picture visible while filtering the next one, preserves traced alpha,
+Open Image Denoise on linear HDR color and coverage in sequential passes with clean albedo and
+normal guides. Separate network instances keep each pass's input shader and output buffer
+independent; the additional alpha output uses 16 bytes per pixel, plus its bounded tile
+working memory. It keeps the previous completed picture visible while filtering the next one,
 and lets the tracer's presentation pass apply tone mapping once. The pinned model and its
 license ship with both page bundles; inference needs no external request. A denoising error
 restores the raster studio.

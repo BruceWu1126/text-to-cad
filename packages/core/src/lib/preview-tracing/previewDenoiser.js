@@ -5,7 +5,7 @@ import { createPreviewGuideScene } from './previewGuides.js';
 
 // OIDN is driven explicitly: the upstream tracer's automatic integration only starts
 // after convergence, does not expose tile errors, and presents partially denoised tiles.
-// This adapter publishes only a completed result and preserves the traced alpha.
+// This adapter publishes only after guided RGB and coverage passes both complete.
 export class PreviewDenoiser extends OIDNDenoiser {
   constructor(options, { onComplete = () => {}, onError = () => {} } = {}) {
     super(options);
@@ -18,7 +18,8 @@ export class PreviewDenoiser extends OIDNDenoiser {
     this.guideMRT = mrt({ output: diffuseColor, normal: vec4(normalView.mul(0.5).add(0.5), 1) });
     this.guidesValid = false;
     this.guideScene = null;
-    this.timings = { guideMs: 0, networkMs: 0 };
+    this.timings = { guideMs: 0, networkMs: 0, rgbMs: 0, alphaNetworkMs: 0, alphaMs: 0 };
+    this.alphaUNet = null;
   }
 
   // Tell WebGPUPathTracer there is no automatic pass to start. Its presentation
@@ -55,6 +56,7 @@ export class PreviewDenoiser extends OIDNDenoiser {
       for (const texture of aux.textures) renderer.initTexture(texture);
       const { width, height } = color;
       this.status = 'denoising';
+      const rgbStart = performance.now();
       this._abort = unet.tileExecute({
         color: { data: backend.get(color).texture, width, height },
         albedo: { data: backend.get(aux.textures[0]).texture, width, height },
@@ -62,8 +64,47 @@ export class PreviewDenoiser extends OIDNDenoiser {
         scheduling: 'animation-frame',
         done: output => {
           if (id !== this._requestId || !this._running) return;
+          this.timings.rgbMs = performance.now() - rgbStart;
+          this._abort = null;
+          void this._runAlphaPass(output, aux, width, height, id);
+        },
+        error: error => this._fail(error, id),
+      });
+    } catch (error) { this._fail(error, id); }
+  }
+
+  // oidn-webgpu's data-preparation shaders bake denoiseAlpha on first use,
+  // so RGB and alpha need separate UNets. Their output buffers remain owned by
+  // those networks; keep RGB alive until the alpha pass completes and combine
+  // straight RGB with estimated coverage in a GPU copy.
+  async _runAlphaPass(rgb, aux, width, height, id) {
+    try {
+      this.status = 'preparing-alpha';
+      const start = performance.now();
+      if (!this.alphaUNet) {
+        const options = { aux: true, hdr: true };
+        if (this.maxTileSize !== null) options.maxTileSize = this.maxTileSize;
+        if (this.dynamicTile !== null) options.dynamicTile = this.dynamicTile;
+        const device = this.renderer.backend.device;
+        this.alphaUNet = this.initUNetFromURL(this.auxWeightsUrl, { device, adapterInfo: device.adapterInfo }, options);
+      }
+      const unet = await this.alphaUNet;
+      this.timings.alphaNetworkMs = performance.now() - start;
+      if (id !== this._requestId || !this._running) return;
+      const backend = this.renderer.backend;
+      const passStart = performance.now();
+      this.status = 'denoising-alpha';
+      this._abort = unet.tileExecute({
+        color: { data: backend.get(this.source).texture, width, height },
+        albedo: { data: backend.get(aux.textures[0]).texture, width, height },
+        normal: { data: backend.get(aux.textures[1]).texture, width, height },
+        denoiseAlpha: true,
+        scheduling: 'animation-frame',
+        done: alpha => {
+          if (id !== this._requestId || !this._running) return;
           try {
-            this._copyOutputToTexture(output, width, height);
+            this.timings.alphaMs = performance.now() - passStart;
+            this._copyOutputToTexture(rgb, alpha, width, height);
             this._abort = null;
             this._running = false;
             this._complete = true;
@@ -143,28 +184,29 @@ export class PreviewDenoiser extends OIDNDenoiser {
     this._auxTarget = null;
     this.guideScene?.dispose();
     this.guideScene = null;
+    this.alphaUNet?.then(unet => unet.dispose()).catch(() => {});
+    this.alphaUNet = null;
     for (const key in this._unets) {
       this._unets[key]?.then(unet => unet.dispose()).catch(() => {});
       this._unets[key] = null;
     }
   }
 
-  // OIDN resolves RGB; alpha is the tracer's unfiltered coverage. Copy both into
-  // a texture the tracer's existing tone-map/presentation pass can sample.
-  _copyOutputToTexture(output, width, height) {
+  // Combine two independently denoised outputs into a sampleable HDR texture.
+  _copyOutputToTexture(output, alpha, width, height) {
     const device = this.renderer.backend.device;
     if (!this._resultPipeline) {
       const module = device.createShaderModule({ code: /* wgsl */`
         @group(0) @binding(0) var<storage, read> filtered: array<vec4f>;
-        @group(0) @binding(1) var source: texture_2d<f32>;
+        @group(0) @binding(1) var<storage, read> filteredAlpha: array<vec4f>;
         @group(0) @binding(2) var destination: texture_storage_2d<rgba16float, write>;
         @compute @workgroup_size(8, 8)
         fn main(@builtin(global_invocation_id) p: vec3u) {
           let size = textureDimensions(destination);
           if (p.x >= size.x || p.y >= size.y) { return; }
           let rgb = filtered[p.y * size.x + p.x].rgb;
-          let alpha = textureLoad(source, vec2i(p.xy), 0).a;
-          textureStore(destination, p.xy, vec4f(rgb, alpha));
+          let coverage = clamp(filteredAlpha[p.y * size.x + p.x].a, 0.0, 1.0);
+          textureStore(destination, p.xy, vec4f(rgb, coverage));
         }
       ` });
       this._resultPipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } });
@@ -177,10 +219,9 @@ export class PreviewDenoiser extends OIDNDenoiser {
       this._texture = new ExternalTexture(this._rawTexture);
       this._texture.image = { width, height };
     }
-    const source = this.renderer.backend.get(this.source).texture;
     const bindGroup = device.createBindGroup({ layout: this._resultPipeline.getBindGroupLayout(0), entries: [
       { binding: 0, resource: { buffer: output.data } },
-      { binding: 1, resource: source.createView() },
+      { binding: 1, resource: { buffer: alpha.data } },
       { binding: 2, resource: this._rawTexture.createView() },
     ] });
     const encoder = device.createCommandEncoder();
