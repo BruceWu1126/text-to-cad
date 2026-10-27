@@ -294,12 +294,18 @@ script's folder and that name, independent of which file in the folder declares 
 names in one folder are refused with both declaration locations. A model's name is its identity
 within its namespace, the function's name by default, `name=` gives it another. In 0.8 the namespace
 is the script's folder, with no project detection. Moving a named model to another file of its folder
-keeps its id: run the file it left with `cadgen run` (or delete it) first, since until then the engine
+keeps its id: run the file it left with its project Python (or delete it) first, since until then the engine
 knows that file by its last run, and refuses the new file's declaration naming both. The page is
 `/<id>` on the engine's address; `cadgen export`, `snapshot` and `inspect`, and the
 CAD app's tools, take the id and read the document as the engine holds it. No command
 imports, runs or builds a script: editing the script changes nothing until Python runs
-it again.
+it again. A live document handle retains its original engine selection. Changing
+`CADGEN_PORT` or `CADGEN_ENGINE_DIR` makes its shape reads, exports and snapshots
+fail instead of redirecting them; restore the selection to use that handle again.
+A raw document id addresses the currently selected engine explicitly. Each port's
+saved documents, Recents and thumbnails stay independent, so the same id on another
+port may name a different last-built state. Restarting a server restores its own
+copy. Preferences and the user token remain shared.
 
 - **Documents outlive their workers.** A document stays held after its script's worker
   retires (`cadgen status`: `live` with its worker, `held` without one, where `made_by`
@@ -307,21 +313,25 @@ it again.
   machine's) that never drops a document a page watches.
 - **The engine never reruns code.** A document it no longer holds (its file in the engine's
   cache deleted, or never saved) is refused with the command that
-  brings it back, `cadgen run <the script that defines it>`, by the page, `cadgen inspect`
+  brings it back, `python <the script that defines it>`, by the page, `cadgen inspect`
   and `cad_show` alike (`cadgen status`: `unsaved`, or `detached` once its script is gone).
   Running it updates the same document and its open pages.
 - **Each document has a record** in cadgen's state folder (`documents/<uuid>/document.json`:
-  the script and function that build it (the rebuild command is always `cadgen run` of that script); never
+  the script and function that build it (the rebuild command is `python` of that script in its project environment); never
   geometry). The home lists the records, models and files alike, pinned first, then by
   last activity. A record whose
   script is gone is detached: listed, saying so, with no rebuild command. Nothing else is
   written beside your files: no record of a run.
 - **A restart reopens what was built.** The engine keeps each model document's bytes in
-  the platform's cache folder (`~/.cache/cadgen/documents/`), once it is idle, so after a
-  restart its id answers every verb as last built (`cadgen status`: `held`, on `disk`).
+  the selected server's cache root (`documents/` at default 3245;
+  `servers/<port>/documents/` at other ports), once it is idle, so after a
+  restart its id answers every verb as last built (`cadgen status`: `held`, on `disk`),
+  provided its original native producer is compatible. An incompatible cache is
+  refused without deleting it; an old handed-over shape with no producer stamp
+  must be handed over again.
   A document is what its last run made: the engine never checks the code on disk against
   it, no surface says the script changed, and nothing reruns. After an edit, run the script
-  (`cadgen run /work/arm.py`) to update the document and its open pages.
+  (`python /work/arm.py`) to update the document and its open pages.
   The cache keeps every document until you delete it (`cadgen delete <id>`, or a script's
   path for every document of it, or Delete in a card's menu on the home); nothing evicts
   from it. Deleting removes the record and the cached document, never a file.
@@ -334,11 +344,21 @@ it again.
   it again: its record says a program the engine did not run showed it, so run that
   program again. A decorated function in no saved file is refused, with these words.
 - `cadgen status` lists the workers and the documents the engine holds (`--json` as
-  data); `cadgen stop` stops the engine and any older one still running. At most
+  data); `cadgen stop` stops only the selected engine. At most
   `CADGEN_ENGINE_WORKERS` workers live (default: the machine's cores); a worker is retired only
   when the workers' memory is over `CADGEN_ENGINE_WORKER_RSS_MB`, never for idleness,
   and its script's next run starts cold. `CADGEN_ENGINE_DIR` moves the
-  engine's door and lock (one engine per folder).
+  private IPC directory. `CADGEN_PORT` selects the engine there (default 3245);
+  callers in different Python environments attach to the same selected engine.
+
+For an explicit offline build, use `bracket.build(daemon=False)` from Python.
+It runs cold in that process, requires no server and serves no live document or URL.
+`export(..., daemon=False)` and `snapshot(..., daemon=False)` likewise operate locally.
+These modes are chosen explicitly; a failed server connection never falls back to them.
+A release mismatch requires the same cadgen release in the project and selected server;
+update the project pin or explicitly restart an engine you own with the intended release.
+Native interchange also requires matching OCP provider versions and document format;
+project-only Python dependencies may differ and remain in their own environments.
 
 ## Progress and the report
 

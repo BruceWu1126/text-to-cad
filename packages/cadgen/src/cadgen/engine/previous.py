@@ -79,7 +79,8 @@ SCHEMA = "cadgen.engine closure/2"
 # xbf/7: the build's animations are a record on the main label (``animations.record``); the closure counts none.
 # xbf/8: the closure names the toolchain that built it (closure/2): the system and architecture join the key.
 # xbf/9: native bd_materials physics and PbrProperties replace the cadgen material schema.
-FORMAT = "xbf/9"
+# xbf/10: the effective Python dependency environment and Python version join the key.
+FORMAT = "xbf/10"
 # The libraries a key covers: what decides the geometry and native material payload.
 KEYED_LIBRARIES = ("build123d", "OCP", "bd_materials", "threejs_materials")
 # The keyed platform fields; the closure also records Python as information only.
@@ -218,6 +219,7 @@ def manifest(keys: dict[str, tuple], name: str, folder: Path, model: Any, module
     ``folder``, the document's: ``keys`` the run's bodies (``memo``), ``name`` the model's
     body, ``modules`` and ``unkeyable`` its closure by file (``sources.Symbols.modules``)."""
     from cadgen.engine.kernel import memo
+    from cadgen.engine import runtime
 
     found = keys.get(name)
     keyed = found is not None and bool(found[2]) and not unkeyable
@@ -234,7 +236,7 @@ def manifest(keys: dict[str, tuple], name: str, folder: Path, model: Any, module
                 inputs.append(row)
     record: dict[str, Any] = {
         "schema": SCHEMA, "engine": _engine(), "libs": _libraries(), "platform": _platform(),
-        "source": _source(model, folder),
+        "runtime": runtime.closure(), "source": _source(model, folder),
         "modules": sorted([_relative(path, folder), digest] for path, digest in modules.items()),
         "symbols": _named(symbols or {}, folder),
         "inputs": inputs, "bodies": len(closure(keys, name)) if found is not None else None}
@@ -250,12 +252,13 @@ def _named(symbols: dict[str, dict[str, str]], folder: Path) -> dict[str, dict[s
 
 def key(record: dict[str, Any]) -> str:
     """The digest a restart compares: the format, the libraries, the system and the architecture,
-    and the code: the source, the modules and the inputs. The release, Python version and engine's
-    code digest are recorded but not keyed; the format moves when what an engine writes does."""
+    and the code: the source, the modules and the inputs. The runtime dependency snapshot and
+    its Python version are keyed too. The release, the platform record's informational Python
+    version and the engine's code digest are not keyed; the format moves when its coverage changes."""
     libs = {name: record["libs"].get(name) for name in KEYED_LIBRARIES}
     platform = {name: record["platform"].get(name) for name in KEYED_PLATFORM}
     return _digest([SCHEMA, record["engine"]["format"], libs, platform,
-                    record["source"], record["modules"], record["inputs"]])
+                    record.get("runtime"), record["source"], record["modules"], record["inputs"]])
 
 
 def text(record: dict[str, Any]) -> str:
@@ -271,10 +274,14 @@ def again(record: dict[str, Any], model: Any, folder: Path, modules: dict[str, s
     each by name (a changed module names what changed in it where the record holds its names)."""
     from cadgen.engine.kernel import memo
 
+    from cadgen.engine import runtime
+
     now = {"schema": SCHEMA, "engine": _engine(), "libs": _libraries(), "platform": _platform(),
-           "source": _source(model, folder),
+           "runtime": runtime.closure(), "source": _source(model, folder),
            "modules": sorted([_relative(path, folder), digest] for path, digest in modules.items())}
     changes: list[str] = []
+    if now["runtime"] != record.get("runtime"):
+        changes.append("the Python execution environment changed")
     if now["engine"]["format"] != record["engine"].get("format"):
         changes.append(f"the xbf format changed ({record['engine'].get('format')} to {now['engine']['format']})")
     for name in sorted(set(now["libs"]) | set(record["libs"])):

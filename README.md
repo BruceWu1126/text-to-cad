@@ -32,10 +32,10 @@ Gemini and Grok.
 ### How it works
 
 1. Your agent writes each model as a Python script with [build123d](https://github.com/gumyr/build123d), built on [Open CASCADE](https://dev.opencascade.org).
-2. Running the script, `python model.py`, builds the model with cadgen's engine
-   into an `.xbf` document (its parts, names, colours, materials and joints) and
-   the STEP, GLB, STL or 3MF files the script declares. The engine keeps each
-   model's work in memory, so an edit rebuilds only what it changed.
+2. With cadgen's engine running, `python model.py` uses the project's Python
+   environment to build an `.xbf` document (its parts, names, colours, materials
+   and joints) and the STEP, GLB, STL or 3MF files the script declares. The engine
+   keeps each model's work in memory, so an edit rebuilds only what it changed.
 3. The CAD viewer shows the model in your agent app or your browser, and follows
    every rebuild.
 
@@ -78,8 +78,11 @@ branch in its own way (`#latest`, `--ref latest`, `@latest` or
 
 Each app's heading also says how to update text-to-cad, and how to reinstall it:
 remove it, then install it again. Updating the plugin updates CAD: the new
-release's cadgen is downloaded the first time it runs, and the skills and the
-server share it. Earlier releases stay in uv's cache until you run `uv cache prune`.
+release's server is downloaded the first time it runs. The agent installs that
+same cadgen release in each project's Python environment alongside its other
+dependencies. Scripts run with project Python and attach to the running engine;
+the plugin's MCP bootstrap starts it. Earlier releases stay in uv's cache until
+you run `uv cache prune`.
 
 ### Claude Code
 

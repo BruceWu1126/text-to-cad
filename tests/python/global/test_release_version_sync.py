@@ -124,13 +124,15 @@ class VersionSyncMirrorTests(unittest.TestCase):
             manifest = json.loads((root / "gemini-extension.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["version"], "9.9.9")
             self.assertIn("cadgen==9.9.9", manifest["mcpServers"]["cad"]["args"])
-            # Every cadgen skill's launch command moves with the server's, so they stay one installation.
+            # Bootstrap, CLI and project dependency pins move together.
             skill = (root / "skills/cad/SKILL.md").read_text(encoding="utf-8")
             self.assertIn("--from cadgen==9.9.9 cadgen doctor`", skill)
-            # And so does the version it runs by the `cadgen` command, and the refusal it names.
-            self.assertIn("`cadgen +9.9.9`", skill)
-            self.assertIn("`python` below means `cadgen +9.9.9 run`", skill)
-            self.assertIn("it says 9.9.9 is not installed", skill)
+            self.assertIn("`~/.local/bin/cadgen +9.9.9`", skill)
+            self.assertIn("`python` below means the project's Python interpreter", skill)
+            self.assertIn("`python -m pip install cadgen==9.9.9`; keep the project's other dependencies", skill)
+            self.assertIn("--from cadgen==9.9.9 cadgen server", skill)
+            self.assertIn("--from cadgen==9.9.9 cadgen server",
+                          (root / "packages/cadgen/README.md").read_text(encoding="utf-8"))
             # So does the turn-off command the README and the docs site print.
             for page in ("README.md", "apps/docs/src/lib/content.ts", "apps/docs/src/app/privacy-policy/page.tsx"):
                 self.assertIn("--from cadgen==9.9.9 cadgen telemetry off", (root / page).read_text(encoding="utf-8"))

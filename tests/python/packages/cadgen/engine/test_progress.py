@@ -380,7 +380,7 @@ class DaemonProgressTest(unittest.TestCase):
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-progress-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
-        self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
+        self.env = engine_daemon.started({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
                                           "CADGEN_STATE_DIR": str(self.state / "state"),
                                           "CADGEN_CACHE_DIR": str(self.state / "cache"),
                                           "CADGEN_LAUNCHER_DIR": str(self.state / "bin"),
@@ -465,7 +465,8 @@ class DaemonProgressTest(unittest.TestCase):
             from pathlib import Path
             from cadgen.engine.client import request
             frames = []
-            answer = request({"op": "build", "script": str(Path("slow.py").resolve()), "cwd": os.getcwd(),
+            from cadgen.engine import runtime
+            answer = request({"execution": runtime.describe(), "op": "build", "script": str(Path("slow.py").resolve()), "cwd": os.getcwd(),
                               "env": dict(os.environ)}, on_progress=frames.append)
             print(json.dumps({"ok": all(report["ok"] for report in answer["done"]), "frames": frames}))
         """)

@@ -36,7 +36,7 @@ def registry():
     from cadgen.engine.registry import Registry
     from cadgen.viewer.recents import cache_dir, state_dir
 
-    return Registry(state_dir(), cache=cache_dir())
+    return Registry.for_port(state_dir(), cache=cache_dir())
 
 
 _MODULES = {"cadgen.engine.client", "cadgen.engine.daemon", "cadgen.engine.registry"}
@@ -45,23 +45,6 @@ _MODULES = {"cadgen.engine.client", "cadgen.engine.daemon", "cadgen.engine.regis
 # The agent hosts whose shells run in a sandbox that refuses the loopback port the engine's HTTP
 # server needs, by the variable each sets there: Codex's Seatbelt, in its default workspace-write mode.
 SANDBOXES = (("CODEX_SANDBOX_NETWORK_DISABLED", "1"),)
-
-
-# The variables an agent host sets in the shells it runs a command in, which name it there as
-# ``cadgen.mcp.host.family`` names it from its process: Codex's (seen with ``env`` in codex-cli
-# 0.163's ``exec`` and ``sandbox`` shells), then Claude Code's. Codex first: a Codex started from a
-# Claude Code shell inherits Claude Code's. The ``cadgen`` command reads it (``proxy``).
-SHELLS = (("codex", ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CODEX_TOOL_CALL_ID", "CODEX_SANDBOX")),
-          ("claude code", ("CLAUDECODE",)))
-
-
-def shell(environ=None) -> str | None:
-    """The host whose shell this is, from its environment (``SHELLS``), or None."""
-    environ = os.environ if environ is None else environ
-    for name, variables in SHELLS:
-        if any(environ.get(variable) for variable in variables):
-            return name
-    return None
 
 
 def _attach(module):

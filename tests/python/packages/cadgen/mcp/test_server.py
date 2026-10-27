@@ -101,8 +101,7 @@ class _Session(unittest.TestCase):
         # host's page is opened by the stdio peer (``call`` delivers each result as it does), the
         # card's Open in browser by the server (``browser_opener``).
         self.opened: list[str] = []
-        engine = self.tmp / "opener"
-        engine.mkdir(mode=0o700)
+        engine = Path(os.environ["CADGEN_ENGINE_DIR"])
         from cadgen.viewer import browser_open
         for patched in (mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(engine)}),
                         mock.patch.object(browser_open, "display_refusal", return_value=None)):
@@ -1309,7 +1308,7 @@ class ToolArgumentsTest(unittest.TestCase):
         answer = failed["structuredContent"]
         self.assertEqual(answer["state"], "failed")
         self.assertEqual(answer["error"], "l_bracket.py is no document: an export reads an .xbf, a .step, a mesh (.glb, "
-                                          f".stl, .3mf) or a document id; run `cadgen run {script}` first, then export "
+                                          f".stl, .3mf) or a document id; run `python {script}` first, then export "
                                           "its document by id")
         self.assertEqual(answer["result"], {"outputsMayHaveBeenWritten": False})  # refused before the engine was asked
 

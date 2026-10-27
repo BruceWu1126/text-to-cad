@@ -342,8 +342,8 @@ class Server:
             from cadgen.analytics import Recorder
             from cadgen.settings import FILE
 
-            # The settings beside the model library (the state directory, by default): shared by every process.
-            path = Path(self._recents.root).parent / FILE if self._recents is not None else None
+            # Preferences stay global even when the selected port has its own document library.
+            path = self._recents.registry.shared_state.root / FILE if self._recents is not None else None
             self._analytics = Recorder(path=path)
         return self._analytics
 

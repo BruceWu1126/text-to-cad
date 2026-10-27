@@ -241,7 +241,7 @@ class Models:
         old = held.get(ident) or {}
         root = str(script.parent)
         # What a restart needs of it and no more: what it is (``id``, ``kind``, ``key``), where its
-        # code is (``root``, ``home``, ``entry``: the command that builds it again is ``cadgen run``
+        # code is (``root``, ``home``, ``entry``: the command that builds it again is ``python``
         # of its home, always), the revision the cache and the delta compare, when it was built (the
         # home's order) and when it was first built (``created``, the home's Created: kept from the
         # record it had; a record from before the time was kept stays without one). The closure is
@@ -392,7 +392,7 @@ class Models:
 
     def rebuild(self, ident: str) -> dict[str, Any] | None:
         """What the engine knows of a model document it does not hold: its state (``unsaved``), the
-        command that builds it again -- ``cadgen run`` and the script that defines it -- and why, in
+        command that builds it again -- ``python`` and the script that defines it -- and why, in
         words (the page's ``error``). None for a document it holds or never built. The engine never
         runs the command."""
         self.adopt(ident)
@@ -416,7 +416,7 @@ class Models:
         return {"error": unsaved(name, ident, command), "state": "unsaved", "rebuild": command}
 
     def command(self, ident: str) -> str | None:
-        """The command that builds model document ``ident`` again: ``cadgen run`` and the script that
+        """The command that builds model document ``ident`` again: ``python`` and the script that
         defines its model -- never a program that imported it and called it -- from this process's
         book or the registry's record. None for an id the engine never built."""
         with self.lock:
@@ -529,7 +529,8 @@ class Models:
         if leaving is None and not whole and self.daemon.pool.holds(worker):
             replies = []
             # Asked of the worker that built it (``via``): a child model's is its parent's script's.
-            self.daemon.handle({**order, "env": worker.environment, "via": worker.script}, replies.append)
+            self.daemon.handle({**order, "env": worker.environment, "via": worker.script,
+                                "execution": getattr(worker, "execution", None)}, replies.append)
             answer = next((row for row in reversed(replies) if "done" in row or "failed" in row), {})
             payload = base64.b64decode(answer.get("payload", ""))
         else:
@@ -745,6 +746,9 @@ class Models:
             record = self.records.get(ident)
         if data is None or record is None:
             raise self.not_held(ident)
+        from cadgen.engine import runtime
+
+        runtime.check_producer(data)
         replies: list[dict[str, Any]] = []
         name = record["source"]["name"]
         self.daemon._call({"source": {"document": ident, "held": ident}},

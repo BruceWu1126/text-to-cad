@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -39,7 +40,8 @@ class DevPluginTests(unittest.TestCase):
                         servers = json.loads((plugin / servers).read_text(encoding="utf-8"))["mcpServers"]
                     self.assertEqual(servers, {"cad": server})
                     self.assertEqual(server["env"], {"CADGEN_INSTALL_CHANNEL": "dev", "CADGEN_MCP_APP_DIR": "/pages/1",
-                                                     "CADGEN_INSTALLATION_VERSION": "1.2.3-dev.1"})
+                                                     "CADGEN_INSTALLATION_VERSION": "1.2.3-dev.1",
+                                                     **({"CADGEN_PORT": os.environ["CADGEN_PORT"]} if os.environ.get("CADGEN_PORT") else {})})
                     self.assertEqual(sorted(path.parent.name for path in plugin.glob("skills/*/SKILL.md")), skills)
                     self.assertFalse(list(plugin.rglob("__pycache__")))
                     for icon in (manifest.get("logo"), manifest.get("interface", {}).get("logo")):
@@ -47,9 +49,8 @@ class DevPluginTests(unittest.TestCase):
                             self.assertTrue((plugin / icon).is_file(), icon)
 
     def test_the_skills_run_the_version_the_server_registers(self) -> None:
-        # The dev server runs the checkout's .venv, registered as this install's own version; the
-        # copied skills must run that version, or the agent's scripts would run the release's
-        # installation and a daemon of their own.
+        # CLI verbs use the registered dev install; project source uses its own interpreter
+        # with the checkout installed editable, rather than the release from PyPI.
         released = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
         with tempfile.TemporaryDirectory() as scratch, mock.patch.dict("os.environ", {"CADGEN_LAUNCHER_DIR": ""}):
             rewrites = dev_install.skill_rewrites(released, "1.2.3-dev.1", python="/w/.venv/bin/python")
@@ -61,9 +62,12 @@ class DevPluginTests(unittest.TestCase):
                     self.assertNotIn("--from cadgen==", text)
                     self.assertNotIn(f"+{released}`", text)
                     if "below means" in text:
-                        self.assertIn("`cadgen` below means `cadgen +1.2.3-dev.1`", text)
-                        self.assertIn("`python` below means `cadgen +1.2.3-dev.1 run`", text)
-                        self.assertIn("it says 1.2.3-dev.1 is not installed", text)
+                        proxy = Path(dev_install.launcher_dir()).expanduser() / ("cadgen.cmd" if os.name == "nt" else "cadgen")
+                        self.assertIn(f"`cadgen` below means `{proxy} +1.2.3-dev.1`", text)
+                        self.assertIn("`python` below means the project's Python interpreter", text)
+                        self.assertIn(f"python -m pip install -e {dev_install.REPO_ROOT / 'packages' / 'cadgen'}", text)
+                        self.assertNotIn(f"cadgen=={released}", text)
+                        self.assertIn("uv pip install --python <project-python> -e ", text)
                         self.assertIn("/w/.venv/bin/python -m cadgen.cli doctor`", text)
 
     def test_wheel_mode_registers_one_wheel_for_the_server_and_the_skills(self) -> None:
@@ -79,14 +83,37 @@ class DevPluginTests(unittest.TestCase):
                              {"v": "/state/installations/v.json"})
         self.assertEqual((server["args"], server["env"]),
                          ([*dev_install.LAUNCHER[1:], str(wheel), "cadgen", "mcp"],
-                          {"CADGEN_INSTALL_CHANNEL": "dev", "CADGEN_INSTALLATION_VERSION": "v"}))
+                          {"CADGEN_INSTALL_CHANNEL": "dev", "CADGEN_INSTALLATION_VERSION": "v",
+                           **({"CADGEN_PORT": os.environ["CADGEN_PORT"]} if os.environ.get("CADGEN_PORT") else {})}))
         # The wheel's installation registers as this install's version, by its own python.
         run.assert_called_once_with(*dev_install.LAUNCHER, str(wheel), "python", "-c", dev_install.REGISTER, "v",
                                     capture=True)
         released = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
         self.assertTrue(rewrites[dev_install.launch("cadgen", released)].endswith(f"--from {wheel} cadgen"))
-        self.assertEqual(rewrites[f"cadgen +{released}"], "cadgen +v")
+        proxy = Path(dev_install.launcher_dir()).expanduser() / ("cadgen.cmd" if os.name == "nt" else "cadgen")
+        self.assertEqual(rewrites[f"~/.local/bin/cadgen +{released}"], f"{proxy} +v")
+        self.assertEqual(rewrites[f"python -m pip install cadgen=={released}"],
+                         f"python -m pip install {wheel}")
         self.assertIsNone(page, "a wheel serves the page it was built with")
+
+    def test_explicit_port_reaches_the_server_and_project_instructions(self) -> None:
+        import argparse
+
+        released = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        wheel = Path("/w/cadgen.whl")
+        with mock.patch.dict("os.environ", {"CADGEN_PORT": "4567"}):
+            server = dev_install.server_entry("claude", "/venv/bin/python", Path("/pages"))
+            self.assertEqual(server["env"]["CADGEN_PORT"], "4567")
+            rewrites = dev_install.skill_rewrites(released, "dev", python="/venv/bin/python")
+            self.assertTrue(any("CADGEN_PORT=4567" in value for value in rewrites.values()))
+            with mock.patch.object(dev_install, "build_wheel", return_value=wheel), \
+                    mock.patch.object(dev_install, "register"):
+                wheel_server, _, _ = dev_install.runtime("codex", argparse.Namespace(wheel=True, build=False), "dev")
+            self.assertEqual(wheel_server["env"]["CADGEN_PORT"], "4567")
+        for invalid in ("0", "65536", "bad"):
+            with self.subTest(port=invalid), mock.patch.dict("os.environ", {"CADGEN_PORT": invalid}):
+                with self.assertRaises(dev_install.Refused):
+                    dev_install.server_entry("claude", "/venv/bin/python", Path("/pages"))
 
     def test_this_scripts_launcher_is_cadgens(self) -> None:
         import sys

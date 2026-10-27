@@ -144,7 +144,7 @@ class DoctorTests(unittest.TestCase):
         environment = {key: value for key, value in os.environ.items() if key != installations.NAME_ENV}
         environment["PYTHONPATH"] = str(Path(cadgen.__file__).resolve().parent.parent)  # this cadgen, however installed
         done = subprocess.run([sys.executable, "-P", "-m", "cadgen._internal.proxy", "+1.2.3-dev.1", "doctor",
-                               "--no-server", str(self.state)], capture_output=True, text=True, env=environment,
+                               str(self.state)], capture_output=True, text=True, env=environment,
                               timeout=300)
         self.assertEqual(done.returncode, 0, done.stderr)
         lines = done.stdout.splitlines()
@@ -160,11 +160,11 @@ class DoctorTests(unittest.TestCase):
             skill = Path(tmp) / "SKILL.md"
             skill.write_text("- `cadgen` below means `cadgen +0.8.0-dev.20261025032333`\n", encoding="utf-8")
             with mock.patch.dict("os.environ", {"CADGEN_INSTALLATION_VERSION": "0.8.0-dev.20261025032333"}):
-                code, out, _ = _run(["--no-server", tmp])
+                code, out, _ = _run([tmp])
             self.assertEqual(code, 0, out)
             self.assertIn("pin      OK — cadgen==0.8.0-dev.20261025032333", out)
             with mock.patch.dict("os.environ", {"CADGEN_INSTALLATION_VERSION": "0.8.0-dev.1"}):
-                code, _, err = _run(["--no-server", tmp])
+                code, _, err = _run([tmp])
             self.assertEqual(code, 3)
             self.assertIn("pins cadgen==0.8.0-dev.20261025032333, but cadgen 0.8.0-dev.1 is installed", err)
 
@@ -217,39 +217,19 @@ class DoctorTests(unittest.TestCase):
             _, out, _ = _run([tmp])
         self.assertRegex(out, r"sharing  on: by default, since cadgen said so on \d{4}-\d{2}-\d{2}\n")
 
-    def test_the_report_starts_the_engine_when_none_runs(self) -> None:
-        # In a sandbox that cannot start one, the client's own line, and nothing started.
-        with TemporaryDirectory() as tmp:
+    def test_the_report_only_inspects_the_selected_engine(self) -> None:
+        with TemporaryDirectory() as tmp, mock.patch("cadgen.engine.client.request", return_value=None) as asked:
             code, out, _ = _run([tmp])
         self.assertEqual(code, 0)
-        self.assertRegex(out, r"server   not running \(.+\): no engine server is running, and this shell's sandbox cannot start one")
-        self.assertFalse((self.state / "engine").exists(), "nothing started")
-        # Running: said. None running: started, by the client's start (a request that may start one).
-        # The workers counted as `cadgen status` counts them: the standby with them, against the cap.
-        # And the version it runs as, so a stale engine is seen (one that says none: its release).
+        asked.assert_called_once_with({"op": "status"}, start=False)
+        self.assertIn("start `cadgen server` before building", out)
+        self.assertFalse((self.state / "engine").exists())
         answer = {"pid": 4242, "workers": [{"script": "a.py"}], "standby": {"pid": 4343}, "cap": 10,
                   "version": "0.8.0", "installation": "0.8.0-dev.2"}
-        with TemporaryDirectory() as tmp, mock.patch("cadgen.engine.client.request", return_value=answer):
+        with TemporaryDirectory() as tmp, mock.patch("cadgen.engine.client.request", return_value=answer) as asked:
             _, out, _ = _run([tmp])
-        self.assertRegex(out, r"server   running, pid 4242, cadgen 0\.8\.0-dev\.2, workers 2/10 with the standby \(.+\)\n")
-        with TemporaryDirectory() as tmp, mock.patch("cadgen.engine.client.request",
-                                                     return_value={**answer, "installation": None}):
-            self.assertRegex(_run([tmp])[1], r"server   running, pid 4242, cadgen 0\.8\.0, workers 2/10")
-        from cadgen.engine.cli import status_text
-
-        self.assertIn(" · workers 2/10 with the standby · ", status_text({**answer, "up": 1}))
-        answer = {"pid": 4242, "workers": [{"script": "a.py"}, {"script": "b.py"}], "standby": None, "cap": 10,
-                  "installation": "0.8.0-dev.2"}
-        with TemporaryDirectory() as tmp, mock.patch("cadgen.engine.client.request", side_effect=[None, answer]) as asked:
-            _, out, _ = _run([tmp])
-        self.assertEqual([call.kwargs["start"] for call in asked.call_args_list], [False, True])
-        self.assertRegex(out, r"server   started, pid 4242, cadgen 0\.8\.0-dev\.2, workers 2/10 \(.+\)\n")
-        # --no-server: everything else, and the engine only asked about, never started.
-        with TemporaryDirectory() as tmp, mock.patch("cadgen.engine.client.request", return_value=None) as asked:
-            code, out, _ = _run(["--no-server", tmp])
-        self.assertEqual((code, [call.kwargs["start"] for call in asked.call_args_list]), (0, [False]))
-        self.assertRegex(out, r"server   not running \(.+\); a build starts it outside a sandbox; inside one, "
-                              r"run `cadgen server` outside first\n")
+        self.assertIn("running, pid 4242, cadgen 0.8.0, workers 2/10 with the standby", out)
+        asked.assert_called_once_with({"op": "status"}, start=False)
 
     def test_the_report_names_the_kernel_it_loaded(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -455,7 +435,7 @@ class LeftoversTest(PrivateFolders):
         before = self.tree()
 
         with mock.patch.object(installations, "targets", return_value=None):
-            code, out, _ = _run(["--no-server", str(self.root)])
+            code, out, _ = _run([str(self.root)])
         self.assertEqual(code, 0)
         self.assertIn("  leftover 2 engine records of an older format, 1 bytecode folder of installations no longer "
                       "registered (2.0 KB), 1 cache folder with no record (4.0 KB), 1 file an earlier 0.8 build kept "
@@ -512,7 +492,7 @@ class SevenLeftoversTest(PrivateFolders):
     def test_a_quiet_0_7_is_said_with_its_size_and_age_and_pruned(self) -> None:
         made, ours = self.seven(), self.ours()
         said = f"cadgen 0.7's store and 4 state files (4.0 KB), last written {self.last(made)}"
-        code, out, _ = _run(["--no-server", str(self.root)])
+        code, out, _ = _run([str(self.root)])
         self.assertEqual(code, 0)
         self.assertIn(f"  0.7      {said}: cadgen doctor --prune removes it\n", out)
         self.assertTrue(all(path.exists() for path in made), "nothing is removed without --prune")
@@ -522,12 +502,12 @@ class SevenLeftoversTest(PrivateFolders):
                      "state/recents/recents.jsonl", "state/install-channels.json.lock"):
             self.assertFalse((self.root / gone).exists(), gone)
         self.assertTrue(all(path.exists() for path in ours), "0.8's own files stay")
-        self.assertNotIn("0.7", _run(["--no-server", str(self.root)])[1])
+        self.assertNotIn("0.7", _run([str(self.root)])[1])
 
     def test_a_0_7_written_in_the_last_week_stays_until_all_versions_says_none_needs_it(self) -> None:
         made, ours = self.seven(recent="state/viewer.log"), self.ours()
         said = f"cadgen 0.7's store and 5 state files (4.0 KB), last written {self.last(made)}"
-        code, out, _ = _run(["--no-server", str(self.root)])
+        code, out, _ = _run([str(self.root)])
         self.assertIn(f"  0.7      {said}: cadgen doctor --prune removes it once nothing has written it for 7 days, "
                       "or now with --all-versions\n", out)
         code, out, _ = _run(["--prune"])

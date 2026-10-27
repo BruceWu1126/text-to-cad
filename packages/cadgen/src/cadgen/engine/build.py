@@ -873,7 +873,6 @@ def held_source(payload: bytes, name: str, origin: dict[str, Any] | None = None)
     its assemblies' placements and its animations' record with it, named as the document is
     (``name``). The source has no path: it is no file. The last few read are kept (``_HELD``)."""
     import hashlib
-
     from cadgen.engine.document_migrations import DocumentCompatibilityError
 
     key = (hashlib.blake2b(payload, digest_size=20).hexdigest(), name,

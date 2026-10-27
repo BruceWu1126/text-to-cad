@@ -1,5 +1,5 @@
 """``cadgen doctor`` — set cadgen up and report it: register the installation, write the ``cadgen``
-command, start the engine, check a skill's pin.
+command, check the engine and a skill's pin.
 
 The skills' one-time step (``uvx ... --from cadgen==<version> cadgen doctor``), and the repair
 command. It registers this installation (``<state>/installations/<version>.json``) and writes the
@@ -14,10 +14,8 @@ their size and when they were last written. ``--prune`` removes those records, t
 launchers (``cadgen-<version>``, ``cadgen-python-<version>``) earlier builds published beside the
 proxy (``installations.prune_legacy``) and those leftovers, but any written in the last seven days,
 a line for each kind; ``--all-versions`` with it removes 0.7's however recently written. Nothing is
-removed without ``--prune``. Then it starts the engine
-when none runs (``cadgen.engine.client``): in a sandbox that cannot start one it says so in its usual
-line. ``--no-server`` does all of it but start the engine, saying whether one runs: a CI job's
-smoke check, which must leave no engine behind. Run pointed at a skill (its directory or SKILL.md), it also says whether this is the cadgen the
+removed without ``--prune``. The engine is only inspected; start it separately with
+``cadgen server``. Run pointed at a skill (its directory or SKILL.md), it also says whether this is the cadgen the
 skill's docs were written against: the version its install command pins.
 
 It also proves the CAD kernel loads. ``OCP`` is imported in a fresh interpreter
@@ -25,7 +23,7 @@ It also proves the CAD kernel loads. ``OCP`` is imported in a fresh interpreter
 and a refused load is named for what it is: on Windows 11 that is Smart App
 Control blocking the unsigned ``.pyd``, which the bare ``ImportError`` never
 says (``cadgen._internal.kernel_load_hint``). And it says where the engine's server,
-where every build runs, keeps its door, and whether it was running or was started.
+where every build runs, keeps its door, and whether it is running.
 
 Exit codes: 0 = installed cadgen matches the pin (or nothing claims a pin);
 3 = pin mismatch; 4 = the kernel is installed but cannot be loaded (the report
@@ -64,33 +62,22 @@ def _resolve_skill(target: str | None) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def _server(start: bool = True) -> str:
-    """The engine server this installation shares (``cadgen.engine.daemon``): where its door is,
-    and whether one is running -- started when none is and ``start``, through the client's own start,
-    which in a sandbox that cannot start one says so."""
+def _server() -> str:
+    """Inspect the selected engine without starting or replacing it."""
     try:
         from cadgen.engine import daemon as engine_daemon
         from cadgen.engine.client import request
 
         where = engine_daemon.address()
         answer = request({"op": "status"}, start=False)
-        started = False
-        if not isinstance(answer, dict) and start:
-            try:
-                answer = request({"op": "status"}, start=True)
-            except ConnectionError as error:
-                return f"not running ({where}): {error}"
-            started = True
-    except Exception as error:  # noqa: BLE001 - a report line, never a reason for the report to fail
+    except Exception as error:  # a diagnostic, never a reason for the report to fail
         return f"unknown ({type(error).__name__}: {error})"
     if not isinstance(answer, dict):
-        return f"not running ({where}); a build starts it outside a sandbox; inside one, run `cadgen server` outside first"
+        return f"not running ({where}); start `cadgen server` before building, or use daemon=False for an offline build"
     from cadgen.engine.cli import workers_text
 
-    # The version the engine runs as (an engine started before engines said it, its release), so a
-    # stale one is seen; the workers as `cadgen status` counts them: the standby with them.
-    version = answer.get("installation") or answer.get("version")
-    return (f"{'started' if started else 'running'}, pid {answer.get('pid')}"
+    version = answer.get("version")
+    return (f"running, pid {answer.get('pid')}"
             + (f", cadgen {version}" if version else "") + f", {workers_text(answer)} ({where})")
 
 
@@ -344,7 +331,7 @@ def _prune_leftovers(all_versions: bool = False) -> list[str]:
 def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
     parser = argparse.ArgumentParser(
         prog=prog,
-        description="Set cadgen up (register it, write the cadgen command, start the engine), report it, "
+        description="Set cadgen up (register it, write the cadgen command, inspect the environment), report it, "
                     "and verify a skill's cadgen version pin.",
     )
     parser.add_argument(
@@ -366,11 +353,6 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
         help="With --prune: remove cadgen 0.7's store and state files too, however recently they were written "
              "(without it they go once nothing has written them for 7 days). Only once no cadgen 0.7 is "
              "installed in any agent app.",
-    )
-    parser.add_argument(
-        "--no-server",
-        action="store_true",
-        help="Do everything but start the engine: say only whether one is running.",
     )
     args = parser.parse_args(argv)
     if args.all_versions and not args.prune:
@@ -411,8 +393,8 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
     # What --prune would remove: nothing is removed without it.
     for line in _report_leftovers():
         sys.stdout.write(f"  {line}\n")
-    # One per installation: the same door means the same warm daemon. Started here when none runs.
-    sys.stdout.write(f"  server   {_server(start=not args.no_server)}\n")
+    # Inspect the selected port without starting or replacing an engine.
+    sys.stdout.write(f"  server   {_server()}\n")
     sharing = _sharing()
     if sharing:
         # Whether CAD's apps send usage stats, as `cadgen telemetry` says it.

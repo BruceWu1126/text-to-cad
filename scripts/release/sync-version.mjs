@@ -24,10 +24,8 @@ const tomlTargets = [
   "packages/cadgen/pyproject.toml",
 ];
 
-// Every skill that runs cadgen names the version the server's installation registers as
-// (`cadgen +<version>`, run by the `cadgen` command it writes, and "it says <version> is not
-// installed") and the command that installs it (`uvx ... --from cadgen==<version> cadgen doctor`) in
-// its SKILL.md, pinned like the server's so the two share one installation.
+// Skills pin CLI/bootstrap commands and the project Python dependency to the same release.
+// The project interpreter stays separate; exact release equality lets its workers use the server.
 function skillLaunchTargets() {
   const skills = path.join(repoRoot, "skills");
   if (!existsSync(skills)) {
@@ -52,6 +50,7 @@ export const pinTargets = [
   "mcp.json",
   "gemini-extension.json",
   "README.md",
+  "packages/cadgen/README.md",
   // The turn-off command the README and the docs site print, the plugin's own launch line.
   "apps/docs/src/lib/content.ts",
   "apps/docs/src/app/privacy-policy/page.tsx",
@@ -211,7 +210,7 @@ function syncTomlTarget(relativePath, version) {
 export const skillVersionPattern = /(cadgen \+|it says )(\d[^\s`"'\\)]*)/g;
 
 function syncPinTarget(relativePath, version, text = readRequiredText(relativePath)) {
-  const pin = /(cadgen(?:\[[a-z0-9_,.-]+\])?==)([^"\s]+)/g;
+  const pin = /(cadgen(?:\[[a-z0-9_,.-]+\])?==)([^"'`\s]+)/g;
   const matches = [...text.matchAll(pin)];
   if (matches.length === 0) {
     throw new Error(`${relativePath} must pin cadgen==<version>`);

@@ -133,7 +133,7 @@ class ViewerAnalyticsTest(unittest.TestCase):
         script = self.root / "parts.py"
         script.write_text("", encoding="utf-8")
         ident = model_id(script, "cube")
-        Registry(self.tmp / "state").put({"id": ident, "kind": "model", "root": str(self.root), "home": "parts.py",
+        Registry.for_port(self.tmp / "state").put({"id": ident, "kind": "model", "root": str(self.root), "home": "parts.py",
                                           "entry": "cube", "revision": "r1", "built": 1.0})
         self.request("POST", "/__cad/analytics", {"share": True})
         for _ in range(2):  # shown, then again: a reload, the home's card

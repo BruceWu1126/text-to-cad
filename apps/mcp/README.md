@@ -2,7 +2,10 @@
 
 The page an agent host renders for CAD: the same `@text-to-cad/ui` FileViewer and
 renderers `apps/web` composes, behind a different host — an MCP Apps bridge
-instead of an HTTP origin. The installation's engine serves its tools, page resource and HTTP routes.
+instead of an HTTP origin. The engine selected by `CADGEN_PORT` (default 3245) serves
+its tools, page resource and HTTP routes. Its persistent document library, Recents and
+thumbnails belong to that port; another port's copy of the same model id stays independent.
+Preferences, installation records and the user's page token remain shared.
 `cadgen mcp` is the stateless stdio shim that agent hosts launch: it ensures that
 engine, then forwards JSON-RPC to `/mcp` using its installation token. Each shim
 negotiates a separate MCP session. Closing a shim releases that session and leaves
@@ -441,4 +444,6 @@ same view through the document version stream.
 
 The stdio peer exits with its host session; it deletes only that MCP session.
 There is no viewer subprocess or file-backed sidebar registry to clean up.
-Restart the installation engine explicitly after editing its Python source.
+MCP bootstrap starts or attaches to the selected engine and requires the same cadgen
+release. Model clients only attach; project workers use the caller's interpreter.
+Restart your own selected engine explicitly after editing its Python source.

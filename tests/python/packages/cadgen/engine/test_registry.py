@@ -52,6 +52,32 @@ class RegistryTest(unittest.TestCase):
                                                  encoding="utf-8")
             self.assertEqual(self.registry.engine("abc123"), read, port)
 
+    def test_port_storage_keeps_default_documents_and_shared_credentials(self) -> None:
+        cache = self.state / "cache"
+        self.registry.put(_record(self.ident, self.state, revision="default"))
+        default = Registry.for_port(self.state, cache, port=3245)
+        first = Registry.for_port(self.state, cache, port=3246)
+        second = Registry.for_port(self.state, cache, port=3247)
+        self.assertEqual(default.get(self.ident)["revision"], "default")
+        self.assertEqual(default.cache.root, cache)
+        self.assertIsNone(first.get(self.ident))
+        first.put(_record(self.ident, self.state, revision="first"))
+        second.put(_record(self.ident, self.state, revision="second"))
+        first.cache.write(f"documents/{self.ident}/document.xbf", b"first")
+        second.cache.write(f"documents/{self.ident}/document.xbf", b"second")
+        token = "x" * 43
+        first.put_token(token)
+        first.put_engine("installation", {"port": 3246})
+        self.assertEqual(default.token(), token)
+        self.assertEqual(second.token(), token)
+        self.assertEqual(second.engine("installation"), {"port": 3246})
+        self.assertEqual(first.state.root, self.state / "servers" / "3246")
+        self.assertEqual(first.cache.root, cache / "servers" / "3246")
+        first.delete(self.ident)
+        self.assertEqual(default.get(self.ident)["revision"], "default")
+        self.assertEqual(second.get(self.ident)["revision"], "second")
+        self.assertEqual(second.cache.read(f"documents/{self.ident}/document.xbf"), b"second")
+
     def test_a_record_is_written_once_until_it_changes_and_its_observers_hear_each_write(self) -> None:
         heard: list[dict] = []
         self.enterContext(mock.patch.object(registry, "OBSERVERS", [heard.append]))
@@ -64,17 +90,17 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual([record["revision"] for record in heard], ["a", "b"])
         self.assertEqual([record["id"] for record in self.registry.list()], [self.ident])
         self.assertEqual(registry.command(self.registry, self.registry.get(self.ident)),
-                         f"cadgen run {self.state / 'parts.py'}", "the script that defines it, not its caller")
+                         f"python {self.state / 'parts.py'}", "the script that defines it, not its caller")
         self.assertTrue(self.registry.delete(self.ident))
         self.assertEqual((self.registry.get(self.ident), self.registry.list()), (None, []))
 
     def test_the_rebuild_command_pastes_into_the_platform_s_shell(self) -> None:
         # Printed for a person to paste: quoted for a POSIX shell there; on Windows as cmd.exe and
         # PowerShell both read it, where a single quote would be part of the path.
-        cases = ((False, "/m/caller.py", "cadgen run /m/caller.py"),
-                 (False, "/my models/caller.py", "cadgen run '/my models/caller.py'"),
-                 (True, "C:\\m\\caller.py", "cadgen run C:\\m\\caller.py"),
-                 (True, "C:\\my models\\caller.py", 'cadgen run "C:\\my models\\caller.py"'))
+        cases = ((False, "/m/caller.py", "python /m/caller.py"),
+                 (False, "/my models/caller.py", "python '/my models/caller.py'"),
+                 (True, "C:\\m\\caller.py", "python C:\\m\\caller.py"),
+                 (True, "C:\\my models\\caller.py", 'python "C:\\my models\\caller.py"'))
         for windows, program, pasted in cases:
             with self.subTest(program=program), mock.patch.object(registry, "WINDOWS", windows):
                 self.assertEqual(registry.rerun(program), pasted)
@@ -170,7 +196,7 @@ class RegistryDaemonTest(unittest.TestCase):
         cls.addClassCleanup(shutil.rmtree, cls.engine, True)
         # The registry alone, with a cache folder nothing can write: a restart knows an id by its
         # record and its command. What the cache adds is ``test_cache``'s.
-        cls.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(cls.engine),
+        cls.env = engine_daemon.started({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(cls.engine),
                                          "CADGEN_STATE_DIR": str(cls.state),
                                          "CADGEN_CACHE_DIR": engine_daemon.unwritable(cls.folder),
                                          "CADGEN_ENGINE_MESH": "inline"},
@@ -194,11 +220,15 @@ class RegistryDaemonTest(unittest.TestCase):
     def ask(self, message: dict) -> dict:
         from cadgen.engine.client import request
 
-        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.engine)}):
+        with mock.patch.dict(os.environ, self.env, clear=True):
             return request(message, start=False) or {}
 
+    @property
+    def document_state(self) -> Path:
+        return Registry.for_port(self.state, port=int(self.env["CADGEN_PORT"])).state.root
+
     def records(self) -> dict[str, dict]:
-        return {record["id"]: record for record in Registry(self.state).list()}
+        return {record["id"]: record for record in Registry.for_port(self.state, port=int(self.env["CADGEN_PORT"])).list()}
 
     def test_a_build_writes_its_record_alone_and_a_restart_knows_it_by_its_command(self) -> None:
         project = self.project("pointer", {"parts.py": PARTS,
@@ -213,25 +243,26 @@ class RegistryDaemonTest(unittest.TestCase):
         record = self.records()[cube]
         self.assertEqual((record["kind"], record["home"], Path(record["root"])), ("model", "parts.py", project))
         # What a restart needs and no more: no closure (the document's own), no versions, no stamps,
-        # no command (always `cadgen run` of its home), no record of the files it declared.
+        # no command (always `python` of its home), no record of the files it declared.
         self.assertEqual(set(record), {"schema", "id", "kind", "root", "home", "entry", "revision", "built", "created", "facts", "namespace", "name", "fingerprint", "module", "declares"})
         self.assertEqual(record["declares"], [], "the explicit names its script declares: none")
         self.assertEqual((record["namespace"], record["name"]), (str(project), "cube"))
         self.assertEqual(record["created"], record["built"], "a first build is when the model was created")
-        self.assertEqual(sorted(os.listdir(self.state / "documents" / cube)), ["document.json"], "it points: no geometry")
+        self.assertEqual(sorted(os.listdir(self.document_state / "documents" / cube)), ["document.json"], "it points: no geometry")
         self.assertEqual(listed(), before, "nothing beside the script")
-        written = (self.state / "documents" / cube / "document.json").stat().st_mtime_ns
+        written = (self.document_state / "documents" / cube / "document.json").stat().st_mtime_ns
         again = self.run_python("caller.py", cwd=project)
         self.assertEqual(again.returncode, 0, again.stderr)
-        self.assertEqual((self.state / "documents" / cube / "document.json").stat().st_mtime_ns, written,
+        self.assertEqual((self.document_state / "documents" / cube / "document.json").stat().st_mtime_ns, written,
                          "an unchanged build rewrites nothing")
         # A restart: the id is known, not held, with the command that builds it again; nothing runs it.
         self.assertEqual(self.cli("stop").returncode, 0)
+        engine_daemon.bootstrap(self.env)
         inspected = self.cli("inspect", cube)
         self.assertEqual(inspected.returncode, 2, inspected.stderr)
-        self.assertIn(f"run `cadgen run {project / 'parts.py'}`", inspected.stderr)
+        self.assertIn(f"run `python {project / 'parts.py'}`", inspected.stderr)
         answer = self.ask({"op": "state", "id": cube})
-        self.assertEqual((answer["state"], answer["rebuild"]), ("unsaved", f"cadgen run {project / 'parts.py'}"))
+        self.assertEqual((answer["state"], answer["rebuild"]), ("unsaved", f"python {project / 'parts.py'}"))
         from cadgen.viewer.recents import RecentStore
 
         listed = {entry.path: entry.public() for entry in RecentStore(self.state).list()}
@@ -241,7 +272,7 @@ class RegistryDaemonTest(unittest.TestCase):
         self.assertEqual(self.ask({"op": "state", "id": cube})["state"], "detached")
         self.assertTrue({entry.path: entry.public() for entry in RecentStore(self.state).list()}[cube]["missing"])
         RecentStore(self.state).remove(cube)
-        self.assertFalse((self.state / "documents" / cube).exists())
+        self.assertFalse((self.document_state / "documents" / cube).exists())
 
     def test_a_name_another_declaration_s_record_holds_is_refused_naming_it(self) -> None:
         project = self.project("keyed", {"left.py": NAMED.format(name="left"), "right.py": NAMED.format(name="right")})

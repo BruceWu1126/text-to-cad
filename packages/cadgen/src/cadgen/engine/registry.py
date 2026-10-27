@@ -1,9 +1,10 @@
 """The registry: one self-describing record per document the engine knows, in the user's state folder.
 
-``<state>/documents/<id>/document.json`` is a document's record, one shape for every kind:
+``<state>/documents/<id>/document.json`` is the default port's document record. Other ports
+use ``<state>/servers/<port>/documents``; their cache has the same scope. Each record has one shape:
 ``{schema, id, kind, root, home, entry, namespace, name, fingerprint?, module?, line?, declares?, relocated?,
 revision, built, facts?, program?, cache?, opened?, pinned?, preview?}`` (identity's fields: ``identity``). ``kind`` is ``model``, a model built from a script (``home`` and ``entry``: the
-script and the function it points at; the command that builds it again is always ``cadgen run``
+script and the function it points at; the command that builds it again is always ``python``
 of its home); ``shape``, a shape a program handed over (``home``: the script that handed it over,
 or the folder it was handed over in; ``program``: that program, where there is one; nothing builds
 it again); or ``file``, an on-disk CAD file the person opened (``home`` and ``opened`` alone, and
@@ -32,8 +33,8 @@ The cache folder is a second ``Folder``, written the same way; forgetting a docu
 Beside the documents, ``<state>/engines/token`` is the user's page token, which every
 installation's engine serves with (``Registry.token``; the first engine makes it, ``make_token``), and
 ``<state>/engines/<installation>.json`` each installation's engine record (``Registry.engine``,
-``put_engine``, its own ``ENGINE_SCHEMA``): while the default port is another program's, the port
-the engine rolled to (``port``). Both are written this user's alone (0600). Links stay valid across
+``put_engine``, its own ``ENGINE_SCHEMA``). These stay global across ports, written this user's
+alone (0600); engine records never select a client's server. Links stay valid across
 restarts and upgrades because of them (``daemon.bind``); ``cadgen server --rotate-token`` replaces
 the token.
 
@@ -64,8 +65,7 @@ SCHEMA = 1
 DOCUMENTS = "documents"
 RECORD = "document.json"
 ENGINES = "engines"
-# The engine records' own schema: 3 holds, while the default port is another's, the port the
-# installation rolled to (and held the installation's token, which is the user's now: ``TOKEN``).
+# The engine records' own schema; these records never select a client's server.
 ENGINE_SCHEMA = 3
 # What an engine record holds (``put_engine``): one carrying anything else is an earlier build's.
 ENGINE_FIELDS = ("port", "schema")
@@ -166,7 +166,7 @@ class Folder:
             return
         try:
             target.unlink()
-        except FileNotFoundError:
+        except (FileNotFoundError, NotADirectoryError):
             pass
 
     def names(self, inside: str) -> list[str]:
@@ -181,8 +181,27 @@ class Registry:
 
     def __init__(self, state: Folder | Path | str, cache: Folder | Path | str | None = None) -> None:
         self.state = state if isinstance(state, Folder) else Folder(state)
+        self.shared_state = self.state  # credentials and installation records are never port-scoped
         # Where the engine's cache keeps documents' bytes (``cache``), or None: nothing is cached.
         self.cache = cache if isinstance(cache, Folder) or cache is None else Folder(cache)
+        self.shared_cache = self.cache  # compiled Python caches stay outside document scopes
+
+    @classmethod
+    def for_port(cls, state: Folder | Path | str, cache: Folder | Path | str | None = None, *,
+                 port: int | None = None) -> "Registry":
+        """Production document storage for the selected port, preserving the default's old paths."""
+        from cadgen.engine.daemon import DEFAULT_PORT, selected_port
+
+        port = selected_port() if port is None else port
+        if not 1 <= port <= 65535:
+            raise ValueError("CADGEN_PORT must be between 1 and 65535")
+        held = cls(state, cache)
+        if port != DEFAULT_PORT:
+            scope = Path("servers") / str(port)
+            held.state = Folder(held.state.root / scope)
+            if held.cache is not None:
+                held.cache = Folder(held.cache.root / scope)
+        return held
 
     # --- records ----------------------------------------------------------------------------
 
@@ -254,7 +273,7 @@ class Registry:
         mode, its owner), or holds anything but a token's characters (it goes into a cookie and a
         URL) is refused (``ValueError``), naming the file and what is wrong with it: never taken for
         none, so never replaced, which would end every link shared before."""
-        path = self.state.path(TOKEN)
+        path = self.shared_state.path(TOKEN)
         try:
             data = path.read_bytes()
         except FileNotFoundError:
@@ -282,17 +301,15 @@ class Registry:
         """Make the user's page token ``token`` where there is none, this user's alone; False, and
         nothing written, when there is one (``Folder.create``): of two engines starting at once, one
         makes it and the other serves the one it reads."""
-        return self.state.create(TOKEN, (token + "\n").encode("ascii"), mode=0o600)
+        return self.shared_state.create(TOKEN, (token + "\n").encode("ascii"), mode=0o600)
 
     def put_token(self, token: str) -> None:
         """Replace the user's page token (``cadgen server --rotate-token``), this user's alone."""
-        self.state.write(TOKEN, (token + "\n").encode("ascii"), mode=0o600)
+        self.shared_state.write(TOKEN, (token + "\n").encode("ascii"), mode=0o600)
 
     def engine(self, installation: str) -> dict[str, Any]:
-        """The engine record of ``installation`` (``daemon._tag(versioned=False)``: its environment, so it
-        outlives an upgrade there): the ``port`` (int) it rolled to
-        from a held default, where it has one; ``{}`` with none, or one this schema does not read."""
-        data = self.state.read(f"{ENGINES}/{installation}.json")
+        """The installation's recorded port, or ``{}`` with none; never a server-selection input."""
+        data = self.shared_state.read(f"{ENGINES}/{installation}.json")
         try:
             record = json.loads(data) if data is not None else {}
         except ValueError:
@@ -305,13 +322,12 @@ class Registry:
         return found
 
     def put_engine(self, installation: str, record: dict[str, Any]) -> None:
-        """Write the engine record of ``installation`` (the ``port`` it rolled to when it has one),
-        this user's alone."""
+        """Write the installation's engine record, this user's alone."""
         if not installation.isalnum():
             raise ValueError(f"{installation!r} is not an installation")
         kept = {key: record[key] for key in ENGINE_FIELDS if key != "schema" and record.get(key)}
         text = json.dumps({**kept, "schema": ENGINE_SCHEMA}, indent=1, sort_keys=True) + "\n"
-        self.state.write(f"{ENGINES}/{installation}.json", text.encode("utf-8"), mode=0o600)
+        self.shared_state.write(f"{ENGINES}/{installation}.json", text.encode("utf-8"), mode=0o600)
 
     def root(self, record: dict[str, Any]) -> Path:
         """The folder a record's paths are relative to: its ``root``."""
@@ -359,17 +375,17 @@ def program(registry: Registry, record: dict[str, Any]) -> Path | None:
 
 def rerun(program: str | os.PathLike) -> str:
     """The command that runs ``program`` again, as a person pastes it into this platform's shell:
-    ``cadgen run`` and the program, absolute. The engine that says it is the one ``cadgen run``
+    ``python`` and the program, absolute. The engine that says it is the one ``python``
     reaches, and its python has the kernel a bare ``python`` may not. The program is quoted for a
     POSIX shell (``shlex.quote``); on Windows in the double quotes cmd.exe and PowerShell both read,
     and only where a space or a quote needs them (``subprocess.list2cmdline``) -- to cmd.exe a
     single quote is part of the path."""
     text = os.fspath(program)
-    return f"cadgen run {subprocess.list2cmdline([text]) if WINDOWS else shlex.quote(text)}"
+    return f"python {subprocess.list2cmdline([text]) if WINDOWS else shlex.quote(text)}"
 
 
 def command(registry: Registry, record: dict[str, Any]) -> str | None:
-    """The command that builds a model's document again (``rerun``): ``cadgen run`` of its home, the
+    """The command that builds a model's document again (``rerun``): ``python`` of its home, the
     script that defines it, never a program that imported it and called it (a check script). None
     for a shape handed over, which no run built, and for a file's. The engine never runs it."""
     return rerun(home(registry, record)) if record.get("kind") == "model" else None

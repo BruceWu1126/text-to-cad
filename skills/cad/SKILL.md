@@ -34,34 +34,47 @@ Use the corresponding robot-description skill for URDF, SRDF or SDF.
 
 ## Setup and paths
 
-Run cadgen through the `cadgen` command its installation writes, so this skill's commands
-share one installation, and its engine server, with the CAD app's:
+Use the project's Python environment for model scripts and the registered command for CLI verbs:
 
-- `cadgen` below means `cadgen +0.8.1` (`~/.local/bin/cadgen +0.8.1` where `~/.local/bin` is not on your PATH)
-- `python` below means `cadgen +0.8.1 run`
+- `cadgen` below means `~/.local/bin/cadgen +0.8.1`, the registered CLI proxy.
+  On Windows use `%USERPROFILE%\.local\bin\cadgen.cmd`; if `CADGEN_LAUNCHER_DIR` moved
+  the proxy, use that directory. Use its explicit path so an activated project environment
+  cannot shadow it with its own `cadgen` console script.
+- `python` below means the project's Python interpreter, from its virtual environment.
+  Install the matching release in that environment
+  with `python -m pip install cadgen==0.8.1`; keep the project's other dependencies there too.
+  If that interpreter has no pip, use
+  `uv pip install --python <project-python> cadgen==0.8.1` instead.
 
-If `cadgen` is not on your PATH, or it says 0.8.1 is not installed, run
-`uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.1 cadgen doctor` once,
-outside any sandbox or with its permission: it installs cadgen, registers it, writes the
-`cadgen` command and starts the engine. With the CAD app's server running, nothing else
-needs the sandbox's permission: it starts the engine and holds it. Without it, a sandboxed
-shell cannot start the engine; when a command says no engine is running, run `cadgen server`
-outside the sandbox once.
+The CAD app's MCP server starts or attaches to the engine. Without it, start the engine explicitly,
+outside a sandbox that cannot bind its listener:
+
+```bash
+uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.1 cadgen server
+```
+
+Keep that server running. Clients select port 3245 by default; set `CADGEN_PORT` in both the server
+and client environments to use another port (`cadgen server --port N` also selects it). Bootstrap reuses a compatible selected
+engine; a conflicting listener fails. Nothing chooses a different port or stops another engine.
+For GUI hosts, set `CADGEN_PORT` in the CAD MCP server's `env` settings too; a terminal export
+alone does not configure the GUI server. Project clients and workers
+must have exactly the server's cadgen release. A missing server or version mismatch fails before
+building; ordinary Python calls and CLI document operations never start a server or fall back locally.
+
+If the registered `cadgen` command is missing, run
+`uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.1 cadgen doctor` once
+outside the sandbox or with its permission. It registers the CLI installation and writes the
+command; it does not start the engine.
 
 `cadgen doctor <skill-dir>` reports the installation in use, whether it is the one
-this skill pins, whether the CAD kernel loads, and whether the engine is running, starting
-it when none is. Each
+this skill pins, whether the CAD kernel loads, and whether the selected engine is running. It never starts one. Each
 command's `--help` lists its flags. The first launch downloads cadgen and may outlast a
 host's server start timeout (Claude Code: 30 s by default, raised by setting `MCP_TIMEOUT` in
 milliseconds; Codex: the plugin asks for 300 s); a restart resumes the download.
 
-A project venv can put its own `cadgen` ahead of the launcher on PATH, even when
-`~/.local/bin` is on PATH. Run `~/.local/bin/cadgen +0.8.1 doctor` to diagnose that
-case and use that full launcher path for commands until PATH is corrected.
-
-One engine serves the installation: the first run starts it, every run and every
-command goes through it, and it serves the viewer. `cadgen status` lists its workers
-and the documents it holds; `cadgen stop` stops it, and any older one left running.
+One engine serves the selected port. Model scripts and CLI document operations
+attach to it; project builds use warm workers in the calling Python environment.
+`cadgen status` lists its workers and documents; `cadgen stop` stops only that engine.
 A build cut off by the shell's time limit keeps running in the engine; run the same
 command again and it waits for that build and replays it (`cadgen status` shows it).
 Give a cold build of a large model the shell tool's longest timeout, or run it in the
@@ -169,7 +182,7 @@ is the script's folder; two explicit names in it must differ.
 - **The engine never reruns code.** A restart reopens every document from the engine's
   cache, as last built. When the cache holds no file of one (deleted by hand, or never
   saved), the page, `cadgen inspect <id>` and `cad_show` print the command that brings it
-  back (`cadgen run src/bracket.py`). Run it.
+  back (`python src/bracket.py`). Run it.
 - Model units are millimetres, +Z up. `$step-parts` finds real vendor models of
   purchasable parts such as fasteners, bearings and servos.
 - An image without a scale sets no fit dimension, and a drawing's units, projection and
@@ -353,7 +366,7 @@ own work; review with `cadgen snapshot`.
   cadgen viewer --json FILE [FILE ...]
   ```
 
-  The command ensures this installation's engine, registers each file and prints
+  The command attaches to the selected engine, registers each file and prints
   its page, `/<id>`, then exits. Read each file's `url` from `documents` in its one
   JSON line (never guess the port); the URL carries its token query. A page follows
   every later run of its model and every rewrite of its file, so share it once.
