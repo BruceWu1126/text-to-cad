@@ -216,7 +216,9 @@ def _main(argv: list[str] | None) -> int:
     # No command says a newer text-to-cad is out: it cannot tell which plugin, if any, it came
     # with, so the CAD app and the CAD Viewer say it (`cadgen/updates.py`). What a command does say,
     # once and before its work, is what those two send by default (`cadgen/analytics.py`).
-    if command not in _UNTOLD:
+    diagnostic = command == "doctor" and any(arg == "--json" or arg == "--python" or arg.startswith("--python=")
+                                              for arg in rest)
+    if command not in _UNTOLD and not diagnostic:
         _tell()
     try:
         return _run(command, entry[0], rest)

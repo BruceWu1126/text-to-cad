@@ -72,6 +72,15 @@ command's `--help` lists its flags. The first launch downloads cadgen and may ou
 host's server start timeout (Claude Code: 30 s by default, raised by setting `MCP_TIMEOUT` in
 milliseconds; Codex: the plugin asks for 300 s); a restart resumes the download.
 
+For a version or connection conflict, run
+`cadgen doctor --json --python <project-python> <skill-dir>` using the actual project
+interpreter and this skill's directory. This diagnostic report is read-only: it
+compares the skill, CLI, project and engine releases and reports discoverable
+provider configurations and registered installations. Discovery has a stated scope;
+do not treat it as a scan of every environment on the machine. Use the findings to
+align releases or configure a distinct port in both the provider and project.
+Do not silently switch releases or stop another provider's engine to make a build succeed.
+
 One engine serves the selected port. Model scripts and CLI document operations
 attach to it; project builds use warm workers in the calling Python environment.
 `cadgen status` lists its workers and documents; `cadgen stop` stops only that engine.

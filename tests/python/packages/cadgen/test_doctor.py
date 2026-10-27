@@ -581,5 +581,285 @@ def setUpModule() -> None:
     engine_daemon.isolate(unittest.addModuleCleanup)
 
 
+class DiagnosticTests(unittest.TestCase):
+    """One structured report serves JSON and human diagnostics without setup or raw config leaks."""
+
+    def setUp(self):
+        from cadgen._internal import diagnostics
+        from cadgen.mcp import diagnostics as hosts
+
+        self.diagnostics, self.hosts = diagnostics, hosts
+        folder = TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+        patch = mock.patch.dict(os.environ, {
+            "HOME": str(self.root), "USERPROFILE": str(self.root), "CODEX_HOME": str(self.root / "codex"),
+            "CLAUDE_CONFIG_DIR": str(self.root / "claude"), "CLAUDE_DESKTOP_CONFIG": str(self.root / "desktop.json"),
+            "CADGEN_STATE_DIR": str(self.root / "state"), "CADGEN_ENGINE_DIR": str(self.root / "engine"),
+            "CADGEN_LAUNCHER_DIR": str(self.root / "bin"), "CADGEN_PORT": "3245", "CADGEN_INSTALLATION_VERSION": "",
+        })
+        patch.start()
+        self.addCleanup(patch.stop)
+        probe = mock.patch.object(diagnostics, "engine", side_effect=lambda port: {
+            "port": port, "status": "compatible", "release": cadgen.__version__, "protocol": 4})
+        self.probe = probe.start()
+        self.addCleanup(probe.stop)
+
+    def write(self, relative, text):
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def data(self, *arguments):
+        import json
+
+        code, out, err = _run(["--json", *arguments])
+        self.assertEqual(err, "")
+        data = json.loads(out)
+        self.assertEqual(code, data["exit_code"])
+        return data
+
+    def test_json_and_human_share_a_report_and_never_run_setup_kernel_or_start(self):
+        from cadgen import cli
+        from cadgen._internal import installations
+        from cadgen.engine import client
+
+        with mock.patch.object(doctor, "_setup") as setup, mock.patch.object(doctor, "_probe_kernel") as kernel, \
+                mock.patch.object(installations, "setup") as register, mock.patch.object(client, "_start") as start, \
+                mock.patch.object(cli, "_tell") as notice:
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                code = cli.main(["doctor", "--json"])
+            self.assertEqual(code, 0)
+            import json
+            data = json.loads(out.getvalue())
+            self.assertEqual(len(out.getvalue().splitlines()), 1, "agent stdout is compact JSON")
+            self.assertEqual(data["schema"], 1)
+            self.assertEqual(data["current"]["release"], cadgen.__version__)
+            for called in (setup, kernel, register, start, notice):
+                called.assert_not_called()
+            with mock.patch.object(self.diagnostics, "project", return_value={"status": "ok", "release": cadgen.__version__}):
+                code, out, err = _run(["--python", sys.executable])
+            self.assertEqual((code, err), (0, ""))
+            self.assertIn("diagnostics (ok)", out)
+            self.assertFalse((self.root / "state").exists())
+            self.assertFalse((self.root / "bin").exists())
+            self.assertFalse((self.root / "engine").exists())
+
+    def test_multiple_registered_releases_stale_invalid_records_and_known_ports(self):
+        import json
+
+        for version in ("0.8.0", "0.8.2"):
+            python = self.write(f"env-{version}/python", "")
+            console = self.write(f"env-{version}/cadgen", "")
+            self.write(f"state/installations/{version}.json", json.dumps({
+                "version": version, "python": str(python), "cadgen": str(console), "prefix": str(python.parent),
+                "secret": "NEVER_PRINT_INSTALLATION_SECRET"}))
+        self.write("state/installations/0.7.0.json", json.dumps({
+            "version": "0.7.0", "python": "/missing/python", "cadgen": "/missing/cadgen", "prefix": "/missing"}))
+        self.write("state/installations/9.0.0.json", '{"secret":"NEVER_PRINT_INVALID_SECRET"')
+        self.write("state/engines/old.json", json.dumps({"schema": 2, "port": 40001, "token": "NEVER_PRINT_TOKEN"}))
+        self.write("state/engines/new.json", json.dumps({"schema": 3, "port": 40002}))
+        self.write("state/engines/invalid.json", "[]")
+        data = self.data()
+        self.assertEqual([item["status"] for item in data["installations"]["records"]],
+                         ["stale", "valid", "valid", "invalid"])
+        self.assertEqual({item["port"] for item in data["engines"]}, {3245, 40001, 40002})
+        self.assertEqual({item["status"] for item in data["engine_records"]["records"]}, {"known", "legacy", "invalid"})
+        self.assertNotIn("NEVER_PRINT", json.dumps(data))
+        self.assertTrue((self.root / "state/installations/0.7.0.json").exists())
+
+    def test_project_and_skill_mismatches_are_actionable_and_exit_three(self):
+        path = self.write("skill/SKILL.md", skill_text("0.1.0"))
+        with mock.patch.object(self.diagnostics, "project", return_value={
+                "status": "ok", "release": "0.2.0", "path": "/project/cadgen/__init__.py"}):
+            data = self.data("--python", "/project/python", str(path))
+        self.assertEqual(data["exit_code"], 3)
+        self.assertEqual({issue["code"] for issue in data["issues"]}, {"skill_mismatch", "project_mismatch"})
+        self.assertTrue(all(issue["remedy"] for issue in data["issues"]))
+        self.assertEqual(data["project"]["path"], "/project/cadgen/__init__.py")
+
+    def test_required_project_and_engine_failures_exit_five_and_stale_records_are_warnings(self):
+        self.write("state/engines/old.json", '{"schema":3,"port":40001}')
+        for state in ("missing", "unusable", "timeout"):
+            with self.subTest(state=state), mock.patch.object(self.diagnostics, "project", return_value={"status": state}), \
+                    mock.patch.object(self.diagnostics, "engine", side_effect=lambda port: {"port": port, "status": "missing"}):
+                data = self.data("--python", "/project/python")
+                self.assertEqual(data["exit_code"], 5)
+                self.assertIn("stale_engine_record", {item["code"] for item in data["issues"]})
+        with mock.patch.dict(os.environ, {"CADGEN_PORT": "TOKEN_MUST_NOT_PRINT"}):
+            data = self.data()
+        self.assertEqual(data["exit_code"], 5)
+        self.assertIsNone(data["selected_port"])
+        self.assertNotIn("TOKEN_MUST_NOT_PRINT", str(data))
+        self.assertEqual(self.data(str(self.root / "missing-skill"))["skill"]["status"], "missing")
+        empty = self.data("--python", "")
+        self.assertEqual(empty["project"]["status"], "unusable")
+        self.assertEqual(empty["exit_code"], 5)
+
+    def test_host_configs_and_plugin_pins_have_provenance_and_no_launch_secrets(self):
+        import json
+
+        def server(version, port):
+            return {"command": "uvx", "args": ["--from", "cadgen==" + version, "cadgen", "mcp", "TOKEN_ARG_SECRET"],
+                    "env": {"CADGEN_PORT": str(port), "API_TOKEN": "TOKEN_ENV_SECRET"}}
+        self.write("codex/config.toml", '[mcp_servers.cad]\ncommand="uvx"\nargs=["--from","cadgen==0.8.2","cadgen","mcp"]\n'
+                   '[mcp_servers.cad.env]\nCADGEN_PORT="3245"\nAPI_TOKEN="TOKEN_TOML_SECRET"\n')
+        self.write("desktop.json", json.dumps({"mcpServers": {"cad": server("0.8.0", 3245)}}))
+        root = self.root / "claude/plugin"
+        self.write("claude/plugins/installed_plugins.json", json.dumps({"version": 2, "plugins": {
+            "text-to-cad@test": [{"installPath": str(root)}]}}))
+        self.write("claude/plugin/.claude-plugin/plugin.json", json.dumps({
+            "name": "text-to-cad", "version": "0.8.1", "mcpServers": "./claude.mcp.json"}))
+        self.write("claude/plugin/claude.mcp.json", json.dumps({"mcpServers": {"cad": server("0.8.1", 40001)}}))
+        self.write("codex/plugins/cache/store/text-to-cad/0.9.0/.codex-plugin/plugin.json", json.dumps({
+            "name": "text-to-cad", "version": "0.9.0", "mcpServers": "./codex.mcp.json"}))
+        self.write("codex/plugins/cache/store/text-to-cad/0.9.0/codex.mcp.json", json.dumps({"mcpServers": {"cad": server("0.9.0", 3245)}}))
+        self.write(".gemini/extensions/text-to-cad/gemini-extension.json", json.dumps({
+            "name": "text-to-cad", "version": "0.8.2", "mcpServers": {"cad": server("0.8.2", 40002)}}))
+        data = self.data()
+        sources = [source for source in data["hosts"]["sources"] if source.get("release")]
+        self.assertEqual({source["release"] for source in sources}, {"0.8.0", "0.8.1", "0.8.2", "0.9.0"})
+        self.assertTrue(all(source["path"] for source in sources))
+        self.assertIn("cached_plugin", {source["kind"] for source in sources})
+        self.assertEqual({item["port"] for item in data["engines"]}, {3245, 40001, 40002})
+        self.assertIn("provider_port_mismatch", {issue["code"] for issue in data["issues"]})
+        self.assertNotIn("TOKEN_", json.dumps(data))
+
+    def test_malformed_unreadable_and_unknown_host_formats_remain_visible(self):
+        import json
+
+        self.write("codex/config.toml", 'SECRET_BAD_TOML=[[')
+        self.write("desktop.json", '{"mcpServers":{"cad":{"command":"shell","args":["SECRET_SHELL"]}}}')
+        self.write("claude/plugins/installed_plugins.json", '{"plugins":[]}')
+        data = self.data()
+        self.assertEqual({source["status"] for source in data["hosts"]["sources"]}, {"invalid", "unknown", "missing"})
+        self.assertNotIn("SECRET_", json.dumps(data))
+        path = self.root / "desktop.json"
+        with mock.patch.object(os, "open", side_effect=PermissionError("SECRET_ERROR")):
+            self.assertEqual(self.hosts.read(path), (None, "unreadable"))
+
+    def test_project_probe_uses_explicit_python_and_discards_all_non_identity_output(self):
+        import subprocess
+
+        for done, state in ((subprocess.CompletedProcess([], 1, "SECRET_STDOUT", "SECRET_STDERR"), "unusable"),
+                            (subprocess.CompletedProcess([], 0, "SECRET_STDOUT\nCADGEN_DIAGNOSTIC={\"status\":\"missing\"}\n", "SECRET_STDERR"), "missing")):
+            with self.subTest(state=state), mock.patch.object(subprocess, "run", return_value=done) as run:
+                data = self.diagnostics.project("~/project-python")
+                self.assertEqual(data["status"], state)
+                self.assertNotIn("SECRET", str(data))
+                self.assertEqual(run.call_args.args[0][0], str(self.root / "project-python"))
+                self.assertEqual(run.call_args.kwargs["timeout"], self.diagnostics.PROBE_SECONDS)
+                self.assertEqual(run.call_args.kwargs["env"]["PYTHONDONTWRITEBYTECODE"], "1")
+        with mock.patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired([], 3, output="SECRET")):
+            self.assertEqual(self.diagnostics.project("/dead-python")["status"], "timeout")
+        self.assertEqual(self.diagnostics.project(str(self.root / "missing-python"))["status"], "unusable")
+        actual = self.diagnostics.project(sys.executable)
+        self.assertEqual(actual["status"], "ok", actual)
+        self.assertEqual(actual["release"], cadgen.__version__)
+
+    def test_diagnostic_flags_cannot_prune(self):
+        for arguments in (["--json", "--prune"], ["--python", sys.executable, "--prune"]):
+            with self.subTest(arguments=arguments), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+                doctor.main(arguments)
+            self.assertEqual(error.exception.code, 2)
+
+    def test_real_project_without_cadgen_and_invalid_executable_are_reported(self):
+        import venv
+
+        folder = self.root / "empty-venv"
+        venv.EnvBuilder(with_pip=False).create(folder)
+        python = folder / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        with mock.patch.dict(os.environ, {"PYTHONPATH": ""}):
+            self.assertEqual(self.diagnostics.project(str(python))["status"], "missing")
+        invalid = self.write("invalid-python", "not an executable interpreter")
+        invalid.chmod(0o755)
+        self.assertEqual(self.diagnostics.project(str(invalid))["status"], "unusable")
+
+    def test_engine_inventory_is_bounded_and_raw_unknown_protocol_errors_are_discarded(self):
+        from cadgen.engine import daemon, door
+        from types import SimpleNamespace
+
+        self.root.joinpath("engine").mkdir(mode=0o700)
+        for port in range(40000, 40020):
+            self.write(f"state/engines/{port}.json", '{"schema":3,"port":' + str(port) + '}')
+        data = self.data()
+        self.assertEqual(len(data["engines"]), self.diagnostics.MAX_ENGINES)
+        self.assertIn("engine_inventory_incomplete", {item["code"] for item in data["issues"]})
+        if os.name == "nt":
+            return
+        path = Path(os.environ["CADGEN_ENGINE_DIR"]) / (daemon._tag(port=3245) + ".door")
+        os.mkfifo(path, 0o600)
+        writer = io.BytesIO()
+        connection = SimpleNamespace(reader=io.BytesIO(b'{"failed":"SECRET_ERROR"}\n'), writer=writer, close=mock.Mock())
+        with mock.patch.object(door, "answering", return_value=True), mock.patch.object(door, "dial", return_value=connection):
+            found = self.diagnostics._probe_port(3245)
+        self.assertEqual(found, {"status": "unknown_protocol"})
+        self.assertNotIn("SECRET", str(found))
+        self.assertEqual(len(writer.getvalue().splitlines()), 1)
+        self.assertIn(b'"op": "hello"', writer.getvalue())
+        connection.close.assert_called_once()
+
+    def test_development_alias_does_not_replace_the_explicit_runtime_release(self):
+        data = self.hosts._server({"args": ["--from", "cadgen==0.8.2", "cadgen", "mcp"],
+                                   "env": {"CADGEN_INSTALLATION_VERSION": "99.0.0"}})
+        self.assertEqual(data["release"], "0.8.2")
+        self.assertEqual(data["installation"], "99.0.0")
+        alias = self.hosts._server({"args": ["-m", "cadgen.cli", "mcp"],
+                                    "env": {"CADGEN_INSTALLATION_VERSION": "0.8.2-dev.1"}})
+        self.assertIsNone(alias["release"])
+        self.assertEqual(alias["installation"], "0.8.2-dev.1")
+
+    @unittest.skipIf(os.name == "nt", "POSIX FIFO permissions")
+    def test_stale_endpoint_probe_creates_no_clients_folder_or_repairs_permissions(self):
+        from cadgen.engine import daemon, door
+
+        folder = self.root / "engine"
+        folder.mkdir(mode=0o700)
+        path = folder / (daemon._tag(port=3245) + ".door")
+        os.mkfifo(path, 0o600)
+        before = sorted(item.name for item in folder.iterdir())
+        with mock.patch.object(self.diagnostics, "_listener", return_value="missing"):
+            self.assertEqual(self.diagnostics._probe_port(3245)["status"], "stale_endpoint")
+        self.assertEqual(sorted(item.name for item in folder.iterdir()), before)
+        clients = folder / "clients"
+        clients.mkdir(mode=0o755)
+        clients.chmod(0o755)
+        self.assertIsNone(door.dial(path, timeout=0.01, repair=False))
+        self.assertEqual(clients.stat().st_mode & 0o777, 0o755)
+        clients.rmdir()
+        self.assertIsNone(door.dial(path, timeout=0.01, repair=False))
+        self.assertFalse(clients.exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX nonregular files")
+    def test_nonregular_and_oversize_records_never_enter_unbounded_installation_lookup(self):
+        from cadgen._internal import installations
+
+        path = self.root / "state/installations" / (cadgen.__version__ + ".json")
+        path.parent.mkdir(parents=True)
+        os.mkfifo(path, 0o600)
+        self.assertEqual(self.hosts.read(path), (None, "invalid"))
+        with mock.patch.object(installations, "own_version", side_effect=AssertionError("unbounded registry reader")):
+            data = self.data()
+        self.assertEqual(data["installations"]["records"][0]["status"], "invalid")
+        path.unlink()
+        path.write_bytes(b" " * (self.hosts.MAX_BYTES + 1))
+        self.assertEqual(self.hosts.read(path), (None, "too_large"))
+
+    def test_host_ports_do_not_guess_over_legacy_selection_or_ignore_cli_equals(self):
+        base = {"args": ["--from", "cadgen==0.8.2", "cadgen", "mcp"]}
+        old = self.hosts._server({**base, "env": {"CADGEN_ENGINE_PORT": "40001"}})
+        self.assertIsNone(old["port"])
+        self.assertEqual(old["status"], "unknown")
+        self.assertEqual(old["port_status"], "unsupported_legacy_variable")
+        for flags in (["--port=40002"], ["--port", "40002"]):
+            data = self.hosts._server({**base, "args": [*base["args"], *flags],
+                                       "env": {"CADGEN_PORT": "40001"}})
+            self.assertEqual(data["port"], 40002)
+        current = self.hosts._server({**base, "env": {"CADGEN_PORT": "40003", "CADGEN_ENGINE_PORT": "40001"}})
+        self.assertEqual(current["port"], 40003)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,12 @@ startup or resume, including unrelated work while CAD is enabled. Fix the server
 disable the CAD MCP server/plugin before continuing without it. Other hosts retain their
 own startup behavior.
 
+Diagnose setup and version conflicts from the local shell with
+`cadgen doctor --json --python <project-python>`. Its read-only report includes
+discoverable provider configuration, registered installations, project identity
+and known engines. It works independently of a successful MCP session, so the
+same command is available to skills and to a person troubleshooting host startup.
+
 Every presentation's initialization instructions explain project authoring as well as viewing:
 install the server's exact cadgen release in the chosen project Python environment, set
 `CADGEN_PORT` to the server's selected port, run a no-argument `@model` with that interpreter,

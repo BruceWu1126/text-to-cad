@@ -119,6 +119,16 @@ are gone.
    | Add the project's import root | `PYTHONPATH=src python src/camera/payload.py` |
    | Export a built document | `~/.local/bin/cadgen +0.8.2 export <id> part.step` |
    | Check the selected engine | `~/.local/bin/cadgen +0.8.2 status` |
+   | Diagnose releases and connections | `~/.local/bin/cadgen +0.8.2 doctor --json --python .venv/bin/python` |
+
+   Use the project's actual interpreter path (`.venv\Scripts\python.exe` on
+   Windows) for diagnostics. The report inspects the project, registered
+   installations, known engines and supported provider configuration without
+   changing setup or starting or stopping servers. It states what it could discover;
+   unregistered environments and unsupported provider configurations may be absent.
+   Different providers can share an engine only when their cadgen releases match.
+   Otherwise align their releases or explicitly configure separate ports in their
+   MCP settings and project environments. A port change does not upgrade a project.
 
 5. **Handle an old viewer explicitly.** Stop an old process only if you own it,
    using the command for that installation, or choose a distinct port. No new

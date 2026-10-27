@@ -39,7 +39,14 @@ def registry():
     return Registry.for_port(state_dir(), cache=cache_dir())
 
 
-_MODULES = {"cadgen.engine.client", "cadgen.engine.daemon", "cadgen.engine.registry"}
+def diagnostics_inventory():
+    """The provider adapter's read-only inventory, loaded only for an explicit doctor report."""
+    from cadgen.mcp.diagnostics import inventory
+
+    return inventory()
+
+
+_MODULES = {"cadgen.engine.client", "cadgen.engine.daemon", "cadgen.engine.registry", "cadgen._internal.diagnostics"}
 
 
 # The agent hosts whose shells run in a sandbox that refuses the loopback port the engine's HTTP
@@ -53,6 +60,8 @@ def _attach(module):
         module.SANDBOXES = SANDBOXES
     elif module.__name__ == "cadgen.engine.registry":
         module.FACTORY = registry
+    elif module.__name__ == "cadgen._internal.diagnostics":
+        module.HOST_INVENTORY = diagnostics_inventory
     else:
         module.HTTP_FACTORY = http_factory
 

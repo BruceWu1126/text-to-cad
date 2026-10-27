@@ -83,6 +83,21 @@ class EnginePortTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'between 1 and 65535'):
                     daemon.address()
 
+    def test_diagnostics_probe_only_hello_and_preserve_the_owned_engine(self):
+        from cadgen._internal import diagnostics
+
+        first = self.start()
+        found = diagnostics.engine(self.port)
+        self.assertEqual(found['status'], 'compatible', found)
+        self.assertEqual(found['release'], previous.version())
+        with mock.patch.object(previous, 'version', return_value='99.0.0'):
+            refused = diagnostics._probe_port(self.port)
+        self.assertEqual(refused['status'], 'incompatible', refused)
+        self.assertEqual(refused['release'], previous.version())
+        self.assertEqual(refused['port'], self.port)
+        self.assertNotIn('instance', refused)
+        self.assertEqual(client.request({'op': 'pid'})['pid'], first['pid'])
+
     def test_start_binds_immediately_and_compatible_bootstrap_reuses_it(self):
         first = self.start()
         self.assertEqual(first['serving']['port'], self.port)
@@ -143,6 +158,8 @@ class EnginePortTest(unittest.TestCase):
             self.assertEqual(result.returncode, 1, result.stdout)
             self.assertIn(f'port {self.port} is held', result.stderr)
             self.assertFalse(daemon.address().exists())
+            from cadgen._internal import diagnostics
+            self.assertEqual(diagnostics.engine(self.port)['status'], 'conflicting_listener')
             with socket.create_connection(('127.0.0.1', self.port), timeout=5):
                 pass
 
@@ -232,7 +249,12 @@ class HandshakeTest(unittest.TestCase):
                 return [json.loads(row) for row in out.getvalue().splitlines()]
 
             self.assertIn('handshake', asked({'op': 'build'})[0]['failed'])
-            self.assertIn('mismatch', asked({**hello, 'release': '0.8.1'})[0]['failed'])
+            refused = asked({**hello, 'release': '0.8.1'}, {'op': 'build'})
+            self.assertIn('mismatch', refused[0]['failed'])
+            self.assertEqual({key: refused[0][key] for key in ('protocol', 'release', 'port')},
+                             {key: identity[key] for key in ('protocol', 'release', 'port')})
+            self.assertNotIn('instance', refused[0])
+            self.assertEqual(len(refused), 1, 'a refused hello never admits the queued work')
             self.assertIn('instance', asked(hello, {'op': 'build', 'engineIdentity': {**identity, 'instance': 'old'}})[1]['failed'])
             engine.handle.assert_not_called()
             asked(hello, {'op': 'build', 'engineIdentity': identity})

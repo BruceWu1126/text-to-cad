@@ -435,6 +435,19 @@ an agent host starts; and `cadgen telemetry` records the person's answer.
 `cadgen doctor` checks setup, registers the installation and writes the global
 `cadgen` command without starting an engine. Its `--prune` removes records and
 caches nothing needs, as reported by `_internal/leftovers.py`.
+For a version or connection conflict, `cadgen doctor --json --python <project-python>`
+reports the current CLI, the chosen project interpreter, registered installations,
+known engines and discoverable agent configuration. Omit `--json` to read the
+project report as text; omit `--python` when no project environment is involved.
+These diagnostic modes inspect without registering an installation, changing
+configuration, or starting or stopping an engine. Discovery covers supported local
+provider configuration and registered or cached plugins; it does not scan every
+virtual environment or establish what a running agent host has loaded. The report
+states these limits. Remedies are suggestions to apply explicitly, including
+matching a project's release or configuring distinct ports. JSON includes a schema
+version, findings and remedies. Diagnostic exit codes are `0` for no required
+failures (warnings may remain), `3` for a release mismatch, and `5` for an unavailable
+or invalid required interpreter, skill, engine or port; invalid arguments return `2`.
 The registered proxy accepts `~/.local/bin/cadgen +<version> <verb>` to select a
 CLI installation; use `cadgen.cmd` on Windows, or its `CADGEN_LAUNCHER_DIR` path.
 Use the explicit proxy path when a project virtual environment is active, so that

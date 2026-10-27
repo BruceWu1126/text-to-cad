@@ -257,9 +257,9 @@ def _users_own(folder: str) -> bool:
     return stat.S_ISDIR(found.st_mode) and found.st_uid == os.getuid() and not found.st_mode & 0o022
 
 
-def _tag(protocol: int | None = None, *, versioned: bool = True) -> str:
+def _tag(protocol: int | None = None, *, versioned: bool = True, port: int | None = None) -> str:
     """Private endpoint for the selected port, independent of Python or cadgen installation."""
-    return hashlib.sha256(f"cadgen-port|{selected_port()}".encode()).hexdigest()[:12]
+    return hashlib.sha256(f"cadgen-port|{selected_port() if port is None else port}".encode()).hexdigest()[:12]
 
 
 def folder_refusal(folder: Path) -> str | None:
@@ -2221,7 +2221,7 @@ def _serve(daemon: Daemon, reader: Any, writer: Any, prefix: bytes = b"") -> Non
     expected = {"protocol": PROTOCOL, "release": daemon.release_version, "port": daemon.port}
     if any(request.get(key) != value for key, value in expected.items()):
         send({"failed": f"cadgen client/server mismatch: server is cadgen {daemon.release_version} on port {daemon.port}; "
-                        "client and server must use exactly the same cadgen release, including patch"})
+                        "client and server must use exactly the same cadgen release, including patch", **expected})
         return
     expected["instance"] = daemon.instance
     send({"ok": True, **expected})

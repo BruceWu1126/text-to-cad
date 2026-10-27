@@ -230,7 +230,8 @@ def _told_started(mine: list[subprocess.Popen]) -> None:
 def missing() -> ConnectionError:
     port = _daemon.selected_port()
     return ConnectionError(f"no cadgen server is running on port {port}; start `cadgen server --port {port}` "
-                           "outside the sandbox, or start the CAD plugin. Set CADGEN_PORT to select another server")
+                           "outside the sandbox, or start the CAD plugin. Set CADGEN_PORT to select another server; "
+                           "run `cadgen doctor --json --python /path/to/project/python` for diagnostics")
 
 
 def _greet(connection: Connection, address: Path | None = None) -> Connection:
@@ -246,7 +247,8 @@ def _greet(connection: Connection, address: Path | None = None) -> Connection:
         connection.writer.flush()
         answer = json.loads(connection.reader.readline() or b"{}")
         if answer.get("failed"):
-            raise ConnectionError(str(answer["failed"]))
+            raise ConnectionError(str(answer["failed"]) + "; run `cadgen doctor --json --python /path/to/project/python` "
+                                  "for diagnostics")
         if (answer.get("protocol") != _daemon.PROTOCOL or answer.get("release") != version()
                 or answer.get("port") != _daemon.selected_port() or not isinstance(answer.get("instance"), str)
                 or not answer["instance"]):

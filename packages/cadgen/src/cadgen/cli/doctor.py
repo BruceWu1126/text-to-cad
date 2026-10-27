@@ -41,6 +41,13 @@ current while the version it reports is not, and running the release instead
 would swap the working tree being developed for a published one. The fix there
 is to re-install it in place, which re-records the version.
 
+Read-only multi-version diagnostics are separate from setup: ``--json [--python PATH] [skill]``
+reports schema-1 JSON, while ``--python PATH [skill]`` prints the same report for a person. These
+modes perform no setup or pruning, import no CAD kernel, and never start or stop an engine.
+Their exit codes are 0 (no required failures; warnings remain visible), 3 (release mismatch),
+5 (a required interpreter, selected engine, skill or port is unavailable/invalid), and argparse's
+2 for invalid arguments. ``cadgen._internal.diagnostics`` owns that report.
+
 stdlib-only on purpose: this must work when the heavy dependency set is broken.
 """
 
@@ -331,6 +338,7 @@ def _prune_leftovers(all_versions: bool = False) -> list[str]:
 def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
     parser = argparse.ArgumentParser(
         prog=prog,
+        allow_abbrev=False,
         description="Set cadgen up (register it, write the cadgen command, inspect the environment), report it, "
                     "and verify a skill's cadgen version pin.",
     )
@@ -354,9 +362,22 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
              "(without it they go once nothing has written them for 7 days). Only once no cadgen 0.7 is "
              "installed in any agent app.",
     )
+    parser.add_argument("--json", action="store_true", help="Read-only diagnostics as schema-1 JSON; no setup or pruning.")
+    parser.add_argument("--python", metavar="PATH", help="Read-only diagnostics, importing cadgen in this project Python.")
     args = parser.parse_args(argv)
+    if (args.json or args.python is not None) and args.prune:
+        parser.error("--json and --python cannot be combined with --prune")
     if args.all_versions and not args.prune:
         parser.error("--all-versions goes with --prune")
+
+    if args.json or args.python is not None:
+        import json
+
+        from cadgen._internal.diagnostics import human, report
+
+        data = report(args.python, _resolve_skill(args.skill) if args.skill else None, requested_skill=args.skill)
+        sys.stdout.write(json.dumps(data, ensure_ascii=True, separators=(",", ":")) + "\n" if args.json else human(data))
+        return data["exit_code"]
 
     if args.prune:
         from cadgen._internal import installations
