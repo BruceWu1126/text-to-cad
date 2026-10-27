@@ -1,0 +1,248 @@
+import assert from 'node:assert/strict';
+import { after, before, test } from 'node:test';
+import { createServer } from 'node:http';
+import { readFile, writeFile, mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
+import { chromium } from 'playwright';
+import { PNG } from 'pngjs';
+import { harnessBundle } from '../../harness/bundle.mjs';
+import { pressInPreview } from '../../harness/preview.mjs';
+
+// A small, generated scene: face-painted and repeated parts, metal and translucent
+// material. This exercises actual GPU output, without the sample-model corpus or a
+// noisy screenshot golden. Unsupported browsers still run the fallback case.
+const fixture = `
+import * as THREE from 'three';
+import { createProgressivePreview } from './packages/core/src/lib/preview-tracing/progressivePreview.js';
+const host = document.querySelector('#view');
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(256, 192); renderer.setPixelRatio(1);
+host.append(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#e7e7e5');
+const modelGroup = new THREE.Group(); scene.add(modelGroup);
+const red = new THREE.MeshStandardMaterial({ color: '#d22822', roughness: 0.55 });
+const blue = new THREE.MeshStandardMaterial({ color: '#2167db', roughness: 0.45 });
+const green = new THREE.MeshStandardMaterial({ color: '#2dab51', roughness: 0.5 });
+const metal = new THREE.MeshStandardMaterial({ color: '#c3cbd4', metalness: 1, roughness: 0.14 });
+const glass = new THREE.MeshPhysicalMaterial({ color: '#b4e6fa', transparent: true, opacity: 0.4, transmission: 0.65, roughness: 0.1 });
+const box = new THREE.BoxGeometry(1.1, 1.1, 1.1);
+const painted = new THREE.Mesh(box, [red, blue, green, blue, red, green]);
+painted.position.set(-1.15, 0, 0.55); modelGroup.add(painted);
+const repeat = new THREE.Mesh(box, blue); repeat.position.set(1.15, 0, 0.55); modelGroup.add(repeat);
+const sphere = new THREE.SphereGeometry(0.58, 16, 12);
+const polished = new THREE.Mesh(sphere, metal); polished.position.set(-0.8, 1.5, 0.6); modelGroup.add(polished);
+const transparent = new THREE.Mesh(sphere, glass); transparent.position.set(0.8, 1.5, 0.6); modelGroup.add(transparent);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshStandardMaterial({ color: '#e7e7e5', roughness: 0.8 }));
+floor.position.z = -0.01; scene.add(floor);
+const keyLight = new THREE.DirectionalLight(0xffffff, 3); keyLight.position.set(-3, -4, 8); scene.add(keyLight);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8a8a, 2));
+const camera = new THREE.PerspectiveCamera(38, 256/192, 0.1, 100);
+camera.up.set(0,0,1); camera.position.set(5,-7,5); camera.lookAt(0,0.6,0.4); camera.updateMatrixWorld();
+const runtime = { THREE, renderer, scene, modelGroup, photographicStudio: { ground: floor, keyLight }, previewConfiguration: { exposure: 0, lighting: { size: 1, fill: 0.25, rotation: 0 } }, previewQuality: 'preview' };
+let controller, queued = false, moving = false, draws = 0, preparationFrames = 0;
+const longTasks = [];
+new PerformanceObserver(list => longTasks.push(...list.getEntries().map(e => e.duration))).observe({type:'longtask',buffered:true});
+const requestRender = () => { if (queued) return; queued = true; requestAnimationFrame(draw); };
+function draw() { queued = false; renderer.render(scene,camera); draws++; const result = controller.render(renderer,scene,camera,{still:!moving,moving,sceneChanged:false}); if(result.refining)requestRender(); }
+const create = () => {
+  controller = createProgressivePreview(runtime,{requestRender}); requestRender();
+  const preparing = () => { if(controller.progress.state === 'preparing') preparationFrames++; if(['idle','preparing'].includes(controller.progress.state)) requestAnimationFrame(preparing); };
+  requestAnimationFrame(preparing);
+};
+window.previewTest = {
+  start: create,
+  progress: () => ({ ...controller.progress, draws, preparationFrames, longTasks: [...longTasks] }),
+  move: () => { moving=true; repeat.position.x=2; controller.invalidate({sceneChanged:true}); draw(); },
+  orbit: () => { camera.position.set(6,-6,5); camera.lookAt(0,0.6,0.4); camera.updateMatrixWorld(); controller.invalidate({sceneChanged:false}); draw(); },
+  stop: () => { moving=false; requestRender(); },
+  dispose: () => { controller.dispose(); },
+  source: () => ({ sameGeometry: painted.geometry===repeat.geometry, material: red.color.getHexString(), boundsTree: !!box.boundsTree }),
+  canvases: () => host.querySelectorAll('canvas').length,
+  capture: () => controller.captureCanvas?.toDataURL('image/png') || null,
+};
+renderer.render(scene,camera);
+window.previewReady=true;
+`;
+
+let browser, server, artifacts;
+before(async () => {
+  if (process.env.CAD_TRACE_ARTIFACTS) artifacts = await mkdtemp(join(tmpdir(), 'preview-tracing-review-'));
+  const root = fileURLToPath(new URL('../../../../../../', import.meta.url));
+  const result = await build({ stdin: { contents: fixture, resolveDir: root, sourcefile: 'preview-fixture.js' },
+    bundle: true, write: false, format: 'esm', platform: 'browser', target: 'esnext' });
+  const worker = await build({ entryPoints: [`${root}/node_modules/three-mesh-bvh/src/workers/generateMeshBVH.worker.js`], bundle: true, write: false, format: 'esm', platform: 'browser' });
+  const { bundle: uiBundle } = await harnessBundle();
+  const css = await readFile(`${root}/packages/ui/dist/styles.css`);
+  const glb = await readFile(`${root}/packages/core/src/lib/render/fixtures/pair.glb`);
+  const uiWorkers = new Map();
+  for (const relative of ['packages/core/src/lib/render/glbMeshWorker.js', 'packages/core/src/lib/viewer/raycastBvhWorker.js', 'packages/ui/src/renderers/kit/look/studioEnvironment.worker.js']) {
+    const output = await build({ entryPoints: [`${root}/${relative}`], bundle: true, write: false, format: 'esm', platform: 'browser' });
+    uiWorkers.set(relative.split('/').pop(), output.outputFiles[0].contents);
+  }
+  server = createServer((request, response) => {
+    const url = new URL(request.url, 'http://test');
+    const name = url.pathname.split('/').pop();
+    if (request.url === '/fixture.js') { response.setHeader('Content-Type', 'text/javascript'); response.end(result.outputFiles[0].contents); }
+    else if (request.url === '/generateMeshBVH.worker.js') { response.setHeader('Content-Type', 'text/javascript'); response.end(worker.outputFiles[0].contents); }
+    else if (uiWorkers.has(name)) { response.setHeader('Content-Type', 'text/javascript'); response.end(uiWorkers.get(name)); }
+    else if (name === 'ui-harness.js') { response.setHeader('Content-Type', 'text/javascript'); response.end(uiBundle); }
+    else if (name === 'styles.css') { response.setHeader('Content-Type', 'text/css'); response.end(css); }
+    else if (name === 'catalog') { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ entries: [{ kind: 'glb', file: '/models/pair.glb', url: '/pair.glb', hash: 'painted-pair', bytes: glb.length }] })); }
+    else if (name === 'server') { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ backend: 'cadgen' })); }
+    else if (name === 'pair.glb') { response.setHeader('Content-Type', 'model/gltf-binary'); response.end(glb); }
+    else if (url.pathname === '/ui/') { response.setHeader('Content-Type', 'text/html'); response.end('<!doctype html><link rel="stylesheet" href="/styles.css"><style>#root>div{width:1000px!important;height:700px!important}</style><div id="root"></div><script type="module" src="/ui-harness.js"></script>'); }
+    else { response.setHeader('Content-Type', 'text/html'); response.end('<!doctype html><style>body{margin:0}#view{position:relative;width:256px;height:192px}</style><div id="view"></div><script type="module" src="/fixture.js"></script>'); }
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  browser = await chromium.launch({ headless: true, args: process.platform === 'darwin' && process.env.CAD_TEST_SWIFTSHADER !== '1'
+    ? ['--use-angle=metal'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+});
+after(async () => { await browser?.close(); if (server) await new Promise(resolve => server.close(resolve)); });
+
+async function open(t, fallback = false) {
+  const page = await browser.newPage({ viewport: { width: 256, height: 192 } });
+  t.after(() => page.close());
+  const errors = [], logs = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', entry => { if (entry.type() === 'error' || entry.type() === 'warn') logs.push(entry.text()); });
+  if (fallback) await page.addInitScript(() => Object.defineProperty(navigator, 'gpu', { value: undefined }));
+  await page.goto(`http://127.0.0.1:${server.address().port}/`);
+  await page.waitForFunction(() => window.previewReady);
+  return { page, errors, logs };
+}
+
+test('a browser without WebGPU keeps the raster picture and disposes cleanly', async t => {
+  const { page, errors } = await open(t, true);
+  const before = await page.locator('canvas').screenshot();
+  await page.evaluate(() => window.previewTest.start());
+  await page.waitForFunction(() => window.previewTest.progress().state === 'fallback');
+  assert.equal(await page.evaluate(() => window.previewTest.capture()), null);
+  assert.equal(await page.evaluate(() => window.previewTest.canvases()), 1);
+  assert.deepEqual(await page.locator('canvas').screenshot(), before, 'fallback preserves the raster output');
+  await page.evaluate(() => window.previewTest.dispose());
+  assert.equal(await page.evaluate(() => window.previewTest.canvases()), 1);
+  assert.deepEqual(errors, []);
+});
+
+test('the real Preview viewport traces, captures and restores the editor on exit', async t => {
+  const page = await browser.newPage({ viewport: { width: 1000, height: 700 }, deviceScaleFactor: 1 });
+  t.after(() => page.close());
+  await page.goto(`http://127.0.0.1:${server.address().port}/ui/?file=pair.glb`);
+  const adapter = await page.evaluate(async () => { const a = await navigator.gpu?.requestAdapter(); return a && !a.info.isFallbackAdapter; });
+  if (!adapter) return t.skip('A hardware WebGPU adapter is unavailable.');
+  const pane = page.getByTestId('one');
+  await page.waitForFunction(() => window.cadHarness?.a.controller?.readState().loading === false);
+  const camera = await page.evaluate(() => window.__cadCamera());
+  await page.evaluate(() => {
+    window.previewTimings = { start: performance.now(), first: null, converged: null, longTasks: [] };
+    new PerformanceObserver(list => window.previewTimings.longTasks.push(...list.getEntries().map(e => e.duration))).observe({type:'longtask'});
+    const measure = () => {
+      const p = window.__cadStage()?.pathTracing;
+      if (p?.sample > 0 && !window.previewTimings.first) window.previewTimings.first = performance.now() - window.previewTimings.start;
+      if (p?.sample >= p?.samples && p?.sample > 0) window.previewTimings.converged = performance.now() - window.previewTimings.start;
+      else requestAnimationFrame(measure);
+    }; requestAnimationFrame(measure);
+  });
+  await pane.getByRole('button', { name: 'Preview', exact: true }).click();
+  await page.waitForFunction(() => { const p = window.__cadStage()?.pathTracing; return p?.state === 'fallback' || (p?.sample > 0 && p.sample >= p.samples); }, null, { timeout: 60000 })
+    .catch(async error => { throw new Error(`${error.message}; stage=${JSON.stringify(await page.evaluate(() => window.__cadStage()))}`); });
+  const progress = await page.evaluate(() => window.__cadStage().pathTracing);
+  assert.notEqual(progress.state, 'fallback', JSON.stringify(progress));
+  t.diagnostic(`Real Preview ${JSON.stringify(await page.evaluate(() => ({...window.previewTimings, progress: window.__cadStage().pathTracing})))}`);
+  if (artifacts) {
+    await page.screenshot({path: join(artifacts, 'preview-ui-traced.png')});
+    // The raster canvas retains the studio picture drawn immediately before the
+    // traced layer became visible. Show it briefly for the review comparison.
+    await pane.locator('[data-preview-view] canvas').evaluateAll(canvases => canvases.forEach((canvas, i) => {
+      canvas.dataset.savedVisibility = canvas.style.visibility;
+      canvas.style.visibility = i === 0 ? 'visible' : 'hidden';
+    }));
+    await page.screenshot({path: join(artifacts, 'preview-ui-raster.png')});
+    await pane.locator('[data-preview-view] canvas').evaluateAll(canvases => canvases.forEach(canvas => {
+      canvas.style.visibility = canvas.dataset.savedVisibility; delete canvas.dataset.savedVisibility;
+    }));
+    t.diagnostic(`Review images: ${artifacts}`);
+  }
+  const capture = await page.evaluate(async () => {
+    const blob = await window.cadHarness.a.controller.capture();
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  });
+  const image = PNG.sync.read(Buffer.from(capture, 'base64'));
+  const colors = new Set();
+  for (let i=0; i<image.data.length; i+=4) colors.add(`${image.data[i]>>4},${image.data[i+1]>>4},${image.data[i+2]>>4}`);
+  assert.ok(colors.size > 20, 'the captured Preview contains shaded model pixels');
+  await pressInPreview(page, pane, pane.getByRole('button', { name: 'Preview settings', exact: true }));
+  await pane.getByRole('region', { name: 'Preview settings', exact: true }).getByRole('combobox', { name: 'Quality', exact: true }).click();
+  const finalStart = await page.evaluate(() => performance.now());
+  await page.getByRole('option', {name: 'Final', exact:true}).click();
+  t.diagnostic(`Quality applied ${JSON.stringify(await page.evaluate(() => ({stage:window.__cadStage(), record:window.cadHarness.state})))}`);
+  await pressInPreview(page, pane, pane.getByRole('button', { name: 'Preview settings', exact: true }));
+  await page.waitForFunction(previousBudget => { const p = window.__cadStage()?.pathTracing; return p?.samples > previousBudget && p.sample >= p.samples; }, progress.samples, {timeout: 90000})
+    .catch(async error => { throw new Error(`${error.message}; ${JSON.stringify(await page.evaluate(() => ({stage:window.__cadStage(),record:window.cadHarness.state, body:document.body.innerText})))}`); });
+  t.diagnostic(`Final quality ${JSON.stringify(await page.evaluate(start => ({elapsed:performance.now()-start, progress:window.__cadStage().pathTracing}), finalStart))}`);
+  if (artifacts) await page.screenshot({path:join(artifacts, 'preview-ui-final.png')});
+  await pressInPreview(page, pane, pane.getByRole('button', { name: 'Exit preview', exact: true }));
+  await pane.locator('[data-preview-view]').waitFor({state:'detached'});
+  assert.equal(await page.evaluate(() => window.__cadStage().pathTracing), null, 'the editor owns no Preview tracer');
+  const restored = await page.evaluate(() => window.__cadCamera());
+  // An orthographic eye's distance is fitted to the current viewport/depth range;
+  // the picture's pose is its direction, target and zoom.
+  const pose = c => {
+    const direction = c.position.map((v, i) => v-c.target[i]);
+    const length = Math.hypot(...direction);
+    return [...direction.map(v => v/length), ...c.target, c.zoom];
+  };
+  pose(camera).forEach((value, index) => assert.ok(Math.abs(value-pose(restored)[index]) < 1e-6, 'exit restores the editor camera pose'));
+});
+
+test('hardware Preview converges on authored parts, resets for motion and releases its canvas on every exit', async t => {
+  const { page, errors, logs } = await open(t);
+  const adapter = await page.evaluate(async () => { const a = await navigator.gpu?.requestAdapter(); return a ? { vendor: a.info.vendor, architecture: a.info.architecture, fallback: a.info.isFallbackAdapter } : null; });
+  if (!adapter || adapter.fallback) return t.skip('A hardware WebGPU adapter is unavailable; the raster fallback is tested separately.');
+  t.diagnostic(`WebGPU ${JSON.stringify(adapter)}`);
+  await page.evaluate(() => window.previewTest.start());
+  await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.state === 'fallback' || (p.sample > 0 && p.sample >= p.samples); }, null, { timeout: 15000 })
+    .catch(async error => { throw new Error(`${error.message}; ${JSON.stringify(await page.evaluate(() => window.previewTest.progress()))}; ${logs.join('\n')}`); });
+  const progress = await page.evaluate(() => window.previewTest.progress());
+  if (progress.state === 'fallback') t.diagnostic(logs.join('\n'));
+  assert.notEqual(progress.state, 'fallback', `hardware tracing must work: ${JSON.stringify(progress)}`);
+  t.diagnostic(`Converged ${JSON.stringify(progress)}`);
+  assert.ok(progress.preparationFrames > 0, 'preparation yields to browser frames while work is pending');
+  const encoded = await page.evaluate(() => window.previewTest.capture());
+  assert.ok(encoded, 'the converged picture is capturable');
+  if (artifacts) {
+    await page.locator('#view').screenshot({path: join(artifacts, 'preview-trace-visible.png')});
+    await writeFile(join(artifacts, 'preview-trace-capture.png'), Buffer.from(encoded.split(',')[1], 'base64'));
+  }
+  const image = PNG.sync.read(Buffer.from(encoded.split(',')[1], 'base64'));
+  let red = 0, blue = 0, dark = 0;
+  for (let i = 0; i < image.data.length; i += 4) {
+    const [r,g,b] = image.data.subarray(i,i+3);
+    if (r > g * 1.3 && r > b * 1.3) red++;
+    if (b > r * 1.25 && b > g * 1.1) blue++;
+    if (r+g+b < 450) dark++;
+  }
+  assert.ok(red > 30 && blue > 30 && dark > 100, `authored face paints and shaded geometry survive: ${JSON.stringify({red,blue,dark})}`);
+  assert.deepEqual(await page.evaluate(() => window.previewTest.source()), { sameGeometry: true, material: 'd22822', boundsTree: false }, 'tracing leaves shared source geometry and authored materials untouched');
+  await page.evaluate(() => window.previewTest.orbit());
+  assert.equal(await page.evaluate(() => window.previewTest.capture()), null, 'a new camera immediately hides the old accumulated picture');
+  await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.sample > 0 && p.sample >= p.samples && window.previewTest.capture() !== null; }, null, { timeout: 60000 });
+  await page.evaluate(() => window.previewTest.move());
+  assert.equal(await page.evaluate(() => window.previewTest.capture()), null, 'motion exposes the immediate raster frame');
+  await page.evaluate(() => window.previewTest.stop());
+  await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.sample > 0 && p.sample >= p.samples; }, null, { timeout: 60000 });
+  for (let visit = 0; visit < 2; visit++) {
+    await page.evaluate(() => window.previewTest.dispose());
+    assert.equal(await page.evaluate(() => window.previewTest.canvases()), 1, 'exit detaches the traced canvas');
+    if (visit === 0) {
+      await page.evaluate(() => window.previewTest.start());
+      await page.waitForFunction(() => window.previewTest.capture() !== null, null, { timeout: 60000 });
+    }
+  }
+  assert.deepEqual(errors, []);
+});

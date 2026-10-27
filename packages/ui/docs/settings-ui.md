@@ -963,13 +963,12 @@ button, not a disabled one, and never enters it, whatever asks. It is the shell'
 hosts neither start nor observe it. Its button is a play triangle ("Preview"), the strip's last
 tile after Display, in every host. A press covers the view at once
 ("Preparing preview…", in the scene's backdrop colour) and enters Preview under the cover,
-which lifts once Preview's view has presented its first frame, its published mesh is complete
-and the studio frame's picture has converged
-(every sample drawn: the viewport's `pictureProgress`) — at least 700ms; at five seconds it stops
-waiting for more components and lifts on the picture converged, a second later at the latest — fading from
-the finished picture (`kit/shell/previewCover.js`). A view the shell set moving, Orbit
-on or a routine playing, has nothing to wait for; a published component that lands starts the
-picture again and is waited for, never read as motion. The navbar is gone too, in every host
+which lifts once Preview has presented its first raster frame and its published mesh is complete
+(`kit/shell/previewCover.js`). There is no minimum wait or convergence gate; after five seconds
+it stops waiting for more components. The image refines while visible. Orbiting or playing a
+routine keeps the responsive raster picture; at rest, supported hardware adds progressive
+path tracing. Missing WebGPU, unsupported materials or geometry, and scenes beyond its
+resource budget keep the studio raster picture. The navbar is gone too, in every host
 (the renderer says Preview is up, `onPreviewChange`, and FileViewer hides it until it closes), as are
 the tool strip, its sub-toolbar, the tool stack and their resize grips, Quick
 Edit, the host's notice and corner, joint handles, cube and context menu (`PreviewChrome`, hidden and
@@ -1035,8 +1034,9 @@ it was, in the file's display mode, its camera in the projection and lens the Di
 now hold. Nothing of the tools view is reset to make room for Preview and nothing of the
 Preview's is kept: the next one starts clean again. Preview holds this by being a view of its
 own (`kit/shell/PreviewView.jsx`): its own viewport, scene, camera, pose and routine, mounted
-over the tools view's while it is up and unmounted as it closes, sharing only the page's GPU
-device. The tools view's viewport stays mounted throughout and is never told: it draws nothing
+over the tools view's while it is up and unmounted as it closes. Both raster views share the
+page's WebGL device; optional Preview path tracing owns a separate WebGPU device until exit.
+The tools view's viewport stays mounted throughout and is never told: it draws nothing
 while covered and is uncovered with its own last frame. What is not either state's is the file's settings, shared by
 both and kept: its Display settings (an edit in Preview's Render settings is the file's
 Render settings), Orbit's speed, Autoplay, Speed and Loop.

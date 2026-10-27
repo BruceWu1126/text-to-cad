@@ -16,6 +16,7 @@ persistent cache identity or occurrence identity.**
 | [2](#2-the-demand-boundary) | Raycast accelerators built only when a ray needs one |
 | [3](#3-reuse-without-changing-geometry) | Recomposition and instancing |
 | [4](#4-decode-workers) | The GLB and STL workers, leased by render sessions |
+| [5](#5-preview-tracing) | Private path-tracing geometry, workers and GPU resources |
 
 ## 1. Shared ownership and disposal
 
@@ -78,3 +79,17 @@ it renders). Placement and appearance belong to the document's instances.
 The GLB and STL decode workers are one each, and render sessions lease them. Releasing
 one owner never cancels another owner's work; the final release retires the worker and
 its pending work.
+
+## 5. Preview tracing
+
+`lib/preview-tracing/scene.js` copies each admitted prototype once. Worker BVH construction
+may reorder or transfer those private arrays; it never mutates or transfers editor buffers.
+A cache retains complete BVHs across appearance and pose changes, checking attribute/index
+identity, arrays, versions, groups and draw range before reuse and evicting removed sources.
+Material objects and their source textures are borrowed; generated environment, floor
+geometry/material/alpha map, GPU buffers and overlay canvases belong to the tracer.
+
+Cancellation rejects pending worker preparation and terminates its worker. A generation
+token rejects stale async results. Motion hides the trace immediately; scene changes rebuild
+its scene using cached prototypes and the same GPU device. Preview exit disposes the cache,
+worker preparation, tracer and device. Admission or device failure restores the raster view.

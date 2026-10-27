@@ -52,13 +52,9 @@ const TOOLBAR_POSITION_PHONE_SIDEBAR = Object.freeze({ ...TOOLBAR_POSITION, left
 // (`--cad-file-sidebar-max-width`).
 // What stands in the top-right corner: the host's notice and Quick Edit's box (not its column).
 const CORNER_BOXES = "[data-viewport-top-right] :is([data-viewport-notice], [data-quick-edit-box])";
-// The sidebar sections Preview offers: posing the model and playing its routines.
-// Preview's cover: at least this long, then until publication and the picture are ready.
-// The picture is checked this often until it has converged.
-// The cover waits at least MIN; at MAX it stops waiting for more components, and lets the picture on
-// screen finish converging for at most FINISH more.
-const PREVIEW_COVER_MIN_MS = 700, PREVIEW_COVER_QUIET_MS = 400, PREVIEW_COVER_MAX_MS = 5000, PREVIEW_COVER_FINISH_MS = 1000,
-  PREVIEW_COVER_CONVERGE_MS = 50;
+// Check first-raster readiness while publication arrives. At MAX, show the published
+// portion; FINISH is the final cap if the viewport never acknowledges a frame.
+const PREVIEW_COVER_QUIET_MS = 50, PREVIEW_COVER_MAX_MS = 5000, PREVIEW_COVER_FINISH_MS = 1000;
 const SIDEBAR_POSITION = Object.freeze({ top: INSET, left: INSET, bottom: INSET });
 // On a phone the sidebar is one tile at the top-left, on the strip's line, and its panel (the open
 // section, under tabs) runs down from under it to the view's bottom inset, clear of Quick Edit's
@@ -188,10 +184,8 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   // Preview is a view of its own, mounted over the editor's as it opens (`PreviewView.jsx`), and
   // its first picture takes a moment on a large model — its scene built from the published mesh
   // and remaining components arriving — so it is covered ("Preparing preview…") until
-  // its first frame is presented (`previewPresented`), the publication is complete,
-  // and its picture converged (every sample of its frame drawn: the view's `pictureProgress`) — unless
-  // it starts over, the view moving (a routine playing), when there is nothing to wait for — or at most
-  // a few seconds. Then the cover fades away from the finished picture. Leaving needs no cover: the
+  // its first raster frame is presented (`previewPresented`) and the publication is complete.
+  // Refinement happens in view. Leaving needs no cover: the
   // Preview's view goes, and under it is the editor's, as it was.
   const previewViewRef = frame.previewViewRef;
   const [previewPresented, setPreviewPresented] = useState(false);
@@ -213,30 +207,24 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     if (previewing) { setCoverRequested(false); setPreviewPanelOpen(false); }
   }
   const previewCovered = coverRequested || (previewing && !previewSettled);
-  // What moves Preview's picture on purpose: its Orbit, or its routine playing (`previewCover.js`).
-  const previewMovingRef = useRef(false);
-  previewMovingRef.current = shell.orbiting || previewView?.animation?.playing === true;
   const previewLoadingRef = useRef(false);
   previewLoadingRef.current = previewView?.complete === false;
   useEffect(() => {
     if (!previewing) return undefined;
     let quiet = 0, done = false, capped = false;
     const finish = () => { if (done) return; done = true; setPreviewSettled(true); };
-    // Published components still streaming (a model opened cold) is waited for this long, no longer; then the
-    // picture on screen converges, and the cover lifts on it, or at the last at FINISH more.
+    // A cold publication may still be streaming: show what has arrived after the cap.
     const cap = setTimeout(() => { capped = true; settle(0); }, PREVIEW_COVER_MAX_MS);
     const last = setTimeout(finish, PREVIEW_COVER_MAX_MS + PREVIEW_COVER_FINISH_MS);
     const settle = (delay = PREVIEW_COVER_QUIET_MS) => {
       clearTimeout(quiet);
       quiet = setTimeout(() => {
-        const step = previewCoverStep({ presented: previewPresentedRef.current, loading: previewLoadingRef.current && !capped, moving: previewMovingRef.current,
-          progress: previewViewRef.current?.pictureProgress?.() ?? null });
+        const step = previewCoverStep({ presented: previewPresentedRef.current, loading: previewLoadingRef.current && !capped });
         if (step === "wait") settle();
-        else if (step === "converge") settle(PREVIEW_COVER_CONVERGE_MS);
         else finish();
       }, delay);
     };
-    settle(PREVIEW_COVER_MIN_MS);
+    settle(0);
     return () => { done = true; clearTimeout(cap); clearTimeout(last); clearTimeout(quiet); };
   }, [previewing]);
   // The routine the Animation section plays: the tools view's, or in Preview its own.

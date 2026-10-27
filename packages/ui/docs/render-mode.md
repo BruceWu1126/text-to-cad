@@ -113,7 +113,15 @@ an M1 Max) and a still view converges in about half a second. A snapshot is OCCT
 the engine (`engine/render/occt.py`), not through this frame. Software WebGL has no frame: one
 draw, as before.
 
-Each interactive viewport keeps its renderer (a view of the page's one GPU device:
+Preview additionally refines a still view with an optional WebGPU path tracer
+(`core/lib/preview-tracing/progressivePreview.js`). The raster studio remains the immediate
+picture and handles all motion. A complete traced sample replaces it, then accumulates to
+32 samples for Preview lighting quality or 64 for Final. Tracing is limited to one million
+pixels and bounded scene resources; unsupported geometry/materials or unavailable WebGPU
+retain the raster studio. This introduces no setting and does not change engine snapshots.
+The existing raster convergence timings above do not describe path-tracing convergence.
+
+Each interactive viewport keeps its raster renderer (a view of the page's shared WebGL device:
 [the GPU device](cad-renderer.md#the-gpu-device)), canvas and camera controls
 across every mode and settings edit. It uses shadow-compatible conventional
 depth throughout, fitting near/far planes to the current model, closeup records

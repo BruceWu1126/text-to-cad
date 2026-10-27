@@ -189,6 +189,33 @@ share a calibrated zero-EV lighting budget. Khronos PBR Neutral tone mapping is
 fixed; `toneMappingExposure` is `2 ** exposure`. Light and dark differ only in
 default backdrop color.
 
+#### Progressive viewer Preview
+
+`lib/preview-tracing/progressivePreview.js` adds an optional WebGPU path tracer to the
+interactive viewer's Preview. It leaves the raster studio available during preparation and
+motion, replaces its picture after a complete traced sample, and stops scheduling after
+its sample/work budget. Camera, pose, material, lighting and viewport changes invalidate
+accumulation. Failures restore the raster picture; a late preparation cannot attach to a
+closed view. Engine snapshots continue to use OCCT.
+
+`scene.js` adapts the visible PBR meshes, preserving material arrays, face groups, vertex
+colours and world transforms. BVHs are prepared in a worker over private prototype copies;
+occurrences share those copies. Scene admission rejects unsupported geometry or materials
+and bounds geometry, mesh/group counts and texture dimensions before upload. A scene that
+cannot be represented faithfully stays entirely on the raster path. The tracer uses the
+same procedural studio cards and sweep, sampled into an owned equirectangular HDR texture
+by `common/environmentMap.js`; it needs no downloaded lighting asset. The raster backdrop's
+screen-space gradient is reconstructed by `backdrop.js` behind the transparent trace, and
+the floor's radial fade is represented as an alpha map. Screenshot capture composites both.
+
+The existing Preview/Final lighting quality selects 32/64 traced samples. A one-million-pixel
+cap bounds render targets, a ray budget bounds each update, and only one GPU batch is in
+flight. A finite update budget stops work even if sample readback stalls; hidden documents
+pause tracing until visible again. These are implementation limits, not new UI controls.
+There is no denoiser in this path; low-sample images retain visible grain. Hardware
+convergence is separate from the raster measurements below. See
+[resource ownership](resource-ownership.md#5-preview-tracing) for lifetime and reuse.
+
 #### The studio's frame
 
 Render's lighting is drawn through the studio's frame (`studioFrame.js`), which

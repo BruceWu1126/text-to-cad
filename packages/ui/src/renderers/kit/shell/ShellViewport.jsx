@@ -10,6 +10,7 @@ import {
 import { mergeBoundsList } from "@text-to-cad/core/lib/viewer/autoZoom.js";
 import { applyRuntimeModelBounds, resolveRuntimeModelFloorZ, sceneRadiusForBounds } from "@text-to-cad/core/lib/viewer/modelRuntime.js";
 import { defaultSceneGridRadius, getSceneScaleSettings, normalizeSceneScaleMode, VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
+import { capturePreview } from "../viewport/capturePreview.js";
 import { buildCompositeScreenshotBlob, resolveElementBackgroundColor } from "@text-to-cad/core/lib/viewer/screenshotCapture.js";
 import {
   applySceneBackground, BASE_VIEWER_THEME, disposeTexture, getViewerThemeValue, updateSpotLightTarget
@@ -284,6 +285,9 @@ const ShellViewport = forwardRef(function ShellViewport({
   renderConfigurationRef.current = renderConfiguration;
   const applyActivePhotographicStudio = useCallback((runtime, bounds = runtime?.modelBounds) => {
     const configuration = renderConfigurationRef.current;
+    if (runtime) {
+      runtime.previewConfiguration = configuration;
+    }
     const studio = studioScene();
     if (!renderMode || !configuration || !runtime?.THREE || !studio) return;
     // The studio floor is sized and centred from the REST placement, as the grid is: a pose or a
@@ -446,7 +450,7 @@ const ShellViewport = forwardRef(function ShellViewport({
       await viewUpdateBindingRef.current?.whenReady();
       const runtime = runtimeRef.current;
       if (!runtime?.renderer || !runtime?.scene || !runtime?.camera) throw new Error("The viewer is not ready");
-      return await buildCompositeScreenshotBlob(runtime, {
+      return await (preview ? capturePreview : buildCompositeScreenshotBlob)(runtime, {
         backgroundColor: resolveElementBackgroundColor(runtime.renderer.domElement)
       });
     },
@@ -615,7 +619,8 @@ const ShellViewport = forwardRef(function ShellViewport({
         // How many planes cut the model just now (Clip).
         cut: (active.activeClipPlanes || []).length,
         // How far Render's picture has converged (`pictureProgress`).
-        studioFrame: active.photographicStudio?.frame ? { sample: active.photographicStudio.frame.sample, samples: active.photographicStudio.frame.samples } : null } : null;
+        studioFrame: active.photographicStudio?.frame ? { sample: active.photographicStudio.frame.sample, samples: active.photographicStudio.frame.samples } : null,
+        pathTracing: active.progressivePreview?.progress || null } : null;
     };
     // The view on screen answers: Preview's while it is open, and as it closes the view it
     // covered (the editor's) answers again.

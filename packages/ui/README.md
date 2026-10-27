@@ -270,7 +270,8 @@ host; in the navbar's place its own bar, on no surface, names the file and holds
 edge) and Exit preview, fading with the playbar while the pointer rests; for a file with
 routines, Preview's own playbar sits under the model. Routines play from the sidebar's
 Animation section in the tools view and from that playbar in Preview. Preview and the tools view are two views,
-each with its own viewport, scene, camera, pose and routine over the page's one GPU device:
+each with its own viewport, scene, camera, pose and routine over the page's shared WebGL device.
+At rest, Preview may refine through its own optional WebGPU path tracer, released on exit:
 Preview starts from the model as authored and leaves the tools view's state untouched, and
 leaving it throws Preview's away and gives the tools view back exactly as it was
 ([Preview](docs/settings-ui.md#camera-animation-and-preview); its mechanism,

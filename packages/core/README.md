@@ -40,8 +40,10 @@ protocol relationship never imports Python or discovers an interpreter.
 - **Resource ownership**: a scene's sibling (Preview beside the editor) draws over
   its source's buffers and frees only what is its own; the source stays their owner
   and is disposed after its siblings. Mechanism:
-  [docs/resource-ownership.md](docs/resource-ownership.md) §1.
-- **Demand boundary**: no raycast accelerator is built until a ray reaches a
+  [docs/resource-ownership.md](docs/resource-ownership.md) §1. Optional Preview tracing owns
+  private geometry, acceleration structures and a WebGPU device; it never rewrites the
+  editor's buffers (§5).
+- **Demand boundary**: no picking raycast accelerator is built until a ray reaches a
   component's bounds. Mechanism: [docs/resource-ownership.md](docs/resource-ownership.md) §2.
 - **Reuse never changes what is exact**: recomposition and a prototype's geometry
   shared by its instances may reuse previous work, but neither may change exact

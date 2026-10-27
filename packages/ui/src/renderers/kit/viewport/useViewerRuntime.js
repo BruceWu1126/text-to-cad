@@ -26,6 +26,7 @@ import { viewerDepthSettings, viewerLogarithmicDepthBuffer } from "./renderDepth
 import { createZoomPivotReanchor } from "../camera/zoomPivotReanchor.js";
 import { createFramePresentation } from "./framePresentation.js";
 import { acquireGpuDevice } from "./gpuDevice.js";
+import { createPreviewRefinement, renderPreviewFrame } from "./previewRefinement.js";
 
 // A pan moves what it grabs 1.35x as far as the cursor, in either projection (`handlePanPress`).
 const PAN_SPEED = 1.35;
@@ -114,7 +115,13 @@ export function useViewerRuntime({
   tRef.current = t;
   renderModeRef.current = renderMode;
   useLayoutEffect(() => {
-    if (runtimeRef.current) runtimeRef.current.renderMode = renderMode;
+    if (runtimeRef.current) {
+      runtimeRef.current.renderMode = renderMode;
+      if (!renderMode) {
+        runtimeRef.current.progressivePreview?.dispose();
+        runtimeRef.current.progressivePreview = null;
+      }
+    }
   }, [renderMode, runtimeRef]);
   // A dependency change replaces this WebGL runtime while the viewport component remains
   // mounted. Layout cleanup runs before passive runtime cleanup on a final
@@ -400,12 +407,21 @@ export function useViewerRuntime({
       const handleContextLost = (event) => {
         event.preventDefault();
         clearKeyboardOrbitState(keyboardOrbitState);
+        const active = runtimeRef.current;
+        if (active) {
+          active.contextLost = true;
+          active.progressivePreview?.dispose();
+          active.progressivePreview = null;
+        }
         setError(tRef.current("viewer.contextLost"));
       };
       const handleContextRestored = () => {
+        if (runtimeRef.current) runtimeRef.current.contextLost = false;
         interactionState.shadowsDirty = true;
+        interactionState.sceneChanged = true;
         setError("");
         onContextRestored?.();
+        requestRender();
       };
 
       // A render type may tighten the pixel ratio further than the shared
@@ -551,7 +567,11 @@ export function useViewerRuntime({
         fitCameraDepthRange(runtimeRef.current);
         // Nothing changed but, perhaps, the camera: the Render studio's frame may draw the next
         // sample of the picture on screen (it starts again itself if the camera really moved).
-        const still = interactionState.sceneChanged !== true && interactionState.shadowsDirty !== true;
+        const sceneChanged = interactionState.sceneChanged === true;
+        const still = !sceneChanged && interactionState.shadowsDirty !== true;
+        const moving = interactionState.active || cameraTransitionActive || keyboardOrbitMoved
+          || needsMoreFrames || runtimeRef.current?.previewOrbitEnabled === true
+          || document.visibilityState === "hidden";
         let refining = false;
         if (!runtimeRef.current?.viewUpdateGate?.held) {
           renderer.shadowMap.needsUpdate = interactionState.shadowsDirty === true;
@@ -566,9 +586,18 @@ export function useViewerRuntime({
               // Render's lighting is drawn through its studio's frame, which converges a still
               // view over its next frames (`photographicStudio.js`); anything else is one draw, as
               // the scene's own rig blends it (`sceneRig.js`).
-              const studioFrame = runtimeRef.current?.photographicStudio?.frame;
-              if (studioFrame) refining = studioFrame.render(renderer, scene, drawCamera, { still }).refining;
-              else renderWithSceneRig(runtimeRef.current?.sceneRig, renderer, scene, drawCamera);
+              const drawRaster = () => {
+                const studioFrame = runtimeRef.current?.photographicStudio?.frame;
+                if (studioFrame) return studioFrame.render(renderer, scene, drawCamera, { still });
+                renderWithSceneRig(runtimeRef.current?.sceneRig, renderer, scene, drawCamera);
+                return { refining: false };
+              };
+              if (runtimeRef.current?.renderMode && previewRef.current && !softwareRendering && !runtimeRef.current.contextLost) {
+                const active = runtimeRef.current;
+                active.progressivePreview ||= createPreviewRefinement(active, { requestRender });
+                refining = renderPreviewFrame(active.progressivePreview, renderer, scene, drawCamera,
+                  { still, moving, sceneChanged }, drawRaster).refining;
+              } else refining = drawRaster().refining;
             },
             presentationRequestRef?.current,
           );
@@ -611,6 +640,7 @@ export function useViewerRuntime({
       }
 
       const beginInteraction = () => {
+        runtimeRef.current?.progressivePreview?.invalidate({ sceneChanged: false });
         if (interactionState.restoreTimerId) {
           window.clearTimeout(interactionState.restoreTimerId);
           interactionState.restoreTimerId = 0;
@@ -745,6 +775,7 @@ export function useViewerRuntime({
         beginInteraction();
       };
       const handleControlsChange = () => {
+        runtimeRef.current?.progressivePreview?.invalidate({ sceneChanged: false });
         emitPerspectiveChange(runtimeRef.current);
         requestRender();
       };
@@ -885,6 +916,7 @@ export function useViewerRuntime({
 
       const handleVisibilityChange = () => {
         if (document.visibilityState !== "visible") {
+          runtimeRef.current?.progressivePreview?.invalidate({ sceneChanged: false });
           clearKeyboardOrbit();
           // A frame still waiting for an animation frame the hidden document will not get: drawn now, as
           // the timer draws a hidden document's (`requestRender`).
@@ -892,6 +924,10 @@ export function useViewerRuntime({
             window.cancelAnimationFrame(rafId);
             renderFrame(frameTime());
           }
+        } else {
+          // Optional refinement pauses while the document is hidden. Resume it even if
+          // nothing moved while the raster picture was kept off screen.
+          requestRender();
         }
       };
 
@@ -900,6 +936,7 @@ export function useViewerRuntime({
         // caller runs before paint, so the view is current in the frame it is uncovered in).
         setSuspended(next) {
           suspended = next === true;
+          if (suspended) runtimeRef.current?.progressivePreview?.invalidate({ sceneChanged: false });
           if (!suspended && owedWhileSuspended) {
             owedWhileSuspended = false;
             renderNow();
@@ -916,6 +953,7 @@ export function useViewerRuntime({
         syncCameraViewport,
         renderer,
         softwareRendering,
+        contextLost: false,
         // The epoch this runtime belongs to, and whether a layout cleanup took its controls off
         // the page (the layout effect above).
         resetToken: runtimeResetToken,
@@ -979,6 +1017,7 @@ export function useViewerRuntime({
         // Camera-driven paths use the closure-local requestRender and keep the
         // last shadow map.
         requestRender: () => {
+          runtimeRef.current?.progressivePreview?.invalidate({ sceneChanged: true });
           interactionState.shadowsDirty = true;
           interactionState.sceneChanged = true;
           requestRender();
@@ -987,10 +1026,14 @@ export function useViewerRuntime({
         // highlight's colour, an overlay, the floor shadow's deferred bake): the shadow maps
         // it has are kept, as on a frame that only moved the camera.
         requestFrame: () => {
+          runtimeRef.current?.progressivePreview?.invalidate({ sceneChanged: true });
           interactionState.sceneChanged = true;
           requestRender();
         },
+        drawCurrentFrame: renderNow,
+        progressivePreview: null,
         invalidateShadows: () => {
+          runtimeRef.current?.progressivePreview?.invalidate({ sceneChanged: true });
           interactionState.shadowsDirty = true;
         },
         beginInteraction,
@@ -1036,6 +1079,7 @@ export function useViewerRuntime({
           return;
         }
         released = true;
+        runtime.progressivePreview?.dispose();
         if (runtime.activeModelKey && runtime.interactiveFraming) previousViewStateRef.current = {
           modelKey: runtime.activeModelKey,
           framing: Object.fromEntries([

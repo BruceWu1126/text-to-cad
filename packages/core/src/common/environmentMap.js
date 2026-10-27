@@ -166,6 +166,76 @@ export function createStudioEnvironmentScene(configuration = {}) {
   return scene;
 }
 
+/**
+ * The same studio as a CPU-owned equirectangular HDR image, for renderers that cannot
+ * share the WebGL PMREM target. Sample the source cards in their own frames; their
+ * vertex-colour gradients and the sweep use the same recipe as the raster studio.
+ * The texture is caller-owned. Rotation is still applied by the consuming scene.
+ */
+export function createStudioEnvironmentTexture(configuration = {}, { size = 256 } = {}) {
+  const height = proceduralEnvironmentSize(size), width = height * 2;
+  const scene = createStudioEnvironmentScene(configuration);
+  const cards = scene.children.filter(mesh => mesh.geometry?.type === "PlaneGeometry").map(mesh => ({
+    inverse: mesh.matrixWorld.clone().invert().elements,
+    normal: new THREE.Vector3(0, 0, 1).applyQuaternion(mesh.quaternion),
+    position: mesh.position,
+    width: mesh.geometry.parameters.width,
+    height: mesh.geometry.parameters.height,
+    segments: mesh.geometry.parameters.widthSegments,
+    colors: mesh.geometry.getAttribute("color"),
+    color: mesh.material.color
+  }));
+  const data = new Float32Array(width * height * 4);
+  const { zenith, horizon, nadir } = PHOTOGRAPHIC_STUDIO_ROOM_RADIANCE;
+  try {
+    for (let y = 0; y < height; y++) {
+      // DataTexture rows run from v=0 at -Y to v=1 at +Y (unlike a flipped image).
+      const elevation = ((y + 0.5) / height - 0.5) * Math.PI;
+      const dy = Math.sin(elevation), ring = Math.cos(elevation);
+      for (let x = 0; x < width; x++) {
+        const azimuth = ((x + 0.5) / width - 0.5) * 2 * Math.PI;
+        const dx = ring * Math.cos(azimuth), dz = ring * Math.sin(azimuth);
+        const sweep = horizon + ((dz >= 0 ? zenith : nadir) - horizon) * Math.sqrt(Math.abs(dz));
+        let r = sweep, g = sweep, b = sweep, nearest = ROOM_RADIUS;
+        for (const card of cards) {
+          const denominator = card.normal.x * dx + card.normal.y * dy + card.normal.z * dz;
+          if (Math.abs(denominator) < 1e-10) continue;
+          const distance = card.normal.dot(card.position) / denominator;
+          if (distance <= 0 || distance >= nearest) continue;
+          const m = card.inverse, px = dx * distance, py = dy * distance, pz = dz * distance;
+          const u = (m[0] * px + m[4] * py + m[8] * pz + m[12]) / card.width + 0.5;
+          const v = 0.5 - (m[1] * px + m[5] * py + m[9] * pz + m[13]) / card.height;
+          if (u < 0 || u > 1 || v < 0 || v > 1) continue;
+          let weight = 1;
+          if (card.colors) {
+            // Match PlaneGeometry's two triangles per cell, including their diagonal.
+            const n = card.segments, col = Math.min(n - 1, Math.floor(u * n)), row = Math.min(n - 1, Math.floor(v * n));
+            const fx = u * n - col, fy = v * n - row, a = row * (n + 1) + col;
+            const c = card.colors;
+            weight = fx + fy <= 1
+              ? c.getX(a) * (1 - fx - fy) + c.getX(a + 1) * fx + c.getX(a + n + 1) * fy
+              : c.getX(a + n + 2) * (fx + fy - 1) + c.getX(a + n + 1) * (1 - fx) + c.getX(a + 1) * (1 - fy);
+          }
+          nearest = distance;
+          r = card.color.r * weight; g = card.color.g * weight; b = card.color.b * weight;
+        }
+        const offset = (y * width + x) * 4;
+        data[offset] = r; data[offset + 1] = g; data[offset + 2] = b; data[offset + 3] = 1;
+      }
+    }
+  } finally {
+    disposeScene(scene);
+  }
+  const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.FloatType);
+  texture.name = PROCEDURAL_STUDIO_ENVIRONMENT_ID;
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.colorSpace = THREE.LinearSRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function disposeScene(scene) {
   scene?.traverse?.((object) => {
     object.geometry?.dispose?.();

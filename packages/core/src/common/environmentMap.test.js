@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as THREE from "three";
 
 import {
   PROCEDURAL_STUDIO_ENVIRONMENT_ID,
   createEnvironmentResource,
   createStudioEnvironmentScene,
+  createStudioEnvironmentTexture,
   disposeEnvironmentResource,
   environmentResourceIdentity
 } from "./environmentMap.js";
@@ -184,4 +186,47 @@ test("environment disposal remains caller-owned", () => {
   disposeEnvironmentResource(resource);
   assert.equal(count, 1);
   disposeEnvironmentResource(null);
+});
+
+
+test("the tracing environment samples the raster studio's cards and sweep in the same orientation", () => {
+  const directions = [PHOTOGRAPHIC_STUDIO_KEY_DIRECTION, PHOTOGRAPHIC_STUDIO_FILL_DIRECTION,
+    PHOTOGRAPHIC_STUDIO_BOUNCE_DIRECTION, ...PHOTOGRAPHIC_STUDIO_PANELS.map(panel => panel.direction),
+    [0, 0, -1], [-1, 0, 0], [1, 1, 0.2], [0, -1, -0.5]];
+  for (const configuration of [{ lighting: { size: 1, fill: 0.25 } }, { lighting: { size: 2, fill: 0 } }]) {
+    const scene = createStudioEnvironmentScene(configuration);
+    scene.updateMatrixWorld(true);
+    const texture = createStudioEnvironmentTexture(configuration, { size: 128 });
+    const { width, height, data } = texture.image;
+    assert.equal(texture.mapping, THREE.EquirectangularReflectionMapping);
+    assert.equal(texture.colorSpace, THREE.LinearSRGBColorSpace);
+    assert.equal(texture.minFilter, THREE.LinearFilter);
+    assert.equal(texture.magFilter, THREE.LinearFilter);
+    for (const raw of directions) {
+      const direction = new THREE.Vector3(...raw).normalize();
+      const x = Math.min(width - 1, Math.floor((Math.atan2(direction.z, direction.x) / (2 * Math.PI) + 0.5) * width));
+      const y = Math.min(height - 1, Math.floor((Math.asin(direction.y) / Math.PI + 0.5) * height));
+      const elevation = ((y + 0.5) / height - 0.5) * Math.PI, azimuth = ((x + 0.5) / width - 0.5) * 2 * Math.PI;
+      direction.set(Math.cos(elevation) * Math.cos(azimuth), Math.sin(elevation), Math.cos(elevation) * Math.sin(azimuth));
+      const hit = new THREE.Raycaster(new THREE.Vector3(), direction).intersectObject(scene, true)[0];
+      assert.ok(hit, `source scene covers ${raw}`);
+      const { object, face } = hit, positions = object.geometry.getAttribute("position"), colors = object.geometry.getAttribute("color");
+      let expected = object.material.color.r;
+      if (colors) {
+        const local = object.worldToLocal(hit.point.clone()), weights = new THREE.Vector3();
+        THREE.Triangle.getBarycoord(local, new THREE.Vector3().fromBufferAttribute(positions, face.a),
+          new THREE.Vector3().fromBufferAttribute(positions, face.b), new THREE.Vector3().fromBufferAttribute(positions, face.c), weights);
+        expected *= colors.getX(face.a) * weights.x + colors.getX(face.b) * weights.y + colors.getX(face.c) * weights.z;
+      }
+      // The sweep is analytic in the texture, versus interpolation on the source sphere.
+      const tolerance = object.name === "studio-room" ? 0.02 : 1e-5;
+      const offset = (y * width + x) * 4;
+      assert.ok(Math.abs(data[offset] - expected) < tolerance, `${object.name}: ${data[offset]} vs ${expected}`);
+      assert.equal(data[offset], data[offset + 1]);
+      assert.equal(data[offset + 1], data[offset + 2]);
+      assert.equal(data[offset + 3], 1);
+    }
+    texture.dispose();
+    scene.traverse(object => { object.geometry?.dispose(); object.material?.dispose(); });
+  }
 });

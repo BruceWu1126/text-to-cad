@@ -55,7 +55,7 @@ after(async () => {
 });
 
 // `record` opens the page as a previous session left its tab (`window.__cadTabRecord`).
-async function open(t, file, { record = null } = {}) {
+async function open(t, file, { record = null, webgpu = true } = {}) {
   const page = await browser.newPage({ viewport: { width: 800, height: 500 }, deviceScaleFactor: 1 });
   t.after(() => page.close());
   page.setDefaultTimeout(15000);
@@ -67,6 +67,7 @@ async function open(t, file, { record = null } = {}) {
       Object.defineProperty(window, name, { get() { throw new Error(`Renderer accessed ${name}`); } });
     }
   });
+  if (!webgpu) await page.addInitScript(() => Object.defineProperty(navigator, 'gpu', { value: undefined }));
   if (record) await page.addInitScript(stored => { window.__cadTabRecord = stored; }, record);
   await page.goto(`http://127.0.0.1:${server.address().port}/?file=${file}`);
   return { page, errors, pane: page.getByTestId('one') };
@@ -447,4 +448,37 @@ test('a corrupt GLB raises the viewer\'s load alert, with reload and details', a
     assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, `no ${name} over a failed load`);
   }
   void page;
+});
+
+
+test('Preview without WebGPU presents its raster studio, captures it and restores the editor on every exit', async t => {
+  const { page, pane, errors } = await open(t, 'static.glb', { webgpu: false });
+  await ready(pane);
+  const editor = await stillCapture(page);
+  const editorCamera = await page.evaluate(() => window.__cadCamera());
+  for (let visit = 0; visit < 2; visit++) {
+    await togglePreview(page, pane, true);
+    const preview = pane.locator('[data-preview-view]');
+    await preview.locator('canvas').first().waitFor({ state: 'visible' });
+    const image = await stillCapture(page);
+    assert.ok(dominantColors(image).length >= 2, 'the raster studio keeps both authored part colours');
+    assert.equal(await preview.locator('canvas').count(), 1, 'unavailable tracing allocates no overlay canvases');
+    const path = await page.evaluate(() => window.__cadStage().pathTracing);
+    assert.ok(path === null || path.state === 'fallback', 'software and unavailable GPU paths retain raster');
+    await togglePreview(page, pane, false);
+    assert.equal(await pane.locator('[data-preview-view]').count(), 0);
+    assert.equal(await page.evaluate(() => window.__cadStage().pathTracing), null, 'the editor owns no tracing session');
+    await captureMatching(page, editor, 'leaving Preview restores the editor pixels');
+    const restored = await page.evaluate(() => window.__cadCamera());
+    for (const key of ['projection', 'target', 'up']) assert.deepEqual(restored[key], editorCamera[key]);
+    assert.ok(Math.abs(restored.halfHeight - editorCamera.halfHeight) < 1e-9);
+    const direction = camera => {
+      const vector = camera.position.map((value, axis) => value - camera.target[axis]);
+      const length = Math.hypot(...vector);
+      return vector.map(value => value / length);
+    };
+    assert.ok(direction(restored).every((value, axis) => Math.abs(value - direction(editorCamera)[axis]) < 1e-12),
+      'depth fitting may translate an orthographic eye, preserving its projected view');
+  }
+  assert.deepEqual(errors, []);
 });

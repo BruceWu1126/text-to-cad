@@ -1415,8 +1415,8 @@ it and passes it in as `preview`, as the engine document's does. It is a 3D view
 offers it declares `previewable` (the engine document's, GLB, the meshes and robots do), and one that
 does not has no Preview button and stays in its normal view whatever sets the state. The
 Preview tile, last on the strip, sets it — after covering the view in the frame of the
-press ("Preparing preview…", until Preview's view has presented, its published mesh is complete and the
-picture has converged) — and Escape or Exit preview, an X beside Preview settings in Preview's bar, clears it;
+press ("Preparing preview…", until Preview's first raster frame and complete published mesh;
+a five-second cap bounds the mesh wait) — and Escape or Exit preview, an X beside Preview settings in Preview's bar, clears it;
 no host prop reaches it.
 Preview is a view of its own (`kit/shell/PreviewView.jsx`): RendererShell mounts it over the
 editor's viewport box while the state is on and unmounts it as it goes. The editor's viewport
@@ -1451,7 +1451,7 @@ Fullscreen API.
 
 ### The GPU device
 
-Every viewport on the page draws through one WebGL context
+Every viewport's raster picture draws through one WebGL context
 (`kit/viewport/gpuDevice.js`): `acquireGpuDevice` makes one `WebGLRenderer` on an
 `OffscreenCanvas`, refcounted and kept 5 s after its last view, so the programs compiled for
 one file survive the switch to the next. A viewport's renderer is a handle on it
@@ -1472,6 +1472,14 @@ draws; a runtime never disposes an environment the device owns. Where the browse
 OffscreenCanvas WebGL or `bitmaprenderer`, there is no device and each viewport makes its own
 renderer (core's `createCadWebGlRenderer`). Read-only seam: `window.__cadGpuDevice()`
 (`{ views, geometries, textures, programs, buffer }`).
+
+At rest, Preview may add an isolated WebGPU renderer through
+`viewport/previewRefinement.js` and core's `lib/preview-tracing/progressivePreview.js`.
+Its transparent traced picture and matching backdrop replace the raster only once a full
+sample is ready. Motion or scene changes expose the raster immediately; a failure leaves
+that picture usable. `capturePreview.js` copies the currently displayed composition in the
+same task as its redraw. Exit disposes the tracer, worker preparation, private geometry and
+WebGPU device. The editor continues to use the shared WebGL device throughout.
 
 ### Robot links
 
