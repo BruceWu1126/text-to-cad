@@ -259,7 +259,8 @@ extension, so start the server with `CADGEN_MCP_PRESENTATION=inline`.
 Automated tests are self-contained. They must not read, enumerate, build, or
 import sample models from this repository's `models/` directory. Generate the
 smallest fixture needed in a fresh temporary directory, or use a tiny fixture
-committed with the tests; do not rely on existing outputs.
+committed with the tests (a CAD or mesh one only when no test can make it, and then
+listed in `tests/python/global/test_no_cad_assets_tracked.py`); do not rely on existing outputs.
 Repo `tmp/` and system temporary directories are both fine. Give builds an
 engine daemon of their own (`CADGEN_ENGINE_DIR`) and clean up their processes and
 files. The runner gives every test file its own state, cache and `cadgen` command
@@ -1192,7 +1193,12 @@ Generated runtime changes should come from the production-output workflow, not
 manual edits inside generated runtime folders.
 
 The repository carries no Git LFS and keeps every file under 5 MiB (see the
-shipping contract above), so heavyweight media never goes in the tree.
+shipping contract above), so heavyweight media never goes in the tree. It holds code,
+never CAD or mesh assets: a test makes the STEP, GLB or mesh it needs in a temporary
+folder, a sample exports on request into its project's gitignored `STEP/`, `STL/`,
+`GLB/`, `3MF/`, `DXF/` or `XBF/`, and `tests/python/global/test_no_cad_assets_tracked.py`
+fails on any tracked CAD or mesh file but the few tiny fixtures it lists, each with the
+reason no test can make it.
 
 A security problem is reported privately, as [SECURITY.md](SECURITY.md) says, never as an
 issue or a pull request.
