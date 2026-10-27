@@ -4,7 +4,7 @@ import contextlib
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from types import SimpleNamespace
 
 from cadgen.engine import snapshot
@@ -153,6 +153,26 @@ class BrowserSnapshotContractTest(unittest.TestCase):
                 with browser._source(path, None, display={"hidden": ["lid"]}):
                     self.fail("an unsupported selector must not silently render the full file")
 
+    def test_native_source_is_read_in_process_without_binding_or_starting_a_listener(self):
+        from cadgen.engine import serve
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "fixture.xbf"
+            source = SimpleNamespace(structure={"name": "fixture", "units": "mm", "version": "fixture", "prototypes": [],
+                                               "instances": [], "tree": {"name": "fixture", "children": []}})
+            with patch.object(serve, "ThreadingHTTPServer", side_effect=AssertionError("snapshot must not bind")) as listener, \
+                    patch.object(serve.Server, "start", side_effect=AssertionError("snapshot must not listen")) as start:
+                with browser._source(path, source) as (resolved, native):
+                    self.assertIsNone(native.server.thread)
+                    self.assertIsInstance(native.server.http, browser._NoListener)
+                    self.assertEqual(resolved["url"], browser.PAGE_ORIGIN + native.path)
+                    status, data = native.server.read(native.path)
+                    self.assertEqual(status, 200)
+                    self.assertIn(b'"name":"fixture"', data)
+                listener.assert_not_called()
+                start.assert_not_called()
+                self.assertTrue(native.server.stopping.is_set())
+
     def test_cli_accepts_auto_or_named_animation_and_full_preview_settings(self):
         parser = snapshot.build_parser()
         auto = parser.parse_args(["part.xbf", "part.mp4", "--animation", "--fps", "6"])
@@ -179,6 +199,34 @@ class BrowserResourceContractTest(unittest.IsolatedAsyncioTestCase):
             favicon.fulfill.assert_awaited_once_with(status=204, body="")
             harmless.resource_failure(favicon.request.url, "not found")
             harmless.check()
+
+    async def test_native_routes_admit_only_held_document_gets_and_static_look(self):
+        reader = Mock()
+        reader.read.return_value = (200, b"fixture")
+        native = browser._NativeDocument(reader, "/api/doc/held")
+        with tempfile.TemporaryDirectory() as folder:
+            for path, content_type in (("/api/doc/held", "application/json"),
+                                       ("/api/doc/held/part/key?tessellation=fixture", "application/octet-stream"),
+                                       ("/api/look/environment", "image/vnd.radiance")):
+                route = SimpleNamespace(request=SimpleNamespace(url=browser.PAGE_ORIGIN + path, method="GET"),
+                                        fulfill=AsyncMock(), fetch=AsyncMock())
+                failures = browser._BrowserFailures()
+                await browser._route_resource(route, Path(folder), Path(folder) / "fixture.xbf", native, {}, failures)
+                reader.read.assert_called_with(path)
+                route.fulfill.assert_awaited_once_with(status=200, body=b"fixture", content_type=content_type)
+                route.fetch.assert_not_awaited()
+                failures.check()
+            for path, method in (("/api/docs", "GET"), ("/api/doc/other", "GET"), ("/api/doc/held/mesh", "POST")):
+                reader.reset_mock()
+                route = SimpleNamespace(request=SimpleNamespace(url=browser.PAGE_ORIGIN + path, method=method),
+                                        fulfill=AsyncMock(), fetch=AsyncMock())
+                failures = browser._BrowserFailures()
+                await browser._route_resource(route, Path(folder), Path(folder) / "fixture.xbf", native, {}, failures)
+                reader.read.assert_not_called()
+                route.fetch.assert_not_awaited()
+                route.fulfill.assert_awaited_once_with(status=403, body="snapshot document route is not admitted")
+                with self.assertRaisesRegex(RuntimeError, "Blocked native document request"):
+                    failures.check()
 
     async def test_page_failure_cancels_a_waiting_render_and_bounds_diagnostics(self):
         failures = browser._BrowserFailures()

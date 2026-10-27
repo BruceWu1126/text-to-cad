@@ -82,15 +82,16 @@ document of one part. Unknown keys and out-of-range values are refused.
 quality target. It fails if tracing is unavailable, the scene is unsupported or its budget is
 exhausted; it never substitutes a raster image. The installed browser and bundled render assets
 run locally. If no supported browser is installed, run `cadgen doctor --install-browser` once.
-An optional JSON object supplies the Viewer's render configuration, including its existing
-`exposure`, `lighting` (including `quality`) and `backdrop` settings:
+An optional JSON object supplies the Viewer's `parts`, `lighting`, `background` and `floor`
+settings. Quality and exposure belong inside `lighting`:
+
+```bash
+cadgen snapshot "$ID" tmp/studio.png --preview '{"lighting":{"quality":"final","exposure":0}}'
+```
+
 Native Preview keeps `display.hidden` and `display.isolated` part/assembly references. Robot
 Preview takes exact visual IDs (`link:v1`). Browser renders of direct mesh files refuse these
 selectors explicitly; ordinary OCCT snapshots retain their existing support.
-
-```bash
-cadgen snapshot "$ID" tmp/studio.png --preview '{"lighting":{"quality":"final"},"exposure":0}'
-```
 
 `--animation [NAME]` writes an MP4 of an authored routine, with the camera fixed across its
 frames. An XBF's AP242 configuration sequence or a glTF animation clip is sampled at authored

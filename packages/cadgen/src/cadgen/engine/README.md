@@ -1407,7 +1407,7 @@ file in their place. Normal OCCT snapshots keep their existing reference support
 
 `preview` in `snapshot(...)` and `Document.snapshot(...)` accepts a boolean or the Viewer's full
 render configuration object. Even `{}` enables Preview. The CLI's `--preview` enables defaults;
-`--preview '{"lighting":{"quality":"final"},"exposure":0}'` supplies a configuration. The browser, page,
+`--preview '{"lighting":{"quality":"final","exposure":0}}'` supplies a configuration. The browser, page,
 workers, weights and encoder are installed resources; rendering downloads nothing. A missing
 browser is installed explicitly with `cadgen doctor --install-browser`.
 
@@ -1430,8 +1430,9 @@ Animation defaults to 1280 × 720; explicit sizes must be even and at most 1920 
 integer from 1 to 60, at most 3,600 frames, with 300 seconds per browser frame and one hour per
 operation. Frames stream into the distribution's bundled FFmpeg encoder, never a PATH executable.
 A private temporary file replaces OUT only after all frames and encoding succeed. Failure keeps
-an earlier output unchanged and releases the browser, encoder and private source server; no
-intermediate XBF, GLB, PNG sequence or model source is written.
+an earlier output unchanged and releases the browser, encoder and private document holder.
+Native reads use in-process interception without opening a listening socket. No intermediate
+XBF, GLB, PNG sequence or model source is written.
 
 ## Exports
 

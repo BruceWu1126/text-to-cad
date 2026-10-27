@@ -1,7 +1,7 @@
 """Packaged Viewer stills and authored-time video, injected into the standalone engine.
 
 The page, workers, weights and encoder are installed assets. No npm, system ffmpeg or
-browser download is attempted. A private server borrows a held document and its meshes;
+browser download is attempted. An in-process holder borrows a document and its meshes;
 only the explicitly requested picture or movie is committed, after rendering succeeds.
 """
 from __future__ import annotations
@@ -100,6 +100,23 @@ def _robot_hidden_visuals(payload, display):
     return sorted(every - shown)
 
 
+class _NoListener:
+    """Only the Server lifecycle shape; no socket, listener thread or HTTP app."""
+    server_address = ("127.0.0.1", 0)
+
+    def server_close(self):
+        pass
+
+
+class _NativeDocument:
+    def __init__(self, server, path):
+        self.server = server
+        self.path = path
+
+    def allows(self, path):
+        return path in ("/api/look", "/api/look/environment", self.path) or path.startswith(self.path + "/")
+
+
 @contextlib.contextmanager
 def _source(document, source, pose=None, display=None):
     display = display or {}
@@ -140,14 +157,13 @@ def _source(document, source, pose=None, display=None):
         return
     from cadgen.engine.serve import MESHES, Server
 
-    server = Server(port=0, mesh_mode="inline", cache=MESHES)
+    server = Server(port=0, mesh_mode="inline", cache=MESHES, http_factory=lambda _server, _host, _port: _NoListener())
     try:
         if source is not None:
             ident = server.put(document, source.structure,
                                {p["key"]: source.shape_data(p["key"]) for p in source.structure["prototypes"]})
         else:
             ident = server.add(document)
-        server.start()
         doc = server.document(ident)
         structure = server.structure(doc)
         hidden = _native_hidden_parts(structure, display, document.name)
@@ -160,8 +176,9 @@ def _source(document, source, pose=None, display=None):
             except mechanism.KinematicsError as error:
                 raise SnapshotRefused(str(error)) from None
         server.mesh_all(doc, None)
-        yield {"kind": "xbf", "url": server.url + "/api/doc/" + ident, "inputPath": str(document), "hiddenParts": hidden,
-               **({"poseValues": values} if values is not None else {})}, server.url
+        path = "/api/doc/" + ident
+        yield {"kind": "xbf", "url": PAGE_ORIGIN + path, "inputPath": str(document), "hiddenParts": hidden,
+               **({"poseValues": values} if values is not None else {})}, _NativeDocument(server, path)
     finally:
         server.stop()
 
@@ -184,7 +201,7 @@ def render(document, out, still, *, source=None, progress=None):
         raise RuntimeError(runtime_build_hint(runtime))
     started = time.monotonic()
     say("scene", detail=document.name)
-    with _source(document, source, still.pose, still.display) as (resolved, engine_origin):
+    with _source(document, source, still.pose, still.display) as (resolved, native):
         pose = resolved.pop("poseValues", still.pose)
         job = {"kind": resolved["kind"], "mode": "view", "display": {key: value for key, value in still.display.items() if key not in ("hidden", "isolated")},
                "camera": still.camera, "outputs": [{"path": str(out), "width": width, "height": height,
@@ -197,7 +214,7 @@ def render(document, out, still, *, source=None, progress=None):
                **({"measurements": still.measurements} if still.measurements else {}),
                **({"animation": animation} if animation else {})}
         with staging(out) as stage:
-            report = asyncio.run(asyncio.wait_for(_render(job, runtime, document, engine_origin, stage), TOTAL_SECONDS))
+            report = asyncio.run(asyncio.wait_for(_render(job, runtime, document, native, stage), TOTAL_SECONDS))
             if not stage.is_file() or stage.stat().st_size == 0:
                 raise RuntimeError("the snapshot renderer wrote no output")
             replace_atomic(stage, out)
@@ -210,7 +227,7 @@ def render(document, out, still, *, source=None, progress=None):
 
 
 async def _launch(playwright, *, preview=False):
-    args = ["--disable-features=LocalNetworkAccessChecks"]
+    args = []
     if sys.platform == "darwin":
         args.append("--use-angle=metal")
     elif sys.platform.startswith("linux") and not preview:
@@ -276,18 +293,28 @@ class _BrowserFailures:
                     await pending
 
 
-async def _route_resource(handle, runtime, document, engine_origin, owned_assets, failures):
+async def _route_resource(handle, runtime, document, native, owned_assets, failures):
     parsed = urlparse(handle.request.url)
     if _favicon(handle.request.url):
         await handle.fulfill(status=204, body="")
         return
-    if engine_origin and handle.request.url.startswith(engine_origin + "/"):
-        answer = await handle.fetch(timeout=FRAME_SECONDS * 1000)
-        await handle.fulfill(response=answer, headers={**answer.headers, "access-control-allow-origin": PAGE_ORIGIN})
-        return
     if f"{parsed.scheme}://{parsed.netloc}" != PAGE_ORIGIN:
         failures.add("Blocked external resource", handle.request.url)
         await handle.abort("blockedbyclient")
+        return
+    if parsed.path.startswith("/api/"):
+        if native is None or getattr(handle.request, "method", "GET") != "GET" or not native.allows(parsed.path):
+            failures.add("Blocked native document request", handle.request.url)
+            await handle.fulfill(status=403, body="snapshot document route is not admitted")
+            return
+        status, data = await asyncio.to_thread(native.server.read, parsed.path + ("?" + parsed.query if parsed.query else ""))
+        if status >= 400:
+            failures.resource_failure(handle.request.url, f"HTTP {status}")
+        part = parsed.path.removeprefix(native.path + "/part/")
+        content_type = ("image/vnd.radiance" if parsed.path == "/api/look/environment" else
+                        "application/octet-stream" if parsed.path.startswith(native.path + "/part/") and "/" not in part else
+                        "application/json")
+        await handle.fulfill(status=status, body=data, content_type=content_type)
         return
     asset = owned_assets.get(parsed.path)
     if isinstance(asset, bytes):
@@ -315,7 +342,7 @@ async def _route_resource(handle, runtime, document, engine_origin, owned_assets
         return
     await handle.fulfill(path=str(found), content_type=mimetypes.guess_type(found)[0] or "application/octet-stream")
 
-async def _render(job, runtime, document, engine_origin, stage):
+async def _render(job, runtime, document, native, stage):
     from playwright.async_api import async_playwright
     from cadgen.engine.progress import say
     from PIL import Image
@@ -336,7 +363,7 @@ async def _render(job, runtime, document, engine_origin, stage):
             page.on("console", lambda message: failures.add("Browser error", message.text) if message.type == "error" and not _favicon(message.location.get("url", "")) else None)
             async def route(handle):
                 try:
-                    await _route_resource(handle, runtime, document, engine_origin, owned_assets, failures)
+                    await _route_resource(handle, runtime, document, native, owned_assets, failures)
                 except Exception as error:
                     failures.add("Resource delivery failed", f"{handle.request.url}: {error}")
                     with contextlib.suppress(Exception):
