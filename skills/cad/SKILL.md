@@ -37,11 +37,11 @@ Use the corresponding robot-description skill for URDF, SRDF or SDF.
 Run cadgen through the `cadgen` command its installation writes, so this skill's commands
 share one installation, and its engine server, with the CAD app's:
 
-- `cadgen` below means `cadgen +0.8.0` (`~/.local/bin/cadgen +0.8.0` where `~/.local/bin` is not on your PATH)
-- `python` below means `cadgen +0.8.0 run`
+- `cadgen` below means `cadgen +0.8.1` (`~/.local/bin/cadgen +0.8.1` where `~/.local/bin` is not on your PATH)
+- `python` below means `cadgen +0.8.1 run`
 
-If `cadgen` is not on your PATH, or it says 0.8.0 is not installed, run
-`uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen doctor` once,
+If `cadgen` is not on your PATH, or it says 0.8.1 is not installed, run
+`uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.1 cadgen doctor` once,
 outside any sandbox or with its permission: it installs cadgen, registers it, writes the
 `cadgen` command and starts the engine. With the CAD app's server running, nothing else
 needs the sandbox's permission: it starts the engine and holds it. Without it, a sandboxed
@@ -54,6 +54,10 @@ it when none is. Each
 command's `--help` lists its flags. The first launch downloads cadgen and may outlast a
 host's server start timeout (Claude Code: 30 s by default, raised by setting `MCP_TIMEOUT` in
 milliseconds; Codex: the plugin asks for 300 s); a restart resumes the download.
+
+A project venv can put its own `cadgen` ahead of the launcher on PATH, even when
+`~/.local/bin` is on PATH. Run `~/.local/bin/cadgen +0.8.1 doctor` to diagnose that
+case and use that full launcher path for commands until PATH is corrected.
 
 One engine serves the installation: the first run starts it, every run and every
 command goes through it, and it serves the viewer. `cadgen status` lists its workers
@@ -150,7 +154,8 @@ is the script's folder; two explicit names in it must differ.
   the kernel loads on first use, in the worker. `from build123d import Box`, or a
   module-level `bd.Color(...)` or `bd.Align` default, loads it at that line instead.
 - **Colours are sRGB**, as a person picks them: `part.color = "#4a6fa5"`, or 0-255
-  integers. Materials are values on the part: `part.material = materials.aluminium_6061`
+  integers. Import `metals` from `bd_materials`; assign a native material with
+  `part.material = metals.aluminum()`
   ([colour and materials](references/build123d-modeling.md#colour-and-materials)).
 - **Inputs** are `read_step`, `read_xbf` and `read_mesh` in the body, and any file its
   Python opens, each tracked by its bytes. The clock, environment variables and
@@ -290,14 +295,18 @@ A check is a Python script that calls the model and measures what it returns, so
 tests the model as it is now. Write one only when the person asks for a dimension, a fit
 or a mass, or when the change is numeric and the number matters ([Pictures](#pictures)):
 
+Copy `world_parts` and `find_part` from
+[Opening geometry](references/inspection-and-validation.md#opening-geometry) into the check
+first. They accumulate parent placements; raw `.leaves` do not.
+
 ```python
 from cadgen.geometry import closest_points
 
 from assembly import assembly
 
-kit = assembly().shape                              # rebuilt (replayed), returned as a tree
-parts = {part.label: part for part in kit.leaves}   # every placed part, world coordinates
-plate, post = parts["plate"], parts["standoff_left"]
+kit = assembly().shape                       # rebuilt (replayed), returned as a tree
+plate = find_part(kit, "plate")               # copied into world coordinates
+post = find_part(kit, "standoff_left")        # refuses missing or repeated labels
 print(plate.bounding_box().size)              # the envelope: not a hole's diameter or a wall's thickness
 print(closest_points(plate, post).distance)   # 0: the standoff sits on the plate
 ```
