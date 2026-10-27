@@ -1601,6 +1601,9 @@ class Daemon:
         self.pool.pressed = self.pressure.under
         self.workers_lock = threading.Lock()  # each worker's ``held``
         self.born = time.time()
+        # What the startup identity migration did (``identity.migrate``), which ``status`` says when it
+        # did anything: a started engine's stderr is no one's.
+        self.identity: dict[str, Any] | None = None
         self.last = time.monotonic()
         self.busy = 0
         self.busy_lock = threading.Lock()
@@ -2308,6 +2311,7 @@ class Daemon:
                                                              "memory": self.server.memory()},
                 "models": self.models.listing(),
                 "cache": self.models.cache.status(),
+                "identity": self.identity if self.identity and any(self.identity.values()) else None,
                 "renders": [] if self.renders is None else self.renders.status(),
                 "sessions": (self.server.http.app.sessions() if self.server is not None
                              and hasattr(self.server.http, "app") else [])}
@@ -2701,8 +2705,9 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
     from cadgen.engine.identity import migrate
 
     try:
-        migrate(daemon.models.registry())
+        daemon.identity = migrate(daemon.models.registry())
     except Exception as error:  # noqa: BLE001
+        daemon.identity = {"filled": 0, "moved": 0, "skipped": [f"the pass failed: {type(error).__name__}: {error}"]}
         print(f"cadgen: identity migration failed: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
     daemon.stand()
     if foreground:

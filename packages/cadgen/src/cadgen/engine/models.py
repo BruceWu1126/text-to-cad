@@ -184,12 +184,15 @@ class Models:
             row = self.row(record["id"])
             if row is None or self.cache.current(record["id"], row["revision"]):
                 return
-            data = self.held_bytes(record["id"], row["version"])
-            worker = row.get("worker")
-            if data is None and worker is not None and worker.pid != pid:
-                _structure, _shapes, data = self.load(record["id"], worker, whole=True)
-            if data:
-                self.cache._write(record["id"], row["revision"], data)
+            try:
+                data = self.held_bytes(record["id"], row["version"])
+                worker = row.get("worker")
+                if data is None and worker is not None and worker.pid != pid:
+                    _structure, _shapes, data = self.load(record["id"], worker, whole=True)
+                if data:
+                    self.cache._write(record["id"], row["revision"], data)
+            except Exception as error:  # noqa: BLE001 - its record moves all the same, with what its cache holds
+                self.cache.failed(record["id"], f"{type(error).__name__}: {error}")
 
         with self.identity_lock:
             moved = [(old, new) for old, new in reattach(held, sources, before=save, log=lines.append) if old != new]

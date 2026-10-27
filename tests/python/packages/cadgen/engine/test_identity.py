@@ -360,6 +360,15 @@ class IdentityMigrationTest(unittest.TestCase):
             self.assertEqual(migrate(held, log=quiet.append), {"filled": 0, "moved": 0, "skipped": []})
             self.assertEqual(quiet, [], "a pass with nothing to do says nothing")
 
+    def test_cadgen_status_says_what_the_pass_did_since_a_started_engine_s_stderr_is_no_one_s(self):
+        from cadgen.engine.cli import status_text
+
+        said = status_text({"pid": 1, "up": 5, "workers": [], "identity": {
+            "filled": 2, "moved": 1, "skipped": ["documents/a/document.json: missing root/home", "documents/b"]}})
+        self.assertIn("identity migration at start: filled 2, moved 1, skipped 2 "
+                      "(documents/a/document.json: missing root/home, ...)", said)
+        self.assertNotIn("identity", status_text({"pid": 1, "up": 5, "workers": [], "identity": None}))
+
 
 def setUpModule():
     engine_daemon.isolate(unittest.addModuleCleanup)

@@ -900,19 +900,21 @@ without an explicit name is a new document. A named model moved between files of
 its id and is re-pointed too. `relocated` keeps the script and module its cache file was built
 from: paths and module qualifiers are projected for the closure comparison alone, never written
 into its XBF; its code, modules, inputs and toolchain are checked all the same, and a fresh build
-clears it. Nothing reads or runs a script outside a run but the migration's one fingerprint fill.
+clears it. Nothing reads or runs a script outside a run but the migration's one pass: a
+fingerprint filled, and a record moved from its key given its function's line.
 
 **Identity migration.** At engine start, before the daemon is reachable, `identity.migrate` makes
 one pass over the records' JSON, independent of any build-closure migration. It fills a missing
 `namespace`, `name` and a model's `fingerprint` (its script's bytes; null where the script is gone,
 until a run supplies one), and moves each record identified by the earlier
 `uuid5(NAMESPACE, "key::" + key)` formula, with its cache file, to its folder/name id (a shape
-once given a key: its calling scope and its name). It reads JSON and, only to fill a fingerprint, a
-script's bytes: it imports no kernel and parses or rewrites no XBF. A second pass writes nothing. A
+once given a key: its calling scope and its name). It reads JSON and, only to fill a fingerprint or
+find a moved record's line, a script's bytes: it imports no kernel and parses or rewrites no XBF. A second pass writes nothing. A
 record that does not read, or whose new id another record holds, is skipped, never deleted, and
 listed in the pass's one log line (`identity migration: filled N, moved N, skipped N`, then each
-skipped record and why); a pass with nothing to do says nothing, and a pass that fails never keeps
-the engine from starting.
+skipped record and why), which `cadgen status` says too while that engine runs (a started engine's
+stderr is no one's); a pass with nothing to do says nothing, and a pass that fails never keeps the
+engine from starting.
 
 A record's `revision` is its closure's key (the same code, the same revision, after a
 restart too), or a token of the build's own where the closure has none. A served document's
