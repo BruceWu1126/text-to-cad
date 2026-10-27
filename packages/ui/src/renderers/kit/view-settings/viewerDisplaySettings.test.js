@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeViewSettings, previewSettingsChanged, resolveViewSettings } from '@text-to-cad/core/common/viewSettings.js';
+import { resolveViewSettings } from '@text-to-cad/core/common/viewSettings.js';
 import { DISPLAY_MODE_OPTIONS } from './DisplayModeOptions.js';
 import {
   cameraForViewSettings, mergePreviewSettings, mergeViewerDisplaySettings, previewDisplaySettings,
@@ -20,7 +20,6 @@ test('live patches merge only what they say and preserve the shared camera and t
   assert.deepEqual(mergeViewerDisplaySettings({ ...current, grid: true }, { grid: false }), current, 'a grid switched off is left unsaid');
   assert.throws(() => mergeViewerDisplaySettings(current, { lighting: { exposure: 1 } }), /Unsupported/);
   assert.throws(() => mergeViewerDisplaySettings(current, { modes: { solid: { flat: true } } }), /Unsupported display fields: modes/);
-  assert.throws(() => normalizeViewSettings({ mode: 'Grid' }), /mode/);
   // Preview's settings merge group by group, field by field.
   const preview = mergePreviewSettings({ lighting: { exposure: 1, size: 2 } }, { lighting: { exposure: 2 }, floor: { finish: 'glossy' } });
   assert.deepEqual(preview, { lighting: { exposure: 2, size: 2 }, floor: { finish: 'glossy' } });
@@ -35,17 +34,6 @@ test('preset camera changes retain the actual camera position, target and zoom',
     assert.deepEqual(next, { ...camera, projection: expected.projection, focalLength: expected.focalLength });
   }
   assert.equal(cameraForViewSettings(null, { mode: 'solid' }), null);
-});
-
-test('the viewer Preview baseline is inherited without an override or Custom state', async () => {
-  const { resolveViewSceneSettings } = await import('@text-to-cad/core/common/sceneSettings.js');
-  const options = { lightingQuality: 'preview' };
-  const scene = resolveViewSceneSettings({ display: {}, preview: true, ...options });
-  assert.equal(scene.view.lighting.quality, 'preview');
-  assert.equal(scene.quality.id, 'standard');
-  assert.equal(previewSettingsChanged({}, options), false);
-  assert.equal(previewSettingsChanged({ lighting: { quality: 'preview' } }, options), false);
-  assert.equal(previewSettingsChanged({ lighting: { quality: 'final' } }, options), true);
 });
 
 test('camera commands activate explicit projection and lens while pose-only updates leave View unchanged', () => {

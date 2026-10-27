@@ -2,10 +2,10 @@
 the bytes the asset route sends.
 
 There is no served directory. Every ``?file=`` -- and every path in a request's body -- names a
-file by its ABSOLUTE path, anywhere on this machine, and anything else is refused with a 400: the
-page resolves a developer's relative link against the folder this viewer was started in
-(``serverInfo.start``) before it asks. Nothing is refused for WHERE it is: no root, no containment,
-and no rule about hidden folders on the way to a file that is named.
+file by its ABSOLUTE path, anywhere on this machine, and anything else is refused with a 400: a
+relative file a launch names is read from the launch's folder before it is registered. Nothing is
+refused for WHERE it is: no root, no containment, and no rule about hidden folders on the way to a
+file that is named.
 
 What is refused is what would LEAVE as bytes. The asset route sends only CAD files and their
 sidecars (``scanner.is_served_cad_asset``), so a ``.py``, a config or a key file is a 404 whatever
@@ -45,6 +45,6 @@ def absolute_path(ref) -> str:
 
 
 def asset_path(ref) -> str | None:
-    """The file the asset route may send for ``ref``: a CAD file or its sidecar, else ``None`` (404)."""
+    """The file the asset route may send for ``ref``: a CAD file, else ``None`` (404)."""
     path = absolute_path(ref)
     return path if is_served_cad_asset(path) else None

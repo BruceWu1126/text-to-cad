@@ -4,15 +4,18 @@ import { createCadFileActions } from '@text-to-cad/ui/catalog';
 import type { ModelLibrarySource } from '@text-to-cad/ui/library';
 import { createLiveRegistry, type ViewerHost } from '@text-to-cad/ui/host';
 import type { TabStore, Appearance } from '@text-to-cad/ui/tab-store';
-import { cadApiUrl, createHttpPromptFiles, type CadClient, type CadServerInfo } from '@text-to-cad/core/client';
+import { cadApiUrl, createHttpPromptFiles, isEngineRefused, type CadClient, type CadServerInfo } from '@text-to-cad/core/client';
 import { useViewerAutoReload } from './host/useViewerAutoReload.js';
+import { useEngineReconnect } from './host/useEngineReconnect.js';
 import { useAnalyticsConsent } from '@text-to-cad/ui/consent';
-import { useLanguage } from '@text-to-cad/ui/i18n';
+import { english, translator, useLanguage } from '@text-to-cad/ui/i18n';
 import { UpdateButton, useUpdateNotice, type UpdateNotice } from '@text-to-cad/ui/update';
+import { createBrowserDownloads } from './host/downloads';
 import { browserClipboard, browserClipboardSupportsImages } from './host/clipboard';
 import { createWebPromptContext } from './host/promptContext';
 import { useViewerLinks } from './host/viewerLinks.js';
-import { readDefaultFileParam, readFileParam, resolveFileParam, writeFileParam } from './client/workbench/fileParam.js';
+import { EngineStopped } from './EngineStopped';
+import { readDefaultFileParam, readDocumentId, writeDocumentId } from './client/workbench/fileParam.js';
 import { applyColorSchemeToDocument, resolveColorSchemeMode } from './client/ui/colorScheme.js';
 
 /** The keyboard the page is typed on — ⌘ on Apple devices, Ctrl elsewhere: the host's one platform answer. */
@@ -34,15 +37,26 @@ export function useTabAppearance(tabStore: TabStore): { preference: Appearance; 
   return { preference: settings.appearance, colorScheme: resolveColorSchemeMode(settings.appearance, { prefersDark }) as 'light' | 'dark' };
 }
 
+const DOCUMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 /**
- * The CAD Viewer's page: one file at a time, by the absolute path its URL names (`?file=`), or the
- * home — the models opened before, and Open — where it names none. The browser's own history is
- * the way back: showing a file or the home is a new entry.
+ * The CAD Viewer's page: one document at a time, by the id its URL's path names (`/<id>`: a model's,
+ * or a file's, which the server registers when it is opened), or the home (`/`): the models opened
+ * before. A file opened by its path (from Files, or the home's Open) is asked for its id first, and shown by it. The browser's own history is the way back:
+ * showing a document or the home is a new entry.
  */
 export default function App({ client, server, tabStore, notice = null, language: chosenLanguage = null }: { client: CadClient; server: CadServerInfo; tabStore: TabStore; notice?: UpdateNotice | null; language?: string | null }) {
-  useViewerAutoReload(server, { fetchServerInfo: () => client.serverInfo({ fresh: true }).then(info => ({ ok: true, identityToken: String(info.identityToken || '') }), () => ({ ok: false })) });
+  // Another process answering on this page's port: never loaded into the tab (a dev server's restart
+  // alone is followed), and said as the engine being gone.
+  const [foreign, setForeign] = useState(false);
+  useViewerAutoReload(server, { fetchServerInfo: () => client.serverInfo({ fresh: true }).then(info => ({ ok: true, identityToken: String(info.identityToken || '') }), () => ({ ok: false })),
+    follow: Boolean(import.meta.env?.DEV), onForeign: () => setForeign(true) });
+  const downloads = useMemo(() => createBrowserDownloads(), []);
   const source = useMemo(() => createCadFileSource(client), [client]);
-  const promptContext = useMemo(() => createWebPromptContext(browserClipboard, browserClipboardSupportsImages()), []);
+  // What the clipboard port says to the person, in the view's language as it is when it speaks.
+  const sayRef = useRef<(key: string, params?: Record<string, unknown>) => string>(english);
+  const promptContext = useMemo(() => createWebPromptContext(browserClipboard, browserClipboardSupportsImages(),
+    (key, params) => sayRef.current(key, params)), []);
   // The file menu: the file's path to the clipboard, and Reveal in the file manager of the machine the
   // server runs on, labeled for its platform.
   const fileActions = useMemo(() => createCadFileActions({ platform: server.platform, clipboard: browserClipboard,
@@ -52,29 +66,44 @@ export default function App({ client, server, tabStore, notice = null, language:
   // The view on screen, for the library's pictures of what was opened.
   const live = useMemo(() => createLiveRegistry(), []);
   const links = useViewerLinks();
-  // The file the URL names (a developer's relative path resolved where this viewer started), or the
-  // build's default; the URL then names it in full.
-  const requested = useCallback(() => resolveFileParam(readFileParam() || readDefaultFileParam() || '', server.start), [server.start]);
-  const [file, setFile] = useState(requested);
-  useEffect(() => { if (file && readFileParam() !== file) writeFileParam(file, { history: 'replace' }); }, []);
-  useEffect(() => {
-    const sync = () => setFile(requested());
-    window.addEventListener('popstate', sync);
-    return () => window.removeEventListener('popstate', sync);
-  }, [requested]);
+  // The document the URL names; anything else is the home (an old link's form included), and the
+  // URL says `/`.
+  const [file, setFile] = useState(() => readDocumentId() || '');
   const shownFile = useRef(file);
   shownFile.current = file;
-  /** Show a file by its absolute path, or the home (''): a new step in the browser's history. */
-  const show = useCallback((next: string) => {
-    const path = normalizePath(next);
-    if (path === shownFile.current) return;
-    writeFileParam(path, { history: 'push' });
-    setFile(path);
+  const asked = useRef(0);
+  /** Show a document by its id, a file by its absolute path (asked for its id), or the home (''): a
+   * new step in the browser's history, or this one's place (`history: 'replace'`). */
+  const show = useCallback(async (next: string, history: 'push' | 'replace' = 'push') => {
+    const turn = ++asked.current;
+    const wanted = normalizePath(next);
+    let id = !wanted || DOCUMENT_ID.test(wanted) ? wanted : '';
+    if (wanted && !id) {
+      id = await client.resolveEntry(wanted).then(entry => String(entry.id || ''), () => '');
+      if (turn !== asked.current) return;
+      if (!id) { setFile(wanted); return; }  // a file that is not there says so, by its path
+    }
+    if (id === shownFile.current) return;
+    writeDocumentId(id, { history });
+    setFile(id);
+  }, [client]);
+  useEffect(() => {
+    if (!file) {
+      writeDocumentId('', { history: 'replace' });
+      const fallback = readDefaultFileParam();  // a developer's build's default file
+      if (fallback) void show(fallback, 'replace');
+    }
+    const sync = () => { asked.current += 1; setFile(readDocumentId() || ''); };
+    window.addEventListener('popstate', sync);
+    return () => window.removeEventListener('popstate', sync);
   }, []);
-  // Once the catalog has the file: the page is named after it, and it joins the library every CAD view
-  // shares (counted, as a code, for analytics).
+  // Once the catalog has the document: the page is named after it alone ("bracket.step", "juno";
+  // the home is "text-to-cad"), and the library every CAD view
+  // shares says it was opened now: a file joins it (counted, as a code, for analytics), and a model,
+  // known by its id alone and in it since its run, has its opened time.
   const shown = useCallback((path: string | null) => {
-    document.title = path ? `CAD | ${path.split('/').pop()}` : 'CAD';
+    const entry = path ? client.entryOf?.(path) : null;
+    document.title = path ? String(entry?.name || path.split('/').pop()) : 'text-to-cad';
     if (path) void client.changeRecents({ action: 'open', path }).catch(() => {});
   }, [client]);
   // The home: the library every CAD view shares, and Open with the desktop's chooser where the
@@ -83,8 +112,8 @@ export default function App({ client, server, tabStore, notice = null, language:
     list: () => client.recents(),
     change: (action, entry) => client.changeRecents({ action, path: entry.path }),
     thumbnail: name => Promise.resolve(cadApiUrl('/__cad/thumbnail', { origin: client.origin, params: { name } })),
-    open: async entry => { show(entry.path); },
-    ...(server.pick ? { pick: async () => { const picked = await client.pick(); if (picked) show(picked); } } : {}),
+    open: async entry => { await show(entry.path); },
+    ...(server.pick ? { pick: async () => { const picked = await client.pick(); if (picked) await show(picked); } } : {}),
   }), [client, server.pick, show]);
   const appearance = useTabAppearance(tabStore);
   const changeColorScheme = useCallback((value: string) => tabStore.settings.update({ appearance: value as Appearance }), [tabStore]);
@@ -96,6 +125,7 @@ export default function App({ client, server, tabStore, notice = null, language:
   // (`main.tsx`), so the page's first paint is already in it.
   const { locale, language } = useLanguage(client.language, { preferred: navigator.languages ?? [navigator.language], initial: chosenLanguage });
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
+  sayRef.current = translator(locale);
   // The usage stats cadgen sends (its telemetry), the same as the CAD app's: nothing asks here (a
   // cadgen command says it once), and the app menu's switch changes it. The answer is the person's,
   // shared with the CAD app.
@@ -119,13 +149,26 @@ export default function App({ client, server, tabStore, notice = null, language:
     return () => { window.removeEventListener('pointerdown', touched, true); window.removeEventListener('keydown', touched, true); };
   }, [client]);
   const host = useMemo<Omit<ViewerHost, 'navigation'>>(() => ({
-    files: source, fileActions, clipboard: browserClipboard, promptContext, promptFiles, links,
+    downloads, files: source, fileActions, clipboard: browserClipboard, promptContext, promptFiles, links,
     // A Quick Edit copied, counted by this Viewer's server for its telemetry, as a touch is.
-    usage: { used: feature => { if (feature === 'quickEdit') client.reportActivity({ quickEdit: true }); } },
+    usage: { used: feature => { if (feature === 'quickEdit') client.reportActivity({ quickEdit: true }); },
+      // The controls a person used, and how long a tool was up, counted by the shared viewer.
+      controls: counts => client.reportActivity({ controls: counts }) },
     environment: { colorScheme: appearance.colorScheme, locale, platform: keyboardPlatform() },
-  }), [client, source, fileActions, promptContext, promptFiles, links, appearance.colorScheme, locale]);
-  return <div className="flex h-svh flex-col overflow-hidden"><div className="min-h-0 flex-1">
-    <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={show} onShown={shown}
+  }), [downloads, client, source, fileActions, promptContext, promptFiles, links, appearance.colorScheme, locale]);
+  // The engine gone under the page: said over it, which stays as it was for the engine's return.
+  const engineGone = useSyncExternalStore(client.subscribe, () => client.getSnapshot().engineGone, () => false) || foreign;
+  const readRefused = useSyncExternalStore(client.subscribe, () => client.getSnapshot().engineRefused, () => false);
+  // Asked again, at the same address with the same token, until an engine answers: a new one reloads the page.
+  // An engine that refuses the token runs: the page's link was replaced, which the last ask says once it has asked.
+  const askedRefused = useEngineReconnect(engineGone, { pid: server.pid, ask: () => client.serverInfo({ fresh: true })
+    .then(info => info, error => (isEngineRefused(error) ? { refused: true } : null)) });
+  const refused = askedRefused ?? readRefused;
+  return <div className="relative flex h-svh flex-col overflow-hidden">{engineGone ? <EngineStopped locale={locale} refused={refused} /> : null}
+    {/* The engine gone, its notice is the page's one: what is under it (a view's own "can't reach"
+        card among it) is out of reach and unheard until it is back. */}
+    <div className="min-h-0 flex-1" inert={engineGone || undefined} aria-hidden={engineGone || undefined}>
+    <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={next => { void show(next); }} onShown={shown}
       library={library} onThumbnail={client.keepThumbnail} appSettings={appSettings}
       update={updateNotice ? <UpdateButton notice={updateNotice} copy={prompt => browserClipboard.writeText(prompt)} onLink={openTab} /> : null}
       colorScheme={colorScheme} language={language} />

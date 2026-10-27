@@ -19,6 +19,17 @@ test("a build of the file is an update of the model on screen until it ends", ()
   assert.equal(viewerLoadingState({ editPending: true, previousView: true }).updating, true);
   assert.equal(viewerLoadingState({ editPending: true, previousView: true }).opening, false);
   assert.equal(viewerLoadingState({}).busy, false);
+  assert.equal(viewerLoadingState({}).preview, false);
+});
+
+test("a build whose own preview is drawn is no longer a wait, and the view says it is a preview", () => {
+  const drawn = viewerLoadingState({ editPending: true, previousView: true, currentPreview: true });
+  assert.deepEqual([drawn.updating, drawn.busy, drawn.preview], [false, false, true]);
+  // Its own geometry still arriving is a wait of its own, said beside the label.
+  const arriving = viewerLoadingState({ busy: true, editPending: true, previousView: true, currentPreview: true });
+  assert.deepEqual([arriving.updating, arriving.preview], [true, true]);
+  // The label outlives the build: a failed one leaves its preview on screen under the alert.
+  assert.equal(viewerLoadingState({ previousView: true, currentPreview: true, error: { severity: "error", blocking: false } }).preview, true);
 });
 
 test("technical stages have a small vocabulary and uncounted waits never claim a fraction", () => {
@@ -36,6 +47,27 @@ test("a loader names its STAGE in `phase`; its own label never has to be recogni
   assert.equal(loadingProgress({ phase: "view", label: "Building anything at all", determinate: false }).label, "Preparing view");
 });
 
+test("the engine's progress event is named by its key, for every kind, counted where its stage has units", () => {
+  // One event for every job the engine runs (`cadgen/engine/progress.py`): the page reads its kind and
+  // stage and nothing of the engine's words, so the screen says each in the view's language.
+  const event = (kind, stage, done, total, detail = "") => ({ kind, stage, job: "hand.py::hand", outputs: [], detail, done, total, elapsedMs: 42 });
+  assert.deepEqual(loadingProgress(event("build", "body", 2, null, "finger")),
+    { label: "progress.build.body", detail: "finger", counts: "", percent: null, connectionLost: null }, "bodies cannot be counted ahead: no fraction");
+  assert.deepEqual(loadingProgress(event("build", "write", 1, 2, "hand.step")),
+    { label: "progress.build.write", detail: "hand.step", counts: "1/2", percent: 50, connectionLost: null });
+  assert.deepEqual(loadingProgress(event("import", "read", 0, null, "tom.step (48.2 MB)")),
+    { label: "progress.import.read", detail: "tom.step (48.2 MB)", counts: "", percent: null, connectionLost: null });
+  assert.deepEqual(loadingProgress(event("import", "collect", 120, 628)),
+    { label: "progress.import.collect", detail: "", counts: "120/628", percent: 19, connectionLost: null });
+  assert.equal(loadingProgress(event("export", "write", 0, 3, "arm.glb")).label, "progress.export.write");
+  assert.equal(loadingProgress(event("snapshot", "draw", 0, null)).label, "progress.snapshot.draw");
+  assert.deepEqual(loadingProgress(event("inspect-measure", "measure", 37, 256, "peg")),
+    { label: "progress.inspect-measure.measure", detail: "peg", counts: "37/256", percent: 14, connectionLost: null });
+  // The page's own words win while it is finding or preparing; a frame that only looks like an event is none.
+  assert.equal(loadingProgress(event("build", "body", 0, null), { finding: true }).label, "Finding file");
+  assert.equal(loadingProgress({ kind: "Build Model", stage: "body" }).label, "Opening model");
+});
+
 test("a file being imported reads as importing, and a cold open's meshing as meshing", () => {
   // The import's build, as cadgen labels its phases: reading the file, collecting its parts
   // (counted), storing them.
@@ -46,7 +78,9 @@ test("a file being imported reads as importing, and a cold open's meshing as mes
     { label: "Importing model", detail: "", counts: "120/256", percent: 47, connectionLost: null });
   // A model script's own build is not an import, nor a read: every phase of it is building,
   // the parts it stores included.
-  for (const [phase, label] of [["generate", "Building geometry"], ["package", "Collecting parts"], ["components", "Storing parts"], ["finalize", "Writing outputs"], ["mesh", "Meshing parts"]]) {
+  for (const [phase, label] of [["generate", "Building geometry"], ["package", "Collecting parts"], ["components", "Storing parts"], ["finalize", "Writing outputs"], ["mesh", "Meshing parts"],
+    // The engine's stages (`progress.PHASES`).
+    ["load", "Loading the script"], ["body", "Building geometry"], ["names", "Naming elements"], ["document", "Making the document"], ["write", "Writing files"]]) {
     assert.equal(loadingProgress({ phase, label }).label, "Building model");
   }
   // "Reading model" is a read; a wait with nothing to say is opening.

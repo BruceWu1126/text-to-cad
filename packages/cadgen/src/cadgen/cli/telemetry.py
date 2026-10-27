@@ -44,9 +44,10 @@ def build_parser(prog: str = DEFAULT_PROG) -> argparse.ArgumentParser:
         description=(
             "Show or change the usage stats and crash reports cadgen sends from CAD's apps (the CAD app in an agent "
             "app, and the CAD Viewer) and its build daemon. By default, once a cadgen command has said so: a random "
-            "install id, versions, the OS and agent app, counts of CAD tool calls, view activity, files shown by "
-            "format, builds and snapshots, how they ended and how long they took, and where cadgen's own code failed "
-            "(never a message). `off` sends nothing. Never file names, paths, contents or prompts."
+            "install id, versions, the OS and agent app, counts of CAD tool calls, view activity, which of the "
+            "viewer's tools and settings are used (never a value or a name), files shown by format, builds and "
+            "snapshots, how they ended and how long they took, and where cadgen's own code failed (never a "
+            "message). `off` sends nothing. Never file names, paths, contents or prompts."
         ),
     )
     parser.add_argument("action", nargs="?", choices=("status", "on", "off"), default="status")
@@ -55,7 +56,7 @@ def build_parser(prog: str = DEFAULT_PROG) -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None, *, prog: str = DEFAULT_PROG) -> int:
     args = build_parser(prog).parse_args(argv)
-    from cadgen.analytics import PRIVACY_URL, choose, notify, request_deletion, status
+    from cadgen.analytics import PRIVACY_URL, choose, notify, off_command, request_deletion, status
     from cadgen.settings import settings_path
 
     if args.action in ("on", "off"):
@@ -76,7 +77,7 @@ def main(argv: Sequence[str] | None = None, *, prog: str = DEFAULT_PROG) -> int:
         print(f"Telemetry is {describe(found)}.")
         if found["reason"] == "default":
             print("It counts CAD's tool calls, views, files shown, builds and snapshots, and reports where cadgen's "
-                  "own code failed -- never what they hold: `cadgen telemetry off` turns it off.")
+                  f"own code failed -- never what they hold: `{off_command()}` turns it off.")
         if found["id"]:
             print(f"Install id: {found['id']}")
     if found["reason"] == "environment" and args.action in ("on", "off"):

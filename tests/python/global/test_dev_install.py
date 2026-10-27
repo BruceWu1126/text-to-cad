@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from tests.python.support.paths import REPO_ROOT
 
@@ -29,7 +30,7 @@ class DevPluginTests(unittest.TestCase):
             for host in dev_install.PLUGIN_HOSTS:
                 with self.subTest(host=host):
                     plugin = Path(scratch) / host
-                    server = dev_install.server_entry(host, "/venv/bin/python", Path("/pages/1"))
+                    server = dev_install.server_entry(host, "/venv/bin/python", Path("/pages/1"), "1.2.3-dev.1")
                     dev_install.assemble(host, plugin, "1.2.3-dev.1", server)
                     manifest = json.loads((plugin / manifests[host]).read_text(encoding="utf-8"))
                     self.assertEqual((manifest["name"], manifest["version"]), (dev_install.plugin_name(), "1.2.3-dev.1"))
@@ -37,38 +38,54 @@ class DevPluginTests(unittest.TestCase):
                     if isinstance(servers, str):
                         servers = json.loads((plugin / servers).read_text(encoding="utf-8"))["mcpServers"]
                     self.assertEqual(servers, {"cad": server})
-                    self.assertEqual(server["env"], {"CADGEN_INSTALL_CHANNEL": "dev", "CADGEN_MCP_APP_DIR": "/pages/1"})
+                    self.assertEqual(server["env"], {"CADGEN_INSTALL_CHANNEL": "dev", "CADGEN_MCP_APP_DIR": "/pages/1",
+                                                     "CADGEN_INSTALLATION_VERSION": "1.2.3-dev.1"})
                     self.assertEqual(sorted(path.parent.name for path in plugin.glob("skills/*/SKILL.md")), skills)
                     self.assertFalse(list(plugin.rglob("__pycache__")))
                     for icon in (manifest.get("logo"), manifest.get("interface", {}).get("logo")):
                         if icon:
                             self.assertTrue((plugin / icon).is_file(), icon)
 
-    def test_the_skills_launch_command_follows_the_servers_runtime(self) -> None:
-        # The dev server runs the checkout's .venv; the copied skills must run it too, or the
-        # agent's scripts would use the release's installation and a daemon of their own.
-        commands = {"cadgen": "/w/.venv/bin/python -m cadgen.cli", "python": "/w/.venv/bin/python"}
-        with tempfile.TemporaryDirectory() as scratch:
+    def test_the_skills_run_the_version_the_server_registers(self) -> None:
+        # The dev server runs the checkout's .venv, registered as this install's own version; the
+        # copied skills must run that version, or the agent's scripts would run the release's
+        # installation and a daemon of their own.
+        released = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        with tempfile.TemporaryDirectory() as scratch, mock.patch.dict("os.environ", {"CADGEN_LAUNCHER_DIR": ""}):
+            rewrites = dev_install.skill_rewrites(released, "1.2.3-dev.1", python="/w/.venv/bin/python")
             plugin = Path(scratch) / "claude"
-            dev_install.assemble("claude", plugin, "1.2.3-dev.1", {"command": "x"}, commands=commands)
+            dev_install.assemble("claude", plugin, "1.2.3-dev.1", {"command": "x"}, rewrites=rewrites)
             for skill in plugin.glob("skills/*/SKILL.md"):
                 text = skill.read_text(encoding="utf-8")
                 with self.subTest(skill=skill.parent.name):
                     self.assertNotIn("--from cadgen==", text)
+                    self.assertNotIn(f"+{released}`", text)
                     if "below means" in text:
-                        self.assertIn("`cadgen` below means `/w/.venv/bin/python -m cadgen.cli`", text)
-                        self.assertIn("`python` below means `/w/.venv/bin/python`", text)
+                        self.assertIn("`cadgen` below means `cadgen +1.2.3-dev.1`", text)
+                        self.assertIn("`python` below means `cadgen +1.2.3-dev.1 run`", text)
+                        self.assertIn("it says 1.2.3-dev.1 is not installed", text)
+                        self.assertIn("/w/.venv/bin/python -m cadgen.cli doctor`", text)
 
-    def test_wheel_mode_runs_one_wheel_for_the_server_and_the_skills(self) -> None:
+    def test_wheel_mode_registers_one_wheel_for_the_server_and_the_skills(self) -> None:
         import argparse
-        from unittest import mock
 
         wheel = Path("/w/tmp/codex-dev/wheels/1/cadgen-1.2.3-py3-none-any.whl")
-        with mock.patch.object(dev_install, "build_wheel", return_value=wheel):
-            server, commands, page = dev_install.runtime("codex", argparse.Namespace(wheel=True, build=False), "v")
+        with tempfile.TemporaryDirectory() as scratch, mock.patch.object(dev_install, "build_wheel", return_value=wheel), \
+                mock.patch.object(dev_install, "dev_root", return_value=Path(scratch)), \
+                mock.patch.object(dev_install, "run", return_value="/state/installations/v.json\n") as run:
+            server, rewrites, page = dev_install.runtime("codex", argparse.Namespace(wheel=True, build=False), "v")
+            # Its record is kept, for --uninstall to take out.
+            self.assertEqual(json.loads((Path(scratch) / "installations.json").read_text(encoding="utf-8")),
+                             {"v": "/state/installations/v.json"})
         self.assertEqual((server["args"], server["env"]),
-                         ([*dev_install.LAUNCHER[1:], str(wheel), "cadgen", "mcp"], {"CADGEN_INSTALL_CHANNEL": "dev"}))
-        self.assertEqual(commands["cadgen"], " ".join((*dev_install.LAUNCHER, str(wheel), "cadgen")))
+                         ([*dev_install.LAUNCHER[1:], str(wheel), "cadgen", "mcp"],
+                          {"CADGEN_INSTALL_CHANNEL": "dev", "CADGEN_INSTALLATION_VERSION": "v"}))
+        # The wheel's installation registers as this install's version, by its own python.
+        run.assert_called_once_with(*dev_install.LAUNCHER, str(wheel), "python", "-c", dev_install.REGISTER, "v",
+                                    capture=True)
+        released = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        self.assertTrue(rewrites[dev_install.launch("cadgen", released)].endswith(f"--from {wheel} cadgen"))
+        self.assertEqual(rewrites[f"cadgen +{released}"], "cadgen +v")
         self.assertIsNone(page, "a wheel serves the page it was built with")
 
     def test_this_scripts_launcher_is_cadgens(self) -> None:

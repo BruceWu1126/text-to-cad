@@ -1,35 +1,22 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { createServer } from 'node:http';
-import { build } from 'esbuild';
+import { harnessBundle } from '../harness/bundle.mjs';
+import { pressInPreview } from '../harness/preview.mjs';
 import { chromium } from 'playwright';
 import { PNG } from 'pngjs';
-import { writeGlb } from '@text-to-cad/core/glb/writeGlb.js';
 
-// Inline fixtures, served from memory: two boxes with authored colours, the same
-// pair with one box driven by a clip whose first key IS the rest pose, and bytes
-// that are not a GLB at all.
-function box([x, y, z], size) {
-  const [a, b, c] = [x + size, y + size, z + size];
-  const corners = [[x, y, z], [a, y, z], [a, b, z], [x, b, z], [x, y, c], [a, y, c], [a, b, c], [x, b, c]];
-  const faces = [[0, 2, 1, 0, 3, 2], [4, 5, 6, 4, 6, 7], [0, 1, 5, 0, 5, 4], [2, 3, 7, 2, 7, 6], [1, 2, 6, 1, 6, 5], [3, 0, 4, 3, 4, 7]];
-  return new Float32Array(faces.flat().flatMap(index => corners[index]));
-}
-const primitives = [
-  { name: 'base', node: 'base', positions: box([0, 0, 0], 0.02), color: '#d02020' },
-  { name: 'rider', node: 'rider', positions: box([0.03, 0, 0], 0.01), color: '#2040d0' },
-];
-const bytes = glb => Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
+// Fixtures, served from memory: cadgen's exports of two boxes with authored colours (core's
+// `lib/render/fixtures`), static and with the clip that slides one of them from its rest pose,
+// and bytes that are not a GLB at all.
+const CORE_FIXTURES = join(dirname(createRequire(import.meta.url).resolve('@text-to-cad/core/lib/render/glbMeshData.js')), 'fixtures');
 const FILES = {
-  'static.glb': bytes(writeGlb({ primitives }, { preset: 'export' })),
-  'animated.glb': bytes(writeGlb({ primitives }, { preset: 'export', animations: [{
-    name: 'slide', times: new Float32Array([0, 1]),
-    channels: [{ node: 'rider', translation: new Float32Array([0, 0, 0, 0, 0.03, 0]) }],
-  }] })),
+  'static.glb': readFileSync(join(CORE_FIXTURES, 'pair.glb')),
+  'animated.glb': readFileSync(join(CORE_FIXTURES, 'pair.slide.glb')),
   'broken.glb': Buffer.from('glTF is not what this is'),
 };
 
@@ -39,11 +26,9 @@ const HARNESS_SIZE = '<style>#root > div { width: 800px !important; height: 500p
 
 // One harness bundle, one server and one browser for the file; every test opens its own page.
 // (A browser's first WebGL page pays for compiling the viewer's shaders; later pages reuse them.)
-let temporary, server, browser;
+let server, browser;
 before(async () => {
-  temporary = await mkdtemp(join(tmpdir(), 'text-to-cad-glb-browser-'));
-  await build({ entryPoints: [fileURLToPath(new URL('../harness/index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.svg': 'dataurl' } });
-  const bundle = await readFile(join(temporary, 'harness.js'));
+  const { bundle } = await harnessBundle();
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
   server = createServer((request, response) => {
     const url = new URL(request.url, 'http://test');
@@ -67,7 +52,6 @@ before(async () => {
 after(async () => {
   await browser?.close();
   if (server) await new Promise(resolve => server.close(resolve));
-  if (temporary) await rm(temporary, { recursive: true, force: true });
 });
 
 // `record` opens the page as a previous session left its tab (`window.__cadTabRecord`).
@@ -89,14 +73,27 @@ async function open(t, file, { record = null } = {}) {
 }
 
 const ready = pane => pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
+// What the view handed Export (the harness's ExportContext records it): the file it shows, named by
+// its path, at the bytes on screen (their catalog hash), which Export converts to the other mesh kinds.
+async function exported(page, file) {
+  await page.waitForFunction(() => window.cadHarness.exportViews.at(-1));
+  const shown = await page.evaluate(() => window.cadHarness.exportViews.at(-1));
+  assert.deepEqual(Object.keys(shown).sort(), ['doc', 'file', 'name', 'revision']);
+  assert.deepEqual([shown.doc, shown.file, shown.name], [`/models/${file}`, `/models/${file}`, file]);
+  assert.ok(shown.revision.endsWith(`-${file}`), `the catalog hash of the bytes shown: ${shown.revision}`);
+}
 
-// A GLB of two nodes that draw has a GLB's every tool on its strip, Select in hand; its view's
-// controls end the strip, in the section of Explode and Clip: Projection, Display, then Preview.
-const GLB_TOOLS = ['Select:true', 'Pencil:false', 'Shapes:false', 'Measure:false', 'Explode:false', 'Clip:false'];
+// A GLB of two nodes that draw has a GLB's every tool on its strip, Select in hand, then Explode and Clip,
+// popovers from their tiles with no pressed state; its view's controls end the strip, in their section:
+// Projection, Display, then Preview.
+const GLB_TOOLS = ['Select:true', 'Pencil:false', 'Shapes:false', 'Measure:false'];
 const glbTools = async (pane) => {
   assert.deepEqual(await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button')
     .evaluateAll(buttons => buttons.filter(button => button.hasAttribute('aria-pressed') && !button.closest('[data-view-controls]')).map(button => `${button.getAttribute('aria-label')}:${button.getAttribute('aria-pressed')}`)),
-  GLB_TOOLS, 'Select, Pencil, Shapes, Measure, Explode and Clip');
+  GLB_TOOLS, 'Select, Pencil, Shapes and Measure');
+  for (const name of ['Explode', 'Clip']) {
+    assert.equal(await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button', { name, exact: true }).getAttribute('aria-pressed'), null, `${name} is never pressed`);
+  }
   const strip = pane.getByRole('group', { name: 'Interaction tools' });
   assert.deepEqual(await strip.locator('[data-view-controls]').getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
     ['Projection: Orthographic', 'Display mode: Solid', 'Preview'], 'its view\'s controls end the strip');
@@ -186,10 +183,13 @@ const differingPixels = (left, right) => {
   return count;
 };
 const settle = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-// Render is Preview's: in by Preview at the strip's end and out by Exit preview in the navbar, each once the view has
+// A press on a control Preview's bar may hide (`harness/preview.mjs`), or on any other.
+const pressPreviewable = async (page, pane, control) => (await pane.locator('[data-preview-view]').count()
+  ? pressInPreview(page, pane, control) : control.click());
+// Render is Preview's: in by Preview at the strip's end and out by Exit preview in Preview's bar, each once the view has
 // come together under its cover.
 async function togglePreview(page, pane, enter) {
-  await pane.getByRole('button', { name: enter ? 'Preview' : 'Exit preview', exact: true }).click();
+  await pressPreviewable(page, pane, pane.getByRole('button', { name: enter ? 'Preview' : 'Exit preview', exact: true }));
   await pane.getByRole('button', { name: enter ? 'Exit preview' : 'Preview', exact: true }).waitFor();
   await page.waitForFunction(() => !document.querySelector('[data-testid="one"] [data-preview-cover]')
     && document.querySelector('[data-testid="one"] [aria-busy="false"]'));
@@ -219,10 +219,11 @@ async function captureMatching(page, expected, message) {
 }
 const display = (page, patch) => page.evaluate(next => window.cadHarness.a.controller.setDisplaySettings(next), patch);
 
-test('a static GLB opens on its native scene in Select: display settings, orbit, host commands and state all work', async (t) => {
+test('a static GLB opens on its native scene in Select: its tools, its display modes on its authored colours, its node picks refused to a command, its settings under its renderer (the shell around it is the mesh spec\'s)', async (t) => {
   const { page, pane, errors } = await open(t, 'static.glb');
   await ready(pane);
   assert.deepEqual(errors, []);
+  await exported(page, 'static.glb');
 
   await glbTools(pane);
   assert.equal(await pane.locator('[data-quick-edit-box]').count(), 0, 'Quick Edit opens on a pick or a mark, never by itself');
@@ -244,12 +245,6 @@ test('a static GLB opens on its native scene in Select: display settings, orbit,
   await page.waitForFunction(() => document.querySelector('[data-testid="one"] [aria-busy] > div > canvas').width >= 790);
   await settle(page);
 
-  // Preview draws the model in Render, on the studio's floor; leaving it takes the studio down.
-  await togglePreview(page, pane, true);
-  await page.waitForFunction(() => window.__cadStage()?.studioGround);
-  await togglePreview(page, pane, false);
-  await page.waitForFunction(() => !window.__cadStage()?.studioGround);
-
   // Surfaces, on the native scene: Solid, each part its own authored colour, shaded.
   const red = ([r, g, b]) => r > 150 && g < 90 && b < 90;
   const blue = ([r, g, b]) => b > 150 && r < 90 && g < 130;
@@ -269,82 +264,23 @@ test('a static GLB opens on its native scene in Select: display settings, orbit,
   await display(page, { mode: 'solid', grid: false });
   assert.equal(differingPixels(shaded, await capture(page)), 0, 'the look is fully reversible');
 
-  // Dragging orbits.
-  const before = await page.evaluate(() => window.cadHarness.a.controller.readState().camera);
-  const canvas = await pane.locator('[aria-busy] > div > canvas').first().boundingBox();
-  await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(canvas.x + canvas.width / 2 + 140, canvas.y + canvas.height / 2 + 40, { steps: 6 });
-  await page.mouse.up();
-  await page.waitForFunction(position => JSON.stringify(window.cadHarness.a.controller.readState().camera.position) !== position, JSON.stringify(before.position));
-
-  // The drag's damping coasts for a moment; a host camera lands on a view at rest.
-  // At rest: the live camera the same over several frames running.
-  await page.waitForFunction(() => new Promise(resolve => {
-    let still = 0, last = null;
-    const step = () => {
-      const position = JSON.stringify(window.__cadCamera().position);
-      still = position === last ? still + 1 : 0;
-      last = position;
-      if (still >= 5) resolve(true); else requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
-  }));
-
-  // Host commands drive the mounted view, and one that makes no sense here fails loudly.
-  const camera = await page.evaluate(async () => {
-    const controller = window.cadHarness.a.controller;
-    const current = controller.readState().camera;
-    return (await controller.setCamera({ ...current, position: [90, -70, 60], target: [10, 5, 5], zoom: 1.3 })).camera;
-  });
-  assert.deepEqual(camera.position.map(Math.round), [90, -70, 60]);
+  // A GLB's own answers to the host: its state, and a command's pick refused (a person picks its nodes).
   const state = await page.evaluate(() => window.cadHarness.a.controller.readState());
   assert.deepEqual([state.resource.path, state.revision, state.loading, state.selection], ['/models/static.glb', 'one-static.glb', false, []]);
-  const declined = await page.evaluate(() => window.cadHarness.a.controller.select({ selectors: ['o1.f1'] }).then(() => '', error => error.message));
+  const declined = await page.evaluate(() => window.cadHarness.a.controller.select({ selectors: ['f:pair.make_box1.1'] }).then(() => '', error => error.message));
   assert.match(declined, /A GLB's nodes are picked by a person in the viewport under Select/);
   assert.equal(await page.evaluate(() => window.cadHarness.a.controller.clearSelection().then(() => '', error => error.message)), '', 'its node selection clears');
 
-  // A secondary press is the camera's: no menu of the viewer's, and the browser's own stays off the canvas.
-  await page.evaluate(() => {
-    window.nativeMenu = [];
-    document.addEventListener('contextmenu', event => window.nativeMenu.push(event.defaultPrevented));
-  });
-  await page.mouse.click(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2, { button: 'right' });
-  // The press has reached the page, and a menu it opened would be up two frames on.
-  await page.waitForFunction(() => window.nativeMenu.length > 0);
-  await settle(page);
-  assert.equal(await page.getByRole('menu').count(), 0);
-  assert.deepEqual(await page.evaluate(() => window.nativeMenu), [true]);
-
-  // A host's capture request goes through the prompt port: the view, of the whole file.
-  await page.evaluate(() => window.cadHarness.capture());
-  await page.waitForFunction(() => window.cadHarness.captures.length === 1);
-  const captured = await page.evaluate(() => window.cadHarness.captures[0]);
-  assert.deepEqual([captured.file, captured.type, captured.references.length], ['/models/static.glb', 'image/png', 1]);
-  assert.deepEqual(captured.references[0].target, { kind: 'whole-resource' });
-
-  // Camera and Display settings belong to this file under this renderer's id, and survive a remount.
+  // Display settings belong to this file under this renderer's id (a remount restoring them is the mesh spec's).
   await display(page, { mode: 'parts', grid: true });
   await page.waitForFunction(() => window.cadHarness.state.renderers?.[JSON.stringify(['/models/static.glb', 'glb'])]?.display?.mode === 'parts');
   const stored = await page.evaluate(() => window.cadHarness.state.renderers);
   assert.deepEqual(Object.keys(stored), [JSON.stringify(['/models/static.glb', 'glb'])], 'keyed by [absolute path, renderer id]');
-  const left = await page.evaluate(() => window.cadHarness.a.controller.readState());
-  await page.evaluate(() => window.cadHarness.mounted(false));
-  await pane.locator('canvas').first().waitFor({ state: 'detached' });
-  await page.evaluate(() => window.cadHarness.mounted(true));
-  await ready(pane);
-  await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
-  const reopened = await page.evaluate(() => window.cadHarness.a.controller.readState());
-  // Within a thousandth: the camera read when leaving can still be coasting its last hundredth.
-  assert.ok(reopened.camera.position.every((value, axis) => Math.abs(value - left.camera.position[axis]) <= 1e-3 * Math.max(1, Math.abs(left.camera.position[axis]))),
-    `reopening restores the camera the file was left at: ${JSON.stringify([reopened.camera.position, left.camera.position])}`);
-  assert.ok(Math.abs(reopened.camera.zoom - left.camera.zoom) < 1e-6);
-  assert.deepEqual([reopened.display.mode, reopened.display.grid], ['parts', true]);
 
   assert.deepEqual(errors, []);
 });
 
-test('an animated GLB opens at rest, its clips the file sidebar\'s Animation section; in Preview, from its playbar, they play in Render without moving the camera or the floor, Orbit turns the camera, and leaving puts the model back at rest', async (t) => {
+test('an animated GLB opens at rest, its clips the file sidebar\'s Animation section; in Preview, from its playbar, they play in Render without moving the camera or the floor, Orbit turns the camera, and leaving restores the tools routine\'s held frame', async (t) => {
   const { page, pane, errors } = await open(t, 'animated.glb');
   await ready(pane);
   await glbTools(pane);
@@ -353,6 +289,27 @@ test('an animated GLB opens at rest, its clips the file sidebar\'s Animation sec
   assert.equal(await animationSection(pane).isVisible(), false, 'no section open as the file opens');
   await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
   const toolsRest = await stillCapture(page);
+  const panelTime = () => page.evaluate(() => Number(document.querySelector(
+    '[data-testid="one"] [data-tool-panel][aria-label="Animation"] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')));
+  // The panel plays the clip in the tools view, and its start is the rest pose.
+  await openSection(pane, 'Animation');
+  const panel = animationSection(pane);
+  await panel.getByRole('button', { name: 'Play animation', exact: true }).click();
+  await page.waitForFunction(() => Number(document.querySelector(
+    '[data-testid="one"] [data-tool-panel][aria-label="Animation"] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')) > 0.25);
+  await panel.getByRole('button', { name: 'Pause animation', exact: true }).click();
+  assert.ok(differingPixels(toolsRest, await capture(page)) > 200, 'the panel moved the rider');
+  await panel.getByRole('slider', { name: 'Animation time', exact: true }).focus();
+  await page.keyboard.press('Home');
+  assert.equal(await panelTime(), 0);
+  await captureMatching(page, toolsRest, 'the clip at its start is the rest pose');
+  // The panel's routine left at its end: preview has a routine of its own, at rest.
+  await page.keyboard.press('End');
+  await page.waitForFunction(() => Number(document.querySelector(
+    '[data-testid="one"] [data-tool-panel][aria-label="Animation"] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')) > 0.25);
+  const panelHeld = await panelTime();
+  const heldCapture = await stillCapture(page);
+  assert.ok(differingPixels(toolsRest, heldCapture) > 200, 'the panel holds the rider at the end of its clip');
 
   await togglePreview(page, pane, true);
   // Preview has no sidebar: its routine is the playbar's, under the model; the model in Render, on its floor.
@@ -373,14 +330,14 @@ test('an animated GLB opens at rest, its clips the file sidebar\'s Animation sec
 
   // Playing moves the model, never the floor; pausing leaves it where it stopped.
   const floor = await page.evaluate(() => window.__cadStage().studioGround);
-  await section.getByRole('button', { name: 'Play animation', exact: true }).click();
+  await pressPreviewable(page, pane, section.getByRole('button', { name: 'Play animation', exact: true }));
   await page.waitForFunction(() => Number(document.querySelector('[data-testid="one"] [data-preview-playbar] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')) > 0.25);
-  await section.getByRole('button', { name: 'Pause animation', exact: true }).click();
+  await pressPreviewable(page, pane, section.getByRole('button', { name: 'Pause animation', exact: true }));
   assert.ok(differingPixels(rest, await capture(page)) > 200, 'the rider moved');
   assert.deepEqual(await page.evaluate(() => window.__cadStage().studioGround), floor);
 
   // Orbit, in Preview's settings, turns the camera; turned off again, it stops.
-  await pane.getByRole('button', { name: 'Preview settings', exact: true }).click();
+  await pressPreviewable(page, pane, pane.getByRole('button', { name: 'Preview settings', exact: true }));
   const orbit = pane.getByRole('region', { name: 'Preview settings' }).getByRole('checkbox', { name: 'Orbit', exact: true });
   assert.equal(await orbit.getAttribute('aria-checked'), 'false', 'Preview opens still');
   const held = await page.evaluate(() => window.__cadCamera().position);
@@ -388,10 +345,11 @@ test('an animated GLB opens at rest, its clips the file sidebar\'s Animation sec
   await page.waitForFunction(start => window.__cadCamera().position.some((value, axis) => Math.abs(value - start[axis]) > 1e-6), held);
   await orbit.click();
 
-  // Leaving puts the clip back at rest, in the tools view's own camera and mode.
+  // Leaving preserves the tools view's held routine frame, camera and mode.
   await togglePreview(page, pane, false);
   await page.waitForFunction(() => !window.__cadStage()?.studioGround);
-  await captureMatching(page, toolsRest, 'the tools view is at rest again');
+  assert.equal(await panelTime(), panelHeld, 'the tools routine stays at its held time');
+  await captureMatching(page, heldCapture, 'the tools routine keeps its held frame');
   assert.deepEqual(errors, []);
 });
 
@@ -402,7 +360,7 @@ test("an animated GLB's Speed and Loop are the file's: chosen in its Animation s
   let settingsButton = animationSection(pane).getByRole('button', { name: 'Playback settings' });
   const menu = page.getByRole('menu', { name: 'Playback settings', exact: true });
   const settings = async () => {
-    await settingsButton.click();
+    await pressPreviewable(page, pane, settingsButton);
     const read = [await menu.getByRole('menuitem', { name: /^Animation speed: / }).getAttribute('aria-label'),
       await menu.getByRole('menuitemcheckbox', { name: 'Loop', exact: true }).getAttribute('aria-checked')];
     await page.keyboard.press('Escape');
@@ -411,11 +369,11 @@ test("an animated GLB's Speed and Loop are the file's: chosen in its Animation s
   };
   // A Speed chosen and Loop turned over, by keyboard (an item easing in never reads as stable under the pointer).
   const choose = async speed => {
-    await settingsButton.click();
+    await pressPreviewable(page, pane, settingsButton);
     await menu.getByRole('menuitem', { name: /^Animation speed: / }).click();
     await page.getByRole('menuitemradio', { name: `${speed}×`, exact: true }).press('Enter');
     await menu.waitFor({ state: 'detached' });
-    await settingsButton.click();
+    await pressPreviewable(page, pane, settingsButton);
     await menu.getByRole('menuitemcheckbox', { name: 'Loop', exact: true }).press('Enter');
     await page.keyboard.press('Escape');
     await menu.waitFor({ state: 'detached' });
@@ -428,12 +386,12 @@ test("an animated GLB's Speed and Loop are the file's: chosen in its Animation s
   await togglePreview(page, pane, true);
   settingsButton = playbar(pane).getByRole('button', { name: 'Playback settings' });
   assert.deepEqual(await settings(), ['Animation speed: 0.5×', 'false'], 'the file\'s, in Preview too');
-  await pane.getByRole('button', { name: 'Preview settings', exact: true }).click();
+  await pressPreviewable(page, pane, pane.getByRole('button', { name: 'Preview settings', exact: true }));
   await orbit.click();
   assert.equal(await orbit.getAttribute('aria-checked'), 'true');
   await togglePreview(page, pane, false);
   await togglePreview(page, pane, true);
-  await pane.getByRole('button', { name: 'Preview settings', exact: true }).click();
+  await pressPreviewable(page, pane, pane.getByRole('button', { name: 'Preview settings', exact: true }));
   assert.equal(await orbit.getAttribute('aria-checked'), 'false', 'still again');
   assert.deepEqual(await settings(), ['Animation speed: 0.5×', 'false'], 'the file\'s, kept');
   await togglePreview(page, pane, false);
@@ -450,10 +408,11 @@ test('a GLB\'s tools: Select picks a node into Quick Edit, Measure reads metres 
   const at = projector(await page.evaluate(() => window.__cadCamera()), box);
   const chips = () => pane.locator('[data-quick-edit-refs] [data-quick-edit-ref] > button:first-child')
     .evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')));
-  // The base: glTF's 20 mm cube at the origin, drawn Z-up in CAD millimetres (x 0..20, y -20..0, z 0..20).
+  // The native static export groups the rider first and the base second, both named pair.
+  // The base is n1: its 20 mm cube is x 0..20, y -20..0, z 0..20 in CAD millimetres.
   await page.mouse.click(...at([10, -10, 20]));
-  await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedNodes?.join() === 'n0');
-  assert.deepEqual(await chips(), ['base'], 'the node, by its name: model.glb#n0');
+  await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedNodes?.join() === 'n1');
+  assert.deepEqual(await chips(), ['pair (n1)'], 'the shared authored name, disambiguated by its node: static.glb#n1');
 
   // Measure: two points on the base's top, 16 mm apart, each where it is pressed: a mesh's triangles are not snapped to.
   await pane.getByRole('button', { name: 'Measure', exact: true }).click();
@@ -470,9 +429,9 @@ test('a GLB\'s tools: Select picks a node into Quick Edit, Measure reads metres 
   const width = (await page.evaluate(() => window.__cadStage().bounds)).max[0];
   await display(page, { exploded: { enabled: true, amount: 1 } });
   await page.waitForFunction(rest => window.__cadStage().bounds.max[0] > rest + 1, width);
-  // Clip set, by its own slider: the model is cut, and Explode goes off (one motion at a time).
+  // Clip set, by its own slider in its popover: the model is cut, and Explode goes off (one motion at a time).
   await pane.getByRole('button', { name: 'Clip', exact: true }).click();
-  await pane.getByRole('slider', { name: 'Clip amount' }).press('End');
+  await page.getByRole('slider', { name: 'Clip amount' }).press('End');
   await page.waitForFunction(() => window.__cadStage().cut === 1 && window.cadHarness.a.controller.readState().display.exploded?.enabled !== true);
   assert.deepEqual(errors, []);
 });

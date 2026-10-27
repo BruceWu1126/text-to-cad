@@ -15,7 +15,6 @@ import { BASE_VIEWER_THEME } from "../lib/viewer/stageTheme.js";
 import {
   addFloor,
   applyLighting,
-  createSharedRenderOptions,
   RENDER_SCENE_SCALE,
   boundsCorners,
   boundsFromVertices,
@@ -70,20 +69,6 @@ function groundHitAtNdc(camera, x, y, groundZ, includeBehind = false) {
   const depth = -hit.clone().applyMatrix4(camera.matrixWorldInverse).z;
   return depth > 0 || includeBehind ? { hit, depth } : null;
 }
-
-test("shared render options preserve explicit caller-owned values without defaults", () => {
-  const options = createSharedRenderOptions({
-    displayMode: "wireframe",
-    background: false,
-    renderScale: 0
-  });
-
-  assert.equal(options.themeSettings, null);
-  assert.equal(options.display, null);
-  assert.equal(Object.hasOwn(options, "displayMode"), false);
-  assert.equal(options.background, false);
-  assert.equal(options.renderScale, 0);
-});
 
 test("a snapshot draws the viewer's grid for the same settings, its density included", () => {
   const bounds = { min: [0, 0, 0], max: [10, 10, 10] };
@@ -313,9 +298,6 @@ test("macro views fit visible occurrences without collapsing depth inside an ass
       const projected = point.applyMatrix4(records[0].effectMatrix).project(camera);
       assert.ok(projected.z > -1 && projected.z < 1);
     }
-    records[0].tubeGpuState = { active: true };
-    fitCameraDepthToBounds(camera, bounds, { placedObjects: records });
-    assertClose(camera.near, aggregateNear, 1e-8 * scale);
   }
 });
 
@@ -326,11 +308,11 @@ test("a perspective closeup with nothing to fit on keeps near at a fraction of t
     camera.position.set(0, -20 * scale, 15 * scale); camera.lookAt(0, 0, 10 * scale);
     const pivot = new THREE.Vector3(0, 0, 10 * scale);
     const pivotDepth = camera.position.distanceTo(pivot);
-    // The camera stands inside a part's own box, and a routine deforms another: the closeup
+    // The camera stands inside a part's own box, and another has no bounds: the closeup
     // fit has nothing to go on and near falls to the radius safety floor.
     const records = [
       { partBounds: { min: [-5 * scale, -25 * scale, 0], max: [5 * scale, 5 * scale, 20 * scale] } },
-      { partBounds: { min: [-2 * scale, -2 * scale, 9 * scale], max: [2 * scale, 2 * scale, 11 * scale] }, tubeGpuState: { active: true } }
+      { partBounds: null }
     ];
     fitCameraDepthToBounds(camera, bounds, { placedObjects: records });
     const collapsed = camera.near;
@@ -432,7 +414,7 @@ test("output sizing and padding helpers preserve snapshot fallback semantics", (
   assert.equal(framePadding({ output: { padding: -0.02 } }), 0);
   assert.equal(framePadding({ output: { padding: 0.25 } }), 0.15);
   assert.equal(framePadding({ output: { padding: 0.13 } }), 0.13);
-  // One name: the retired `paddingPercent` is refused by the CLI and means nothing here.
+  // One name: `paddingPercent` is not an output key (the CLI refuses it as unknown) and means nothing here.
   assert.equal(framePadding({ output: { paddingPercent: 0.13 } }), 0.04);
 });
 
@@ -519,7 +501,7 @@ test("inspection grid uses explicit appearance and shared Viewer spacing", () =>
 
 test("a posed model's ground is sized from its REST placement, while the floor still drops under it", () => {
   // The viewer sizes the grid and stage from the rest pose so posing never rescales the ground;
-  // a snapshot must too, or `cadgen step snapshot --kinematics` shows a different ground than the
+  // a snapshot must too, or a posed model's snapshot shows a different ground than the
   // viewer does. Only the SIZE follows rest: a pose that reaches below the rest box still pushes
   // the floor down, or the moved part would sink through it.
   const rest = { min: [0, 0, 0], max: [10, 10, 10] };

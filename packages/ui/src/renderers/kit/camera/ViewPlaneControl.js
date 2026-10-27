@@ -1,5 +1,7 @@
 import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { VIEW_CUBE_CORNERS, VIEW_CUBE_EDGES } from "./viewportCameraKit.js";
+import { VIEW_CUBE_CORNERS, VIEW_CUBE_EDGES, viewPlaneTitle } from "./viewportCameraKit.js";
+import { useI18n } from "../../../i18n/react.js";
+import { useControlUsage } from "../../../usage/controls.js";
 
 // The view cube. A cube drawn from the camera's orientation: its faces are the six plane
 // views (click TOP, FRONT, RIGHT...) and its corners are the eight isometric views. The
@@ -12,7 +14,8 @@ const ORIENTATION_FALLBACK = Object.freeze({
   z: [0, 0, 1]
 });
 
-const FACE_LABELS = Object.freeze({ z: "Top", zNeg: "Bottom", yNeg: "Front", y: "Back", x: "Right", xNeg: "Left" });
+// Each face names its side on the cube, in the view's language (`viewCube.face.*`).
+const FACE_SIDES = Object.freeze({ z: "top", zNeg: "bottom", yNeg: "front", y: "back", x: "right", xNeg: "left" });
 const AXIS_COLORS = Object.freeze({ x: "rgb(239, 83, 80)", y: "rgb(76, 175, 80)", z: "rgb(66, 133, 244)" });
 const DEFAULT_VIEW_PLANE_SIZE = "7rem";
 const HOME_CORNER_ID = "iso+-+";
@@ -158,6 +161,9 @@ function ViewPlaneControl({
   // The cube's own subscription to the camera's orientation (`createViewPlaneOrientationStore`):
   // a moving camera re-renders the cube and nothing around it.
   const viewPlaneOrientation = useSyncExternalStore(orientationStore.subscribe, orientationStore.getSnapshot, orientationStore.getSnapshot);
+  // A face, an edge or a corner pressed, or the cube turned by a drag (`usage/controls.js`).
+  const usage = useControlUsage();
+  const { t } = useI18n();
   const [hoveredId, setHoveredId] = useState("");
   const [dragging, setDragging] = useState(false);
   // A press that moves more than a few pixels is a drag that orbits, not a click on a face.
@@ -182,7 +188,7 @@ function ViewPlaneControl({
       const facing = toView(orientation, face.direction)[2];
       const points = faceCorners(face.direction).map((corner) => toScreen(toView(orientation, corner)));
       const labelTransform = faceLabelTransform(orientation, face.direction);
-      return { ...face, facing, points, labelTransform, label: FACE_LABELS[face.id] || face.label || "" };
+      return { ...face, facing, points, labelTransform, label: FACE_SIDES[face.id] ? t(`viewCube.face.${FACE_SIDES[face.id]}`) : face.label || "" };
     })
     // A convex cube: the faces turned toward the camera never overlap, so they are all it draws.
     .filter((face) => face.facing > 0.02);
@@ -242,6 +248,7 @@ function ViewPlaneControl({
       if (!draggedRef.current) {
         draggedRef.current = true;
         setDragging(true);
+        usage.used("view_cube_drag");
       }
       orbitViewCube(moveEvent.clientX - lastX, moveEvent.clientY - lastY);
       lastX = moveEvent.clientX;
@@ -277,9 +284,10 @@ function ViewPlaneControl({
     onClick: (event) => {
       event.stopPropagation();
       if (disabled || draggedRef.current) return;
+      usage.used("view_cube");
       activate();
     },
-    onKeyDown: (event) => activateOnKey(event, () => { if (!disabled) activate(); }),
+    onKeyDown: (event) => activateOnKey(event, () => { if (!disabled) { usage.used("view_cube"); activate(); } }),
     ...hoverProps(id)
   });
 
@@ -300,7 +308,7 @@ function ViewPlaneControl({
         style={sizeStyle}
         onPointerDown={(event) => { event.stopPropagation(); startDrag(event); }}
       >
-        <svg className="absolute inset-0 h-full w-full overflow-visible" viewBox="0 0 100 100" aria-label="View cube">
+        <svg className="absolute inset-0 h-full w-full overflow-visible" viewBox="0 0 100 100" aria-label={t("viewCube.label")}>
           {faces.map((face) => {
             const active = activeViewPlaneFace === face.id;
             const hovered = hoveredId === face.id;
@@ -314,7 +322,7 @@ function ViewPlaneControl({
                 ? "color-mix(in oklch, var(--background) 82%, var(--foreground))"
                 : `color-mix(in oklch, var(--background) ${shade}%, var(--foreground))`;
             return (
-              <g key={face.id} {...pickProps(face.id, face.title, () => activateViewPlaneFace?.(face.id))}>
+              <g key={face.id} {...pickProps(face.id, viewPlaneTitle(face, t), () => activateViewPlaneFace?.(face.id))}>
                 <polygon points={face.points.map((point) => point.join(",")).join(" ")}
                   fill="color-mix(in oklch, var(--background) 90%, var(--foreground))" stroke="var(--background)" strokeWidth="0.6" strokeLinejoin="round" />
                 <path d={roundedInsetFace(face.points)} fill={fill} pointerEvents="none" style={HOVER_TRANSITION} />
@@ -335,7 +343,7 @@ function ViewPlaneControl({
             // An edge is a view too: hovered (or the view on screen) it shows as a bar along the
             // cube's edge, where nothing marked it before.
             return (
-              <g key={edge.id} {...pickProps(edge.id, edge.title, () => activateViewPlaneFace?.(edge.id))}>
+              <g key={edge.id} {...pickProps(edge.id, viewPlaneTitle(edge, t), () => activateViewPlaneFace?.(edge.id))}>
                 <line x1={edge.ends[0][0]} y1={edge.ends[0][1]} x2={edge.ends[1][0]} y2={edge.ends[1][1]}
                   stroke="transparent" strokeWidth="8" />
               </g>
@@ -347,7 +355,7 @@ function ViewPlaneControl({
             const home = corner.id === HOME_CORNER_ID;
             const tone = home ? 55 : 25;
             return (
-              <g key={corner.id} {...pickProps(corner.id, corner.title, () => activateViewPlaneFace?.(corner.id))}>
+              <g key={corner.id} {...pickProps(corner.id, viewPlaneTitle(corner, t), () => activateViewPlaneFace?.(corner.id))}>
                 <circle cx={corner.x} cy={corner.y} r="6" fill="transparent" />
                 <circle cx={corner.x} cy={corner.y} r={home ? 2.4 : 1.8} pointerEvents="none"
                   fill={`color-mix(in oklch, var(--foreground) ${tone}%, var(--background))`}

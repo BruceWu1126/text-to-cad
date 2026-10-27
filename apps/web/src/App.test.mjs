@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 const temporary = await mkdtemp(join(tmpdir(), 'text-to-cad-web-app-'));
 const output = join(temporary, 'app.mjs');
 await build({
-  stdin: { contents: `export {default as App} from './App.tsx'; export {createWebCadClient} from './host/cadClient.js'; export {act,createElement} from 'react'; export {createRoot} from 'react-dom/client'; export {snapshot} from '@text-to-cad/ui/cad-viewer'; export {autoReloadOptions} from './host/useViewerAutoReload.js'; export {createTabStore} from '@text-to-cad/ui/tab-store'; export {sessionTabRecord, TAB_RECORD_KEY} from './persistence/tabRecord.ts';`, resolveDir: fileURLToPath(new URL('.', import.meta.url)) },
+  stdin: { contents: `export {default as App} from './App.tsx'; export {EngineStopped} from './EngineStopped.tsx'; export {createWebCadClient} from './host/cadClient.js'; export {act,createElement} from 'react'; export {createRoot} from 'react-dom/client'; export {snapshot} from '@text-to-cad/ui/cad-viewer'; export {autoReloadOptions} from './host/useViewerAutoReload.js'; export {createTabStore} from '@text-to-cad/ui/tab-store'; export {sessionTabRecord, TAB_RECORD_KEY} from './persistence/tabRecord.ts';`, resolveDir: fileURLToPath(new URL('.', import.meta.url)) },
   bundle: true, platform: 'node', format: 'esm', jsx: 'automatic', outfile: output, loader: { '.css': 'empty', '.svg': 'dataurl' },
   banner: { js: `import {createRequire} from 'node:module'; const require=createRequire(import.meta.url);` },
   plugins: [{ name: 'host-boundaries', setup(plugin) {
@@ -31,12 +31,23 @@ await build({
     });
   } }],
 });
-const { App, createWebCadClient, act, createElement, createRoot, snapshot, autoReloadOptions, createTabStore, sessionTabRecord, TAB_RECORD_KEY } = await import(pathToFileURL(output).href);
+const { App, EngineStopped, createWebCadClient, act, createElement, createRoot, snapshot, autoReloadOptions, createTabStore, sessionTabRecord, TAB_RECORD_KEY } = await import(pathToFileURL(output).href);
 after(() => rm(temporary, { recursive: true, force: true }));
 
+// Each file's document id, as the server derives it from the file's canonical path.
+const IDS = { '/m/one.step': '6f1c2a4e-1b2c-5d3e-8f4a-000000000001', '/m/folder/two.step': '6f1c2a4e-1b2c-5d3e-8f4a-000000000002',
+  '/m/picked.step': '6f1c2a4e-1b2c-5d3e-8f4a-000000000003' };
+const ONE = IDS['/m/one.step'], TWO = IDS['/m/folder/two.step'], PICKED = IDS['/m/picked.step'];
+/** The catalog's answer for one document, asked by its path or its id. */
+function catalogOf(url) {
+  const params = new URL(url, 'http://cad.local').searchParams;
+  const file = params.get('file') || Object.keys(IDS).find(path => IDS[path] === params.get('id'));
+  return { entries: file && IDS[file] ? [{ id: IDS[file], file }] : [] };
+}
+
 test('the web host keeps the URL, the history, the title and the appearance, and hands the rest to the shared viewer', async () => {
-  // A developer's link names the file relative to where this viewer started: the page names it in full.
-  const dom = new JSDOM('<div id="root"></div>', { url: 'http://cad.local/?file=one.step' });
+  // A link names the document by its id, in the URL's path.
+  const dom = new JSDOM('<div id="root"></div>', { url: `http://cad.local/${ONE}` });
   const { window } = dom;
   let systemDark = false;
   const appearanceListeners = new Set();
@@ -52,14 +63,14 @@ test('the web host keeps the URL, the history, the title and the appearance, and
   globalThis.fetch = async (url, init = {}) => {
     libraryCalls.push([url, init.body ? JSON.parse(init.body) : null]);
     if (url === '/__cad/analytics' && init.body) guards.push(init.headers?.['x-cadgen-viewer']);
-    const reply = url === '/__cad/version' ? { notice }
+    const reply = url.startsWith('/__cad/catalog') ? catalogOf(url) : url === '/__cad/version' ? { notice }
       : url === '/__cad/recents' ? { recents: [] } : url === '/__cad/pick' ? { path: '/m/picked.step' }
       : url !== '/__cad/analytics' ? { ok: true }
       : init.body ? { sharing: false, reason: 'choice', policy: 'p' } : { sharing: false, reason: 'untold', policy: 'p' };
     return new Response(JSON.stringify(reply), { headers: { 'content-type': 'application/json' } });
   };
   // The page's own client over this Viewer's routes, its server's description answered here.
-  const client = { ...createWebCadClient({ document: window.document }), serverInfo: async options => { serverCalls.push(options); return { identityToken: 'restarted' }; } };
+  const client = { ...createWebCadClient({ document: window.document }), serverInfo: async options => { serverCalls.push(options); return { identityToken: 'restarted', start: '/m/launch' }; } };
   const root = createRoot(window.document.getElementById('root'));
   const tabStore = createTabStore(sessionTabRecord(window.sessionStorage));
   const viewer = () => snapshot();
@@ -67,10 +78,10 @@ test('the web host keeps the URL, the history, the title and the appearance, and
     const historyAtStart = window.history.length;
     // The update notice comes with the server's description (`main.tsx`): the button draws with the page.
     await act(() => root.render(createElement(App, { client, server: { start: '/m', pick: true, platform: 'darwin' }, tabStore, notice })));
-    // The file, by its absolute path, in the URL too, in place of the relative one; the host's file
-    // menu and links; the tab's store for everything the viewer keeps.
-    assert.equal(viewer().file, '/m/one.step');
-    assert.equal(new URL(window.location.href).search, '?file=/m/one.step');
+    // The document the URL names, as it names it; the host's file menu and links; the tab's store
+    // for everything the viewer keeps.
+    assert.equal(viewer().file, ONE);
+    assert.equal(new URL(window.location.href).pathname, `/${ONE}`);
     assert.equal(window.history.length, historyAtStart);
     assert.equal(viewer().host.files.id, 'local');
     assert.equal(viewer().tabStore, tabStore);
@@ -100,8 +111,8 @@ test('the web host keeps the URL, the history, the title and the appearance, and
     assert.equal(window.document.cookie, '');
 
     // Once the catalog has the file, the page is named after it and it joins the library.
-    await act(() => viewer().onShown('/m/one.step'));
-    assert.equal(window.document.title, 'CAD | one.step');
+    await act(() => viewer().onShown('/m/one.step', ONE));
+    assert.equal(window.document.title, 'one.step');
     assert.deepEqual(libraryCalls.filter(([url]) => url === '/__cad/recents'), [['/__cad/recents', { action: 'open', path: '/m/one.step' }]]);
     // CAD's telemetry, as the CAD app's: the consent read once, its answer in the app menu. (The
     // model shown is counted, by its format and only with consent, as it joins the library.)
@@ -110,6 +121,12 @@ test('the web host keeps the URL, the history, the title and the appearance, and
     viewer().host.usage.used('quickEdit');
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(libraryCalls.filter(([url]) => url === '/__cad/analytics/activity'), [['/__cad/analytics/activity', { quickEdit: true }]]);
+    libraryCalls.splice(libraryCalls.findIndex(([url]) => url === '/__cad/analytics/activity'), 1);
+    // So are the controls a person used, as the shared viewer counted them: names and seconds, nothing else.
+    viewer().host.usage.controls([{ control: 'display_xray', count: 1, seconds: 0 }]);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(libraryCalls.filter(([url]) => url === '/__cad/analytics/activity'),
+      [['/__cad/analytics/activity', { controls: [{ control: 'display_xray', count: 1, seconds: 0 }] }]]);
     libraryCalls.splice(libraryCalls.findIndex(([url]) => url === '/__cad/analytics/activity'), 1);
     // The app menu: Analytics.
     assert.deepEqual(viewer().appSettings.map(setting => [setting.label, setting.checked]),
@@ -134,35 +151,37 @@ test('the web host keeps the URL, the history, the title and the appearance, and
     assert.deepEqual(libraryCalls.filter(([url]) => url === '/__cad/version'), [], 'nothing read: the page started with the notice');
     assert.deepEqual(guards, ['1']);
 
-    // Showing another file is a navigation: pushed, and undone by Back.
+    // Showing another file is a navigation, by the file's id: pushed, and undone by Back.
     const historyLength = window.history.length;
-    await act(() => viewer().onShow('/m/folder\\two.step'));
-    assert.equal(viewer().file, '/m/folder/two.step');
-    assert.equal(new URL(window.location.href).searchParams.get('file'), '/m/folder/two.step');
+    await act(async () => { viewer().onShow('/m/folder\\two.step'); await new Promise(resolve => setTimeout(resolve, 10)); });
+    assert.equal(viewer().file, TWO);
+    assert.equal(new URL(window.location.href).pathname, `/${TWO}`);
     assert.equal(window.history.length, historyLength + 1);
-    await act(() => viewer().onShow('/m/folder/two.step'));
+    await act(async () => { viewer().onShow('/m/folder/two.step'); await new Promise(resolve => setTimeout(resolve, 10)); });
     assert.equal(window.history.length, historyLength + 1, 'the file on screen is no navigation at all');
-    await act(() => { window.history.replaceState({}, '', '?file=/m/one.step'); window.dispatchEvent(new window.PopStateEvent('popstate')); });
-    assert.equal(viewer().file, '/m/one.step');
-    // A URL that names no file shows the home: the library every CAD view shares, and Open.
-    await act(() => { window.history.replaceState({}, '', '/'); window.dispatchEvent(new window.PopStateEvent('popstate')); });
+    await act(() => { window.history.replaceState({}, '', `/${ONE}`); window.dispatchEvent(new window.PopStateEvent('popstate')); });
+    assert.equal(viewer().file, ONE);
+    // A URL that names no document shows the home: the library every CAD view shares, Open, and
+    // the folder of the most recent launch, read again from the server.
+    await act(async () => { window.history.replaceState({}, '', '/'); window.dispatchEvent(new window.PopStateEvent('popstate')); await new Promise(resolve => setTimeout(resolve, 10)); });
     assert.equal(viewer().file, '');
     await act(() => viewer().onShown(null));
-    assert.equal(window.document.title, 'CAD');
+    assert.equal(window.document.title, 'text-to-cad');
     assert.deepEqual(await viewer().library.list(), []);
     assert.equal(libraryCalls.at(-1)[0], '/__cad/recents');
     assert.equal(await viewer().library.thumbnail('abc'), '/__cad/thumbnail?name=abc');
     // A model opened from the home, and one picked with Open, are shown here, each a new step.
     await act(() => viewer().library.open({ path: '/m/folder/two.step' }));
-    assert.equal(viewer().file, '/m/folder/two.step');
+    assert.equal(viewer().file, TWO);
     await act(() => viewer().library.pick());
-    assert.deepEqual(libraryCalls.at(-1), ['/__cad/pick', null]);
-    assert.equal(viewer().file, '/m/picked.step');
-    assert.equal(new URL(window.location.href).searchParams.get('file'), '/m/picked.step');
-    // Back to files leads to the bare URL: the home is a step of the browser's history, as a file is,
+    assert.ok(libraryCalls.some(([url]) => url === '/__cad/pick'));
+    assert.equal(viewer().file, PICKED);
+    assert.equal(new URL(window.location.href).pathname, `/${PICKED}`);
+    // Back to home leads to the bare URL: the home is a step of the browser's history, as a file is,
     // so the browser's Back and Forward walk between them (the page hands no history of its own).
     const beforeHome = window.history.length;
-    await act(() => viewer().onShow(''));
+    await act(async () => { viewer().onShow(''); await new Promise(resolve => setTimeout(resolve, 10)); });
+    assert.equal(new URL(window.location.href).pathname, '/');
     assert.equal(new URL(window.location.href).search, '');
     assert.equal(window.history.length, beforeHome + 1);
     assert.equal(viewer().history, undefined);
@@ -170,6 +189,77 @@ test('the web host keeps the URL, the history, the title and the appearance, and
     globalThis.fetch = fetchBefore;
     await act(() => root.unmount());
     assert.equal(appearanceListeners.size, 0);
+    dom.window.close();
+  }
+});
+
+test('a page whose engine is gone says so in its language, over the page, until the engine answers', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { url: `http://cad.local/${ONE}` });
+  const { window } = dom;
+  const matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  for (const [key, value] of Object.entries({ window, document: window.document, navigator: window.navigator, localStorage: window.localStorage, sessionStorage: window.sessionStorage, matchMedia, IS_REACT_ACT_ENVIRONMENT: true })) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  window.matchMedia = matchMedia;
+  const fetchBefore = globalThis.fetch;
+  // The catalog's answer: nothing listening (a stopped engine), an engine that does not know this
+  // page's token (one started since), or the engine back.
+  let catalog = 'back';
+  globalThis.fetch = async (url) => {
+    if (url.startsWith('/__cad/catalog') && catalog === 'stopped') throw new TypeError('Failed to fetch');
+    if (url.startsWith('/__cad/catalog') && catalog === 'restarted') {
+      return new Response(JSON.stringify({ error: 'engine token required' }), { status: 403, headers: { 'content-type': 'application/json' } });
+    }
+    const reply = url.startsWith('/__cad/catalog') ? catalogOf(url) : url === '/__cad/recents' ? { recents: [] }
+      : url === '/__cad/language' ? { locale: 'ja' } : url === '/__cad/analytics' ? { sharing: false, reason: 'untold', policy: 'p' } : { ok: true };
+    return new Response(JSON.stringify(reply), { headers: { 'content-type': 'application/json' } });
+  };
+  const client = { ...createWebCadClient({ document: window.document }), serverInfo: async () => ({ start: '/m' }) };
+  const root = createRoot(window.document.getElementById('root'));
+  const alert = () => window.document.querySelector('[role="alert"]');
+  try {
+    await act(() => root.render(createElement(App, { client, server: { start: '/m' }, tabStore: createTabStore(sessionTabRecord(window.sessionStorage)), language: 'ja' })));
+    await act(() => client.refresh({ file: ONE }));
+    assert.equal(alert() === null, true, 'nothing is said while the engine answers');
+    catalog = 'stopped';
+    await act(() => client.refresh({ file: ONE }).catch(() => {}));
+    assert.match(alert()?.textContent ?? '', /エンジンが動いていません。戻るとページは自動で再接続します。/);
+    assert.match(alert()?.textContent ?? '', /cadgen run <script>\.py か cadgen viewer を実行して起動してください。/);
+    // The one notice: the page under it, a view's own card among it, is out of reach and unheard.
+    assert.equal(window.document.querySelectorAll('[role="alert"]').length, 1);
+    const under = alert()?.nextElementSibling;
+    assert.deepEqual([under?.hasAttribute('inert'), under?.getAttribute('aria-hidden')], [true, 'true']);
+    assert.doesNotMatch(alert()?.textContent ?? '', /Failed to fetch|\{/, 'never the failure itself');
+    assert.equal(snapshot() !== undefined, true, 'the page stays under it');
+    catalog = 'restarted';
+    await act(() => client.refresh({ file: ONE }).catch(() => {}));
+    // An engine that refuses the token runs: the page's link was replaced (`cadgen server --rotate-token`).
+    assert.match(alert()?.textContent ?? '', /このページのリンクは置き換えられました。/);
+    assert.match(alert()?.textContent ?? '', /cadgen viewer を実行し、表示されたリンクを開いてください。/);
+    assert.doesNotMatch(alert()?.textContent ?? '', /engine token required|エンジンが動いていません/);
+    catalog = 'back';
+    await act(() => client.refresh({ file: ONE }));
+    assert.equal(alert() === null, true, 'gone with the first read that answers');
+    assert.equal(window.document.querySelector('[inert]'), null, 'the page in reach again');
+  } finally {
+    globalThis.fetch = fetchBefore;
+    await act(() => root.unmount());
+    client.dispose();
+    dom.window.close();
+  }
+});
+
+test('the notice says the page reconnects, and how to start the engine', async () => {
+  const dom = new JSDOM('<div id="root"></div>');
+  for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true })) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  const root = createRoot(dom.window.document.getElementById('root'));
+  try {
+    await act(() => root.render(createElement(EngineStopped, { locale: 'en' })));
+    assert.equal(dom.window.document.querySelector('[role="alert"]')?.textContent,
+      'The engine is not running; the page reconnects when it is back.Run cadgen run <script>.py or cadgen viewer to start it.');
+    await act(() => root.render(createElement(EngineStopped, { locale: 'en', refused: true })));
+    assert.equal(dom.window.document.querySelector('[role="alert"]')?.textContent,
+      "This page's link was replaced; the page reconnects once its new link is opened.Run cadgen viewer and open the link it prints.");
+  } finally {
+    await act(() => root.unmount());
     dom.window.close();
   }
 });

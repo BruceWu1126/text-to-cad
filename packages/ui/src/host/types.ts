@@ -1,5 +1,6 @@
 import type { PromptContextPort } from '@text-to-cad/core/prompt';
 import type { FileActions, FileSource } from '../file-viewer/types.js';
+import type { ControlCount } from '../usage/controls.js';
 
 /** Environmental effects are supplied by the app; shared UI never discovers a clipboard. */
 export interface ClipboardPort {
@@ -8,12 +9,13 @@ export interface ClipboardPort {
    * starts inside the gesture that asked for it and takes the text when it arrives.
    */
   writeText(text: string | Promise<string>): Promise<void>;
-  readText(): Promise<string>;
+  /** Read where the host exposes paste from its clipboard. */
+  readText?(): Promise<string>;
   writeImage(image: Blob | Promise<Blob>): Promise<void>;
 }
 /**
  * A Quick Edit's .snapshot.json, made at Copy/Queue/Send: shared input, inline annotation
- * and measurements, with one job per drawn view (`cadgen snapshot --job` renders them).
+ * and measurements, with one job per drawn view (`cadgen snapshot --annotation PACKET --camera authored` draws each).
  * `create` returns compact inline JSON up to 1024 UTF-8 bytes, otherwise writes it and answers its path; `read` fetches it. `createHttpPromptFiles` (`@text-to-cad/core/client`) is the
  * viewer server's.
  */
@@ -22,11 +24,8 @@ export interface PromptFiles {
     name: string; input: string;
     views: Array<Record<string, unknown> & { label: string }>;
     annotation: Record<string, unknown> | null;
-    measurements?: Array<{ start: number[]; end: number[]; label: string; color: string }>;
   }): Promise<{ snapshot: string; inline?: never } | { inline: string; snapshot?: never }>;
   read(path: string): Promise<Blob>;
-  /** Legacy individual-file export for older clients; current annotation and measurement chips do not call it. */
-  save?(request: { name: string; kind: 'annotation' | 'measurement'; data: Record<string, unknown> }): Promise<string>;
 }
 /**
  * What the app menu links to — the running version (its release notes), the source and the
@@ -57,7 +56,19 @@ export interface ViewerLinks {
    */
   open?(url: string): Promise<void>;
 }
+/** One export the page started and has not yet handed to the browser: its request and the name it downloads as. */
+export interface ExportRecord { request: import('@text-to-cad/core/client').ExportRequest; filename: string }
+/** The browser's own downloads. No picker, handle or server path crosses this port. */
+export interface DownloadPort {
+  /** Hands the browser a same-origin file URL to download as `filename`; where it goes is the browser's setting. */
+  save(url: string, filename: string): void;
+  /** The exports still under way when the page was last here, to pick up again. */
+  restore?(): ExportRecord[];
+  /** Keeps the exports under way, for `restore` after a reload; never a file. */
+  remember?(value: ExportRecord[]): void;
+}
 export interface ViewerHost {
+  downloads?: DownloadPort;
   files: FileSource;
   fileActions?: FileActions;
   clipboard: ClipboardPort;
@@ -79,9 +90,11 @@ export interface ViewerHost {
   links?: ViewerLinks;
   /**
    * What the person used, for the host to count: its telemetry, never what they made. Absent, nothing is
-   * counted. `quickEdit`: a Quick Edit reached its destination -- copied, queued or sent.
+   * counted. `quickEdit`: a Quick Edit reached its destination -- copied, queued or sent. `controls`: which of
+   * the view's controls a person used since the last report, and how long a tool that stays on was on
+   * (`usage/controls.js`), at most every minute; absent, they are not counted.
    */
-  usage?: { used(feature: 'quickEdit'): void };
+  usage?: { used(feature: 'quickEdit'): void; controls?(counts: ControlCount[]): void };
   /**
    * `platform` names the keyboard's modifiers (⌘ on `darwin`, Ctrl elsewhere); `reducedMotion` is
    * the app's own motion setting, honoured beside the system's `prefers-reduced-motion`. `compact`

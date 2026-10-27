@@ -11,9 +11,9 @@
 
 /** The kinds Measure snaps to, in its menu's order. */
 export const MEASURE_SNAP_KINDS = Object.freeze([
-  Object.freeze({ id: "vertex", label: "Vertices" }),
-  Object.freeze({ id: "edge", label: "Edges" }),
-  Object.freeze({ id: "face", label: "Faces" }),
+  Object.freeze({ id: "vertex", label: "Vertices", key: "pick.vertices" }),
+  Object.freeze({ id: "edge", label: "Edges", key: "pick.edges" }),
+  Object.freeze({ id: "face", label: "Faces", key: "pick.faces" }),
 ]);
 
 /** Every kind ticked: a file opens snapping to all three. */
@@ -43,9 +43,8 @@ export function restrictMeasurePick(pick, filter, { vertex = null, face = () => 
 const endKey = (positions, index) => `${positions[index]},${positions[index + 1]},${positions[index + 2]}`;
 
 /**
- * The ends of an edge drawn as segments (`positions`: pairs of points, flat, as
- * `buildEdgeLinePositionsFromProxy` lays them out): the points that end exactly one segment. A
- * closed edge (a circle) has none.
+ * The ends of an edge drawn as segments (`positions`: pairs of points, flat): the points that end
+ * exactly one segment. A closed edge (a circle) has none.
  *
  * @param {ArrayLike<number> | null} positions
  * @returns {number[][]}

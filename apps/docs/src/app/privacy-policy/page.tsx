@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 
 export default function PrivacyPolicyPage() {
   return (
-    <LegalPage title="Privacy Policy" updated="October 9, 2026">
+    <LegalPage title="Privacy Policy" updated="October 26, 2026">
       <LegalSection>
         <p>
           This policy describes how Thompson Labs LLC (“we”, “us”) handles personal data for
@@ -31,10 +31,10 @@ export default function PrivacyPolicyPage() {
           <li>
             <strong>Telemetry: usage counts and crash reports, when it is on.</strong> cadgen’s
             long-running parts -- the CAD app that shows models in your agent app (the plugin’s{" "}
-            <code>cad</code> server), the CAD viewer in your browser (<code>cadgen viewer</code>) and
-            the build daemon that builds models for them and for every <code>cadgen</code> command --
-            send to api.texttocad.dev, at most once every five minutes while you use them and once as
-            each stops:
+            <code>cad</code> server) and the CAD viewer in your browser (<code>cadgen viewer</code>), and
+            in earlier releases the build daemon that built models for them -- send to api.texttocad.dev,
+            with what <code>cadgen</code> commands and model scripts counted, at most once every five
+            minutes while you use them and once as each stops:
             <ul>
               <li>
                 a random install ID created on your computer, a random ID for each time one of them
@@ -44,7 +44,7 @@ export default function PrivacyPolicyPage() {
               <li>
                 which of them sent it, the cadgen version, where it was installed from (a plugin
                 directory, the Cursor Marketplace, GitHub, or a development install, as the plugin’s
-                CAD app names it and notes on your computer for the viewer and the build daemon to
+                CAD app names it and notes on your computer for the viewer and cadgen’s commands to
                 report too), your operating
                 system and processor type, and the name and version of your agent app and how it shows
                 CAD (or that it is the browser viewer);
@@ -54,20 +54,29 @@ export default function PrivacyPolicyPage() {
                 failed, and why each failure happened, as one of a fixed set of words cadgen chooses
                 (such as no file at the path the agent gave, no view open, a view that did not answer
                 in time, or a bug in cadgen) -- never the error’s message or the path; how many times
-                you touched a CAD view; how many different files of each format
-                (such as STEP or STL) a CAD view showed for the first time that day, told apart on your
-                computer and sent only as a number; how many models were built, of which format,
-                whether a model script or a <code>cadgen</code> command asked, how they ended
-                (finished, failed, crashed or stopped), how many came from cadgen’s cache, and how long
-                they took; how many snapshots were rendered, of which format, how many failed and how
-                long they took; why each build or snapshot failed, again as one of a fixed set of words
-                cadgen chooses from the kind of error and whose code raised it (such as an error in
-                your model’s code, a CAD operation the geometry kernel could not do, a module or file
-                that is not there, the snapshot browser not starting, or a bug in cadgen) -- never the
-                error’s message, your code or the path; how many times assemblies, mesh exports, posed
-                joints, animations, engineering drawings and Quick Edit were used; and how many of the
-                build daemon’s workers started, crashed or were replaced, and how many builds it turned
-                away for want of memory;
+                you touched a CAD view; which of a CAD view’s tools and settings you used (such as
+                Select and its filters, Measure, Pencil and Shapes and what they draw with, Explode,
+                Clip, the display modes and Grid, Projection, Preview and its settings, playback, a
+                model’s joints, the sidebar’s sections, a part’s menu, the view cube, Quick Edit’s
+                Copy, Queue and Send, Export, the Models and Files menu, Theme and Language, and the
+                home’s search, filters, layout and card menus), each as a name from a fixed list, with how many times each was used and, for a
+                tool that stays on (the tool in hand, or Preview), how many whole seconds it was on --
+                never what you typed, a value you chose (other than a choice that is itself a name on the
+                list, such as a display mode or a clip axis), or the name of a file or a part; how many different live models
+                and files of each format (such as XBF, STEP or STL) a CAD view showed for the first time that day, told apart on your
+                computer and sent only as a number; how many models were built and files exported,
+                with live models counted separately from each exported file format, whether a model script or a <code>cadgen</code> command asked, how they
+                ended (finished, failed, crashed or stopped), how many were reused from an earlier
+                build rather than built again, and how long they took; how many snapshots were drawn,
+                of a live model or which file format, how many failed and how long they took; why each build or snapshot
+                failed, again as one of a fixed set of words cadgen chooses from the kind of error and
+                whose code raised it (such as an error in your model’s code, a CAD operation the
+                geometry kernel could not do, a module or file that is not there, a picture that could
+                not be drawn, or a bug in cadgen) -- never the error’s message, your code or the path;
+                how many times assemblies, mesh exports, posed joints, animations, engineering drawings
+                and Quick Edit were used; and how many of the CAD engine’s build workers started,
+                crashed or were retired (and, from earlier releases, how many builds were turned away for
+                want of memory);
               </li>
               <li>
                 crash reports, when cadgen’s own code fails unexpectedly: the error’s type (such as
@@ -84,8 +93,10 @@ export default function PrivacyPolicyPage() {
             from, which it works out from your IP address; it keeps neither the address nor anything
             finer than the country. Nothing is sent while cadgen sits unused. Telemetry never includes
             your files, models, file or folder names, prompts, tool arguments or anything you type. A{" "}
-            <code>cadgen</code> command sends nothing itself: it hands what it counted (a snapshot, a
-            drawing, a crash) to the build daemon if one is running, which sends it with its own. Like any
+            <code>cadgen</code> command or model script sends nothing itself: it keeps what it counted (a
+            build, an export, a snapshot, a drawing, a crash) on your computer for the next part of cadgen
+            that sends; when nothing has sent it for five minutes, the next <code>cadgen</code> command
+            starts a short-lived sender in the background, which sends it and exits. Like any
             request over the internet, each one also reaches our host with your IP address, the time
             and a user agent (for cadgen, just “cadgen”); see section 4 for what happens to them.
             Section 5 says when telemetry is on and how to turn it off.
@@ -127,7 +138,9 @@ export default function PrivacyPolicyPage() {
           <li>
             Telemetry: only to understand, in aggregate, how many people use text-to-cad and how
             often, how many files they work on and in which formats, what they build and how long it
-            takes, where in the world it is used, which features are used, which agent apps and
+            takes, where in the world it is used, which features are used, which of the CAD views’ tools
+            and settings are used and for how long (so we know which to improve and which matter
+            less), which agent apps and
             operating systems to support, and how often tools, builds and snapshots fail; and, from
             crash reports, to find and fix the bugs behind them.
           </li>
@@ -199,27 +212,27 @@ export default function PrivacyPolicyPage() {
             <code>telemetry</code> setting in cadgen’s settings file, through restarts and updates, and
             one choice counts for every part of cadgen; a no stays a no. Turning telemetry off also turns
             off analytics in an earlier version still installed, and deletes what it sent. Nothing waits to
-            send: what a command counts without cadgen’s build daemon, and what any part of cadgen counted
-            since its last send when it exits, wait in small files beside that setting until the next part
-            of cadgen sends them; turning telemetry off deletes those files too.
+            send: what a command or a model script counts, and what any part of cadgen counted since its
+            last send when it exits, wait in small files beside that setting until the next part of cadgen
+            sends them, or a sender the next command starts once they have waited five minutes; turning
+            telemetry off deletes those files too.
           </li>
           <li>
-            To turn telemetry off, run <code>uvx cadgen telemetry off</code>, use{" "}
-            <strong>Share usage stats</strong> in the menu of the CAD app or the CAD viewer (the logo
+            To turn telemetry off, run <code>uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen telemetry off</code>, use{" "}
+            <strong>Telemetry</strong> in the menu of the CAD app or the CAD viewer (the logo
             at the top left, over any open model), or ask your agent to turn off CAD telemetry.
             Turning it off deletes the install ID on your computer and asks our server to delete
             everything stored under it. Turning it on again starts a new install ID, so nothing links
-            the two. <code>uvx cadgen telemetry on</code> turns it on, and{" "}
-            <code>uvx cadgen telemetry status</code> shows the setting and your install ID.
+            the two. <code>uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen telemetry on</code> turns it on, and{" "}
+            <code>uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen telemetry status</code> shows the setting and your install ID.
           </li>
           <li>
             Setting <code>DO_NOT_TRACK=1</code> or <code>CADGEN_TELEMETRY=0</code> where cadgen runs
-            (your agent app’s environment, or the shell that runs a <code>cadgen</code> command) turns
-            telemetry off for that process and the models it asks cadgen’s build daemon to build,
-            whatever your setting says; <code>CADGEN_TELEMETRY=1</code> turns it on for that process
-            the same way. Neither changes your setting, and the parts of cadgen that process starts to
-            run on their own, the build daemon and a viewer started in the background, go by your
-            setting.
+            (your agent app’s environment, or the shell that runs a <code>cadgen</code> command or a
+            model script) turns telemetry off for that process and the builds it asks for, whatever your
+            setting says; <code>CADGEN_TELEMETRY=1</code> turns it on for that process the same way.
+            Neither changes your setting, and the parts of cadgen that process starts to run on their
+            own, a viewer started in the background and the short-lived sender, go by your setting.
           </li>
           <li>
             Setting <code>CADGEN_UPDATE_CHECK=0</code> where cadgen runs turns the daily version check

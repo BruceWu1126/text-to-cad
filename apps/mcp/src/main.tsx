@@ -2,9 +2,10 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createCrashReporter, type CadPageCrash } from '@text-to-cad/core/client';
 import { version } from '../package.json';
-import App from './App';
-import Notice from './Notice';
-import { createBridge, type HostContext } from './host/bridge';
+import Connection from './Connection';
+import Notice, { noticeTranslator } from './Notice';
+import { createBridge, type HostContext, type ToolResult } from './host/bridge';
+import { createChannel, declaresServerTools } from './host/channel';
 import { readPresentation } from './host/presentation';
 import { createServer, PROTOCOL, readLaunch, toolText, type Launch } from './host/server';
 import { createTunnelClient, createTunnelFetch } from './host/tunnel';
@@ -21,12 +22,17 @@ const reportCrash = createCrashReporter(crash => sendCrash(crash), { fileOf: chu
 window.addEventListener('error', event => reportCrash(event.error));
 window.addEventListener('unhandledrejection', event => reportCrash(event.reason));
 
+// The notices this page shows itself, before a view knows the person's language setting: in the
+// host's locale once it has said one, else the frame's browser languages.
+let hostLocale: string | undefined;
+const say = (key: string, params?: Record<string, unknown>) => noticeTranslator(hostLocale)(key, params);
+
 const element = document.getElementById('root');
 if (!element) throw new Error('Missing #root mount point.');
 const root = createRoot(element, {
   onUncaughtError: error => {
     reportCrash(error);
-    root.render(<Notice title="CAD stopped" message="Something went wrong in this view. Close the tab and open CAD again." details={error instanceof Error ? `${error.name}: ${error.message}` : String(error)} />);
+    root.render(<Notice title={say('cad.stopped.title')} message={say('cad.stopped.message')} details={error instanceof Error ? `${error.name}: ${error.message}` : String(error)} t={say} />);
   },
   // Logged as React logs one, and counted: the page went on, with the view's "could not display".
   onCaughtError: (error, info) => { console.error(error, info.componentStack); reportCrash(error, { handled: true }); },
@@ -42,36 +48,43 @@ async function start() {
   const presentation = readPresentation();
   const bridge = createBridge(window.parent);
   bridge.onHostContext(applyTheme);
-  const server = createServer(bridge);
+  bridge.onHostContext(context => { hostLocale = context.locale || hostLocale; });
   // What to show comes as the result of the tool that opened this view.
-  const launched = new Promise<Launch>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('CAD did not receive anything to show. Close this tab and open CAD again.')), 30_000);
+  const launched = new Promise<{ launch: Launch; result: ToolResult }>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(say('cad.nothingToShow'))), 30_000);
     const stop = bridge.onToolResult(result => {
       const launch = readLaunch(result);
       if (!launch && !result.isError) return;
       clearTimeout(timer);
       stop();
-      if (launch) resolve(launch); else reject(new Error(toolText(result, 'CAD could not open.')));
+      if (launch) resolve({ launch, result }); else reject(new Error(toolText(result, say('cad.couldNotOpen'))));
     });
   });
   try {
     await bridge.initialize({ name: 'CAD', version }, presentation === 'inline' ? { displayModes: ['inline', 'fullscreen'] } : undefined);
-    const reporting = createTunnelClient(createTunnelFetch(server), { pollIntervalMs: 0 });
-    sendCrash = crash => reporting.reportActivity({ crash });
-    waiting.splice(0).forEach(sendCrash);
+    hostLocale = bridge.hostContext.locale || hostLocale;
     // The page starts on its launch alone: the launch carries what the server is (its protocol,
     // version and platform). One from another build -- a tab the host restored after an update, a
     // past chat's card -- says so: this page reads only its own protocol's.
-    const launch = await launched;
+    const { launch, result } = await launched;
     if (launch.protocol !== PROTOCOL) {
-      root.render(<Notice title="CAD was updated" message="Close this tab and open CAD again to use the new version." details={`view ${PROTOCOL} · launch ${launch.protocol}${launch.version ? ` (${launch.version})` : ''}`} />);
+      root.render(<Notice title={say('cad.updated.title')} message={say('cad.updated.message')} t={say} details={`view ${PROTOCOL} · launch ${launch.protocol}${launch.version ? ` (${launch.version})` : ''}`} />);
       return;
     }
-    root.render(<StrictMode><App bridge={bridge} server={server} launch={launch} presentation={presentation} /></StrictMode>);
+    const token = result._meta?.['dev.texttocad/httpToken'];
+    if (typeof token !== 'string' || !token) throw new Error(say('cad.noCapability'));
+    // Whether the host carries this page's calls to CAD's server: what it declared, until a call says
+    // (`host/channel.ts`). A host that refuses them all gets the CAD Viewer's page instead.
+    const channel = createChannel(declaresServerTools(bridge.hostCapabilities));
+    const server = createServer(bridge, token, channel);
+    const reporting = createTunnelClient(createTunnelFetch(server), { pollIntervalMs: 0 });
+    sendCrash = crash => reporting.reportActivity({ crash });
+    waiting.splice(0).forEach(sendCrash);
+    root.render(<StrictMode><Connection bridge={bridge} server={server} channel={channel} launch={launch} presentation={presentation} /></StrictMode>);
   } catch (error) {
-    root.render(<Notice title="CAD could not open" message={error instanceof Error ? error.message : String(error)} details={`CAD ${version}`} />);
+    root.render(<Notice title={say('cad.couldNotOpenTitle')} message={error instanceof Error ? error.message : String(error)} details={`CAD ${version}`} t={say} />);
   }
 }
 
-if (window.parent === window) root.render(<Notice title="CAD" message="This page runs inside an agent app. Install the CAD plugin to use it." />);
+if (window.parent === window) root.render(<Notice title="CAD" message={say('cad.outsideAgent')} t={say} />);
 else void start();

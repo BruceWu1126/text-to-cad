@@ -1,4 +1,4 @@
-import { buildCadRefToken, parseCadRefSelector, parseCadRefToken } from '../lib/cadRefs.js';
+import { buildCadRefToken, isDocumentId, isEngineRefFile, isEngineSelector, isLabelSelector, parseCadRefToken } from '../lib/cadRefs.js';
 
 let operationSequence = 0;
 const operationNamespace = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
@@ -13,6 +13,9 @@ export function validatePromptReference(reference) {
     // A file is named by its absolute path, `/`-separated (`/a/b.step`, `C:/a/b.step`).
     requireValue(typeof resource.path === 'string' && /^(?:[A-Za-z]:)?\//.test(resource.path) && !/[\\\0]/.test(resource.path)
       && resource.path.replace(/^(?:[A-Za-z]:)?\//, '').split('/').every(part => part && part !== '.' && part !== '..'), 'file paths must be normalized and absolute');
+  } else if (resource.kind === 'cad-model') {
+    // A document the engine holds by its id alone (a model's): its id, never a path.
+    requireValue(isDocumentId(resource.path), 'model references name the document by its id');
   } else {
     requireValue(resource.kind === 'url' && typeof resource.url === 'string', 'unknown resource kind');
     let url; try { url = new URL(resource.url); } catch { /* Report the contract error below. */ }
@@ -21,14 +24,16 @@ export function validatePromptReference(reference) {
   requireValue(resource.revision === undefined || typeof resource.revision === 'string', 'revision must be a string');
   requireValue(reference.label === undefined || typeof reference.label === 'string', 'label must be text');
   if (target.kind === 'text-range') {
+    requireValue(resource.kind !== 'cad-model', 'a model has no text ranges');
     requireValue(position(target.start) && position(target.end), 'invalid text range');
     requireValue(target.end.line > target.start.line || (target.end.line === target.start.line && target.end.character >= target.start.character), 'range end precedes its start');
   } else if (target.kind === 'cad-selector') {
-    requireValue(resource.kind === 'workspace-file', 'CAD selectors require a workspace file');
-    requireValue(Array.isArray(target.selectors) && target.selectors.length > 0 && target.selectors.every(selector => {
-      const parsed = typeof selector === 'string' && selector === selector.trim() ? parseCadRefSelector(selector) : null;
-      return parsed && parsed.selectorType !== 'opaque';
-    }), 'invalid CAD selector');
+    requireValue(resource.kind === 'workspace-file' || resource.kind === 'cad-model', 'CAD selectors require a file or a model');
+    // A document the engine draws (an .xbf, a STEP, a model) is named in the engine's grammar; any
+    // other file by its renderer's labels (cadRefs.js).
+    const valid = isEngineRefFile(resource.path) ? isEngineSelector : isLabelSelector;
+    requireValue(Array.isArray(target.selectors) && target.selectors.length > 0 && target.selectors.every(selector => valid(selector)),
+      'invalid CAD selector');
   } else requireValue(target.kind === 'whole-resource', 'unknown reference target');
   return reference;
 }
@@ -94,13 +99,13 @@ export function promptReferenceIds(reference) {
 
 /**
  * A line that is one reference and nothing else — a file's absolute path and the ids in it, as a
- * copied reference is written (`/models/base.step#o1.f2`) — as that reference; null for any other.
+ * copied reference is written (`/models/base.step#base/face 3`) — as that reference; null for any other.
  */
 export function parsePromptReference(text) {
   const line = String(text || '').trim();
   const parsed = line ? parseCadRefToken(line) : null;
   if (!parsed || parsed.token.trim() !== line || !parsed.selectors.length) return null;
-  try { return validatePromptReference({ resource: { kind: 'workspace-file', path: parsed.cadPath }, target: { kind: 'cad-selector', selectors: parsed.selectors } }); }
+  try { return validatePromptReference({ resource: { kind: isDocumentId(parsed.cadPath) ? 'cad-model' : 'workspace-file', path: parsed.cadPath }, target: { kind: 'cad-selector', selectors: parsed.selectors } }); }
   catch { return null; }
 }
 

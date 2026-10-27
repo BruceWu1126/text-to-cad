@@ -1,52 +1,18 @@
-import { createInspectEnvironmentResource, hasAuthoredMaterials } from "./inspectEnvironment.js";
-import { resolveCadEdgeSettings } from "./cadInk.js";
+import { createInspectEnvironmentResource } from "./inspectEnvironment.js";
 import * as THREE from "three";
 import { createAnnotationLayer, normalizeAnnotation, ANNOTATION_REFERENCE_HEIGHT_PX } from "./annotation.js";
-import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
-import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { Line2 } from "three/examples/jsm/lines/Line2.js";
 import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
-import {
-  displayModeIsWireframe,
-  CAMERA_PROJECTION,
-  resolveDisplayEdgeSettings
-} from "./displaySettings.js";
-import {
-  buildModel,
-  normalizedSelectorValues
-} from "./cadScene.js";
-import {
-  applyDisplayRecordTransform
-} from "./displayRecordTransform.js";
-import {
-  resolveTopologyDisplayEdgeRuntimes,
-  shouldRenderTopologyDisplayEdges,
-  shouldUseRecordTopologyEdgeTransforms
-} from "./topologyDisplayEdgeRuntime.js";
-import {
-  screenSpaceLineDeviceResolution,
-  syncScreenSpaceLineMaterialResolution
-} from "./renderEdges.js";
-import {
-  syncTopologyDisplayEdgeLine
-} from "../lib/viewer/topologyDisplayEdgeLine.js";
-import { syncRuntimeStepClipPlane } from "../lib/viewer/modelRuntime.js";
+import { CAMERA_PROJECTION } from "./displaySettings.js";
 import { createSceneClip } from "../lib/viewer/sceneClip.js";
-import { disposeSectionCaps } from "../lib/viewer/sectionCaps.js";
-import {
-  applyExplodedViewProgress,
-  clearExplodedViewRecords,
-  computeExplodedViewLayout,
-  explodedViewBounds
-} from "../lib/viewer/explodedView.js";
+import { applySceneRig, renderWithSceneRig, sceneRigFor } from "../lib/viewer/sceneRig.js";
 import {
   addFloor as addSharedFloor,
   applyLighting as applySharedLighting,
   boundsFromVertices as sharedBoundsFromVertices,
   colorTextureFromBackground as sharedColorTextureFromBackground,
   configurePngRenderer,
-  createSharedRenderOptions,
   fitPerspectiveCamera as fitSharedPerspectiveCamera,
   fitCameraDepthToBounds,
   fitOrthographicCamera,
@@ -56,16 +22,12 @@ import {
   RENDER_SCENE_SCALE,
   RENDER_VIEW_PRESETS,
   rendererDataUrlWithOptionalLabel as sharedRendererDataUrlWithOptionalLabel,
-  resolveRenderView,
-  shouldBurnInViewLabels as sharedShouldBurnInViewLabels
+  resolveRenderView
 } from "./renderOptions.js";
 import {
   normalizeCameraSpec
 } from "./camera.js";
-import {
-  resolveDisplayMaterialSettings,
-  resolveViewSceneSettings
-} from "./sceneSettings.js";
+import { resolveViewSceneSettings } from "./sceneSettings.js";
 import { viewFeaturesForKind } from "./viewSettings.js";
 import {
   createEnvironmentResource,
@@ -75,7 +37,7 @@ import {
   applyPhotographicStudio,
   disposePhotographicStudio
 } from "./photographicStudio.js";
-import { PHOTOGRAPHIC_STUDIO_FRAME, PHOTOGRAPHIC_STUDIO_MATERIAL_SETTINGS } from "./photographicStudioRig.js";
+import { PHOTOGRAPHIC_STUDIO_FRAME } from "./photographicStudioRig.js";
 import { validateSnapshotRenderJob } from "./snapshotJobValidation.js";
 import { isSoftwareWebGlRenderer } from "../lib/viewer/webglSupport.js";
 
@@ -84,12 +46,12 @@ import { isSoftwareWebGlRenderer } from "../lib/viewer/webglSupport.js";
 const SNAPSHOT_STUDIO_FRAME = Object.freeze({ multisample: 0 });
 
 /**
- * How many samples a snapshot's studio frame converges over: a still's, all of them; a video's
- * frame (a `frameBounds` capture) and a software renderer's, one, which is a whole picture of
- * its own (its occlusion smoothed, its shadows the key's own) at the cost of one draw.
+ * How many samples a snapshot's studio frame converges over: a still's, all of them; a software
+ * renderer's, one, which is a whole picture of its own (its occlusion smoothed, its shadows the
+ * key's own) at the cost of one draw.
  */
-export function snapshotStudioSamples({ video = false, softwareRendering = false } = {}) {
-  return video || softwareRendering ? 1 : PHOTOGRAPHIC_STUDIO_FRAME.stillSamples;
+export function snapshotStudioSamples({ softwareRendering = false } = {}) {
+  return softwareRendering ? 1 : PHOTOGRAPHIC_STUDIO_FRAME.stillSamples;
 }
 
 const DEFAULT_RENDER_SCALE = 1;
@@ -109,10 +71,6 @@ const RENDER_SCENE_SCALE_SETTINGS = Object.freeze({
     minCameraFar: 10
   })
 });
-
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
-}
 
 function toFiniteNumber(value, fallback = 0) {
   const numericValue = Number(value);
@@ -193,10 +151,6 @@ function configureRenderer(width, height, job, context) {
     // inspection scene takes its exposure from the theme.
     toneMappingExposure: context.theme?.lighting?.toneMappingExposure ?? 1
   });
-}
-
-function shouldBurnInViewLabels(job = {}) {
-  return sharedShouldBurnInViewLabels(job);
 }
 
 function rendererDataUrlWithOptionalLabel(renderer, label, job, size) {
@@ -369,25 +323,24 @@ function roundedBounds(bounds) {
   return min && max ? { min, max } : null;
 }
 
-// The parts inventory: what is in this model and what can be selected.
+// The parts inventory of a family scene (a GLB, an STL, a 3MF, a robot, an engine document):
+// what it drew.
 //
-// This is the ONLY output whose size grows with the model -- everything else in the CLI
-// surface is constant (a 600-part assembly logs the same ~100 bytes a single part does).
+// This is the ONLY output whose size grows with the model -- everything else a job answers is
+// constant (a 600-part assembly logs the same ~100 bytes a single part does).
 // So it is the one payload where redundancy is measured in tens of thousands of tokens:
 // on a 600-part rover the previous shape was 294 KB, of which `id`, `occurrenceId` and
 // `ref` were the same string three times over (identical in 600/600 parts), `label`
 // duplicated `name` (600/600), and the coordinates carried 16 significant figures.
 //
-// `ref` survives rather than `id`/`occurrenceId` because it is the form that goes
-// straight back into `--focus` / `--hide` / `inspect`; the bare id is one string slice
-// away for anyone who needs it.
+// `ref` survives rather than `id`/`occurrenceId` because it is the form a reader hands
+// back to address the part; the bare id is one string slice away for anyone who needs it.
 // A label ref (`#eye_shank`) addresses a part by the `name` already in every row, so this
 // payload deliberately does NOT carry a second `labelRef` identifier -- that would undo the
-// size work above for a string the row already contains. `inspect refs` reports the exact
-// paste spelling, including the numbered form for duplicated labels, where the output is
-// small enough for it to be free.
-export function listRenderableParts(meshData) {
-  return toArray(meshData.parts).map((part, index) => {
+// size work above for a string the row already contains. A duplicated label's numbered
+// aliases (`#wheel_1`, `#wheel_2`) are spelled out where the bare label is refused.
+export function listRenderableParts(parts) {
+  return toArray(parts).map((part, index) => {
     const occurrenceId = String(part?.occurrenceId || part?.id || "");
     return {
       ref: occurrenceId ? `#${occurrenceId}` : "",
@@ -437,9 +390,8 @@ export function renderJobContext(meshData, job = {}) {
   const mode = String(job.mode || "view").trim().toLowerCase();
   const sceneScale = resolveRenderSceneScale(job);
   const sourceKind = String(job.resolved?.kind || job.kind || "").trim().toLowerCase();
-  const stepDisplayEnabled = sourceKind === "step" || sourceKind === "stp";
   const sceneSettings = resolveViewSceneSettings({
-    // Appearance is `display.appearance`; the CLI default is Light.
+    // Appearance is `display.appearance`; a job's default is Light.
     appearance: "light",
     camera: job.camera || null,
     display: job.display ?? {},
@@ -457,39 +409,6 @@ export function renderJobContext(meshData, job = {}) {
   const displayMode = displaySettings.mode;
   const bounds = meshData.bounds || boundsFromVertices(meshData.vertices || []);
   const outputs = toArray(job.outputs);
-  const warnings = [];
-  const sharedRenderOptions = createSharedRenderOptions({
-    themeSettings: theme,
-    display: displaySettings,
-    camera: sceneSettings.camera,
-    sceneScale,
-    clip: displaySettings.clip,
-    selection: job.selection || null,
-    floor: theme?.floor || null,
-    background: theme?.background || null,
-    lighting: theme?.lighting || null,
-    renderScale: job.output?.renderScale ?? sceneSettings.quality.renderScale
-  });
-  const displayEdgeSettings = resolveCadEdgeSettings(
-    resolveDisplayEdgeSettings(displaySettings)
-  );
-  const edgeSettings = {
-    ...displayEdgeSettings,
-    enabled: sceneSettings.view.edges.enabled,
-    depthTest: sceneSettings.view.edges.visibility !== "all"
-  };
-  const wireframeMode = displayModeIsWireframe(displayMode);
-  const edgesVisible = sceneSettings.view.edges.enabled;
-  const selectorRuntime = job.stepParameters?.selectorRuntime || job.selectorRuntime || null;
-  const displayEdgeRuntime = job.stepParameters?.displayEdgeRuntime || job.displayEdgeRuntime || null;
-  const topologyDisplayEdgesVisible = shouldRenderTopologyDisplayEdges({
-    edgesVisible,
-    wireframeMode,
-    cadEdgeSource: stepDisplayEnabled,
-    displayEdgeRuntime,
-    selectorRuntime,
-    edgeSettings
-  });
   return {
     mode,
     theme,
@@ -498,111 +417,21 @@ export function renderJobContext(meshData, job = {}) {
     quality: sceneSettings.quality,
     sceneScale,
     sourceKind,
-    stepDisplayEnabled,
     displaySettings,
     projection,
     displayMode,
-    wireframeMode,
-    edgesVisible,
     bounds,
     outputs,
-    warnings,
-    sharedRenderOptions,
-    edgeSettings,
-    selectorRuntime,
-    displayEdgeRuntime,
-    topologyDisplayEdgesVisible
+    warnings: []
   };
-}
-
-export function modelOptionsForRenderJob(context, job = {}) {
-  const selection = job.selection || {};
-  const keepsAllParts = context.mode === "view";
-  const filterSelection = keepsAllParts
-    ? {
-        hide: selection.hide
-      }
-    : selection;
-  // View/orbit focus keeps every part in the scene so the frame retains
-  // assembly context (hide is the removal filter); the focused refs instead
-  // ghost the rest of the model through the same focusedPartId path the
-  // interactive viewer uses. List mode isolates via filterSelection.
-  const focusedPartId = keepsAllParts ? normalizedSelectorValues(selection.focus) : [];
-  const renderEnabled = context.sceneSettings.view.lighting.enabled;
-  return {
-    theme: context.theme ?? undefined,
-    // Render's finish is the studio's, not a theme's. CAD takes its material
-    // settings from the resolved theme.
-    materialSettings: renderEnabled
-      ? resolveDisplayMaterialSettings(
-          PHOTOGRAPHIC_STUDIO_MATERIAL_SETTINGS,
-          context.displaySettings.partColor
-        )
-      : undefined,
-    appearance: context.sceneSettings.appearance,
-    edgeSettings: context.topologyDisplayEdgesVisible
-      ? { ...context.edgeSettings, enabled: false }
-      : context.edgesVisible
-        ? context.edgeSettings
-        : { ...context.edgeSettings, enabled: false },
-    materialOverrides: context.sceneSettings.materialOverrides,
-    receiveShadows: renderEnabled,
-    displayMode: context.displayMode,
-    surfaceSettings: context.sceneSettings.view.surfaces,
-    applyDisplayModeEdgePolicy: false,
-    scale: context.sceneScale,
-    clip: context.sharedRenderOptions.clip,
-    silhouette: context.topologyDisplayEdgesVisible && context.edgeSettings.silhouette === true,
-    renderPartsIndividually: true,
-    selection: {
-      ...selection,
-      ...(focusedPartId.length ? { focusedPartId } : {}),
-      showEdges: context.edgesVisible
-    },
-    edgeRendering: {
-      mode: "screen-space",
-      Line2,
-      LineGeometry,
-      LineSegments2,
-      LineSegmentsGeometry,
-      LineMaterial
-    },
-    callbacks: {
-      onWarning: (warning) => {
-        const message = String(warning?.message || warning?.title || "").trim();
-        if (message) {
-          context.warnings.push(message);
-        }
-      },
-      // The choreography half of a still: `{clip, elapsedSec}` rides the channel
-      // cadScene's effects pass already reads (the docs hero drives playback
-      // through the same key), so the clip's frame merges over the pose exactly
-      // as it does in the viewer — one applySceneState, no snapshot-side twin.
-      animation: job.stepAnimation || null
-    },
-    filterSelection
-  };
-}
-
-// Kinematics is model state in both Inspect and Render. Per-output values take
-// precedence so a multi-output capture can pose each frame independently.
-export function stepParametersForSnapshotOutput(output = {}, job = {}) {
-  return output.stepParameters || job.stepParameters || null;
-}
-
-// Inspect gives authored finishes a small neutral environment to reflect. A family's scene
-// says so itself (`keepsAuthoredFinish`, the viewer's viewport reads the same flag); a CAD
-// model built by `buildModel` answers from its composed parts.
-function keepsAuthoredFinish(model) {
-  return typeof model.keepsAuthoredFinish === "boolean" ? model.keepsAuthoredFinish : hasAuthoredMaterials(model.meshData);
 }
 
 export function renderModel(_THREE, model, viewportOptions = {}) {
   if (!model?.root) {
-    throw new Error("renderModel requires a model returned by buildModel");
+    throw new Error("renderModel requires a family's scene as the headless stage holds it (headlessSceneModel)");
   }
   const job = viewportOptions.job || {};
-  const context = viewportOptions.context || renderJobContext(model.meshData, job);
+  const context = viewportOptions.context || renderJobContext({ bounds: model.bounds }, job);
   const sceneBuildStarted = performance.now();
   const firstSize = outputSize(context.outputs[0] || {}, job);
   const renderer = configureRenderer(firstSize.width, firstSize.height, job, context);
@@ -615,17 +444,16 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
     ? { ...photographicConfiguration, backdrop: { ...photographicConfiguration.backdrop, transparent: true, opacity: 0 } }
     : photographicConfiguration;
   // What the GROUND is sized from. The viewer sizes the grid, the stage and the studio floor from
-  // the model's rest placement, so posing or playing never rescales the ground under it; the CLI
-  // follows the same rule so a posed snapshot shows the ground the viewer shows. A video passes
-  // `floorBounds` (the union across its frames) and keeps it for everything.
+  // the model's rest placement, so posing or playing never rescales the ground under it; a still
+  // follows the same rule, so it shows the ground the viewer shows.
   const restGroundBounds = model.restBounds || null;
   const studioRuntime = studioConfiguration ? { scene, renderer, modelBounds: model.bounds || context.bounds } : null;
   if (studioRuntime) {
     applyPhotographicStudio(THREE, studioRuntime, studioConfiguration, {
-      bounds: viewportOptions.floorBounds || studioRuntime.modelBounds,
+      bounds: studioRuntime.modelBounds,
       // The viewer sizes the studio floor from the REST placement (`groundBounds`), so a posed
-      // still must too, or the CLI and the viewer disagree about how big the ground is.
-      groundBounds: viewportOptions.floorBounds ? null : restGroundBounds,
+      // still must too, or the still and the viewer disagree about how big the ground is.
+      groundBounds: restGroundBounds,
       shadowMapSize: context.quality.shadowMapSize,
       // Each kept pixel averages renderScale² drawn ones: the floor's dither is drawn that much wider.
       ditherScale: renderer.getPixelRatio(),
@@ -638,12 +466,21 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
     backgroundTexture = colorTextureFromBackground(context.theme.background || {}, firstSize.width, firstSize.height);
     scene.background = backgroundTexture;
   }
+  // A family's scene that brings its own lighting (`sceneContract.js`'s `rig`, or `rigFor` the look
+  // it wears) is lit by it outside Render, in place of the theme's rig, as the viewer's viewport
+  // lights it (`sceneRig.js`): its environment is the scene's, and it is drawn as the rig blends
+  // (`renderWithSceneRig`, in `captureModel`).
+  const ownRig = photographicConfiguration ? null : sceneRigFor(model.scene, model.look);
+  const sceneRig = ownRig ? applySceneRig(THREE, { scene, renderer }, ownRig) : null;
   // PMREM generation is synchronous, but `ready` stays a promise so a failure
   // reaches the caller after it holds a viewport it can dispose.
   const ready = Promise.resolve().then(() => {
+    if (sceneRig) return null;
     const resource = context.sceneSettings.view.lighting.enabled
       ? createEnvironmentResource(renderer, studioConfiguration, { size: context.quality.environmentMapSize })
-      : keepsAuthoredFinish(model) ? createInspectEnvironmentResource(THREE) : null;
+      // Inspect gives authored finishes a small neutral environment to reflect: a family's scene
+      // says whether it keeps one (`keepsAuthoredFinish`), as the viewer's viewport reads it.
+      : model.keepsAuthoredFinish ? createInspectEnvironmentResource(THREE) : null;
     if (disposed) {
       disposeEnvironmentResource(resource);
       return null;
@@ -652,39 +489,23 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
     scene.environment = resource?.texture || null;
     return resource;
   });
-  if (!context.sceneSettings.view.lighting.enabled) applyLighting(
+  if (!sceneRig && !context.sceneSettings.view.lighting.enabled) applyLighting(
     scene,
     context.theme,
     model.bounds || context.bounds,
     context.sceneScale,
     context.quality.shadowMapSize
   );
-  // CAD edges are drawn with screen-space lines; only a CAD model has them (a family's scene
-  // from `headlessScene.js` has no edges, which is the viewer's rule for it too).
-  if (model.runtime) {
-    Object.assign(model.runtime, {
-      Line2,
-      LineGeometry,
-      LineSegments2,
-      LineSegmentsGeometry,
-      LineMaterial
-    });
-  }
   scene.add(model.root);
-  // `floorBounds` is what a locked camera will frame, for a caller that knows
-  // more than this pose does. The stage plane and grid are sized and centred on
-  // whatever they are handed, and `model.bounds` is the pose the model happens
-  // to be in right now — right for a still, which is posed before it gets here,
-  // and wrong for a video, whose camera frames the union across its frames and
-  // would otherwise show the grid's edge with the moving part walking off it.
+  // The stage plane and grid are centred on the model as posed and sized from rest, as the
+  // viewer's are.
   const floor = addFloor(
     scene,
-    viewportOptions.floorBounds || model.bounds || context.bounds,
+    model.bounds || context.bounds,
     { ...context.theme, floor: { enabled: false }, colorMode: context.sceneSettings.appearance },
     context.sceneScale,
     context.displaySettings.guides,
-    // A still is sized from rest, as the viewer is; a video keeps its union box for both.
-    viewportOptions.floorBounds ? null : restGroundBounds
+    restGroundBounds
   );
   const orthographicCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.001, 10000);
   const perspectiveCamera = new THREE.PerspectiveCamera(48, firstSize.width / Math.max(firstSize.height, 1), 0.1, 50000);
@@ -697,6 +518,8 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
     perspectiveCamera,
     studioRuntime,
     studioConfiguration,
+    // The scene's own rig, up on this stage (`applySceneRig`), or null.
+    sceneRig,
     // The grid as drawn, for the depth fit: the viewer fits its near and far planes to it too.
     gridBounds: floor?.gridBounds ?? null,
     context,
@@ -707,10 +530,10 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
       disposed = true;
       viewport.annotationLayer?.layer.dispose();
       viewport.annotationLayer = null;
-      if (viewport.clipRuntime) disposeSectionCaps(viewport.clipRuntime);
       viewport.sceneClip?.dispose();
       model.dispose?.();
       scene.remove?.(model.root);
+      sceneRig?.dispose();
       if (studioRuntime) disposePhotographicStudio(studioRuntime);
       if (scene.environment === environmentResource?.texture) scene.environment = null;
       if (scene.background === environmentResource?.texture) scene.background = null;
@@ -732,106 +555,6 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
   return viewport;
 }
 
-// What the viewer's Clip sync (`syncRuntimeStepClipPlane`) reads of its runtime, over this
-// snapshot's model: the plane is measured against the model at rest, as the viewer measures it,
-// and the cut is capped as it is there. One per viewport, so its caps are kept and released.
-function viewportClipRuntime(viewport) {
-  const { model } = viewport;
-  viewport.clipRuntime ??= {
-    THREE,
-    renderer: viewport.renderer,
-    scene: viewport.scene,
-    cadScene: model,
-    modelGroup: model.runtime.modelGroup,
-    get displayRecords() { return model.displayRecords; },
-    get topologyDisplayEdgeLine() { return model.runtime.topologyDisplayEdgeLine; },
-    get zeroPoseBounds() { return model.restBounds; },
-    get modelRadius() { return model.runtime.modelRadius; },
-    modelBounds: null
-  };
-  return viewport.clipRuntime;
-}
-
-function displayRecordPartIds(displayRecords = []) {
-  return Array.from(new Set(
-    toArray(displayRecords)
-      .map((record) => String(record?.partId || "").trim())
-      .filter((partId) => partId && partId !== "__model__")
-  ));
-}
-
-// `layoutBounds` is what the layout radiates from: the model's REST placement, as the viewer's
-// (`useStepExplode`) is, never the bounds as posed. `bounds` is what the returned box falls back to.
-function applyViewportExplodedView(viewport, bounds, layoutBounds = bounds) {
-  const { context, model, THREE: RuntimeTHREE } = viewport;
-  const settings = context.displaySettings?.exploded;
-  const THREEImpl = RuntimeTHREE || THREE;
-  const resetExplodedView = () => {
-    clearExplodedViewRecords(model.displayRecords);
-    for (const record of model.displayRecords) {
-      applyDisplayRecordTransform(THREEImpl, record);
-    }
-    model.root?.updateMatrixWorld?.(true);
-  };
-  if (settings?.enabled !== true) {
-    resetExplodedView();
-    return bounds;
-  }
-  const layout = computeExplodedViewLayout(model.displayRecords, layoutBounds);
-  if (!layout.entries.length) {
-    resetExplodedView();
-    return bounds;
-  }
-  const amount = clamp(Number(settings.amount ?? 1), 0, 1);
-  applyExplodedViewProgress(THREEImpl, layout, amount);
-  for (const record of model.displayRecords) {
-    applyDisplayRecordTransform(THREEImpl, record);
-  }
-  model.root?.updateMatrixWorld?.(true);
-  return explodedViewBounds(layout, bounds, amount);
-}
-
-function syncViewportTopologyDisplayEdges(viewport) {
-  const { context, model } = viewport;
-  const renderedPartIds = displayRecordPartIds(model.displayRecords);
-  const baseEdgeRuntimes = resolveTopologyDisplayEdgeRuntimes({
-    selectorRuntime: context.selectorRuntime,
-    displayEdgeRuntime: context.displayEdgeRuntime,
-    displayRecords: model.displayRecords,
-    transformDisplayEdges: false
-  });
-  const transformByRecord = shouldUseRecordTopologyEdgeTransforms({
-    transformDetected: baseEdgeRuntimes.transformCount > 0,
-    topologyDisplayEdgesVisible: context.topologyDisplayEdgesVisible,
-    displayEdgeRuntime: context.displayEdgeRuntime,
-    displayRecords: model.displayRecords
-  });
-  const edgeRuntimes = transformByRecord
-    ? baseEdgeRuntimes
-    : resolveTopologyDisplayEdgeRuntimes({
-        selectorRuntime: context.selectorRuntime,
-        displayEdgeRuntime: context.displayEdgeRuntime,
-        displayRecords: model.displayRecords
-      });
-  syncTopologyDisplayEdgeLine(
-    model.runtime,
-    transformByRecord ? context.displayEdgeRuntime : edgeRuntimes.topologyRuntime,
-    {
-      visible: context.topologyDisplayEdgesVisible,
-      edgeSettings: renderedPartIds.length
-        ? {
-            ...context.edgeSettings,
-            includePartIds: renderedPartIds
-          }
-        : context.edgeSettings,
-      viewerTheme: model.runtime?.baseTheme,
-      transformByRecord,
-      displayRecords: model.displayRecords
-    }
-  );
-}
-
-
 // The job's annotation (`job.annotation`, the ink a person drew with the viewer's Annotate tool), drawn over this
 // output with the viewer's own code (`annotation.js`): each mark where it was drawn, in model
 // coordinates, cut by the same clip planes. Its ink is as heavy against this output's height as it was against a
@@ -847,13 +570,12 @@ function syncViewportAnnotation(viewport, job, { height }) {
     viewport.annotationLayer = { layer, lineScale };
   }
   if (viewport.renderer) viewport.renderer.localClippingEnabled = true;
-  viewport.annotationLayer.layer.place(viewport.clipRuntime?.activeClipPlanes || viewport.sceneClip?.planes || []);
+  viewport.annotationLayer.layer.place(viewport.sceneClip?.planes || []);
 }
 
 export async function captureModel(viewport, captureOptions = {}) {
   const job = captureOptions.job || {};
-  const context = viewport.context || renderJobContext(viewport.model.meshData, job);
-  const meshData = viewport.model.meshData;
+  const context = viewport.context || renderJobContext({ bounds: viewport.model.bounds }, job);
   const {
     mode,
     sceneScale,
@@ -861,14 +583,16 @@ export async function captureModel(viewport, captureOptions = {}) {
     outputs,
     warnings
   } = context;
-  const modelBounds = viewport.model?.bounds || meshData?.bounds || bounds;
+  const modelBounds = viewport.model.bounds || bounds;
 
   if (mode === "list") {
+    if (typeof viewport.model.listParts !== "function") {
+      throw new Error("--mode list lists a GLB, mesh or robot scene here; cadgen lists a STEP model's parts itself");
+    }
     return {
       ok: true,
       mode,
-      // A family's scene lists what it drew; a CAD model its composed part occurrences.
-      parts: listRenderableParts(viewport.model.listParts ? { parts: viewport.model.listParts() } : meshData),
+      parts: listRenderableParts(viewport.model.listParts()),
       bounds: roundedBounds(modelBounds) || modelBounds,
       warnings
     };
@@ -888,65 +612,29 @@ export async function captureModel(viewport, captureOptions = {}) {
   for (const output of outputs) {
     const outputTimings = stageTimings ? { path: String(output.path || "") } : null;
     let stageStarted = performance.now();
-    const parameters = stepParametersForSnapshotOutput(output, job);
     const { width, height } = outputSize(output, job);
     viewport.renderer.setSize(width, height, false);
-    // ONE update per output. `modelState` is a patch a caller needs applied in
-    // the same pass -- a video's `callbacks.animation` for this frame -- because
-    // applying it separately first means the clip evaluator and the effects pass
-    // over every display record run twice for one image.
-    const posedBounds = viewport.model.update({
-      stepParameters: parameters,
-      ...(captureOptions.modelState || null)
-    }).bounds;
-    // `frameBounds` locks what the camera frames on. A still frames the model
-    // it just posed, which is right for one image and wrong for a sequence:
-    // every frame of a video would re-fit to that frame's pose and the camera
-    // would breathe as the model moves. A video passes the union across its
-    // frames, computed once (headlessRenderEntry sequenceFrameBounds).
-    const baseOutputBounds = captureOptions.frameBounds || posedBounds;
-    // The model at rest (a package's declared box when it has one): what the viewer sizes the
-    // ground from and radiates an exploded view from, whatever the pose.
+    // A family's scene is posed once, as it is built: the still frames it as it stands.
+    let outputBounds = viewport.model.bounds;
+    // The model at rest: what the viewer sizes the ground from, whatever the pose.
     const restBounds = viewport.model.restBounds || null;
-    let outputBounds = baseOutputBounds;
-    // The exploded view, topology edges and their screen-space line widths are a CAD
-    // model's (`buildModel`'s runtime). A family's scene has no edges; it explodes and is cut
-    // through the scene contract, as the viewer's viewport explodes and cuts it
-    // (`sceneExplode.js`, `sceneClip.js`), under the features the job was resolved with.
-    if (!viewport.model.runtime) {
-      const familyScene = viewport.model.scene;
-      const exploded = context.displaySettings.exploded;
-      if (familyScene.setExplode) {
-        familyScene.setExplode(exploded?.enabled === true ? Number(exploded.amount) || 0 : 0);
-        outputBounds = captureOptions.frameBounds || familyScene.bounds;
-      }
-      viewport.sceneClip ??= createSceneClip(THREE, { stage: viewport.scene });
-      viewport.sceneClip.sync(familyScene, context.displaySettings.clip);
-    } else {
-      outputBounds = applyViewportExplodedView(viewport, baseOutputBounds, restBounds || baseOutputBounds);
-      syncViewportTopologyDisplayEdges(viewport);
-      // The Clip tool cuts and caps the model as the viewer's does, on every material, edge set and
-      // the topology edges drawn just above.
-      const clipRuntime = viewportClipRuntime(viewport);
-      clipRuntime.modelBounds = outputBounds;
-      syncRuntimeStepClipPlane(clipRuntime, context.displaySettings.clip);
-      // Device pixels: renderScale is the renderer's pixel ratio, so a
-      // supersampled drawing buffer keeps `thickness` in drawing-buffer units
-      // before the final PNG is resampled to this output's requested dimensions.
-      const lineResolution = screenSpaceLineDeviceResolution(viewport.renderer, width, height);
-      syncScreenSpaceLineMaterialResolution(
-        viewport.model.runtime.screenSpaceLineMaterials,
-        lineResolution.width,
-        lineResolution.height
-      );
+    // The scene explodes and is cut through the scene contract, as the viewer's viewport explodes
+    // and cuts it (`sceneExplode.js`, `sceneClip.js`), under the features the job was resolved with.
+    const familyScene = viewport.model.scene;
+    const exploded = context.displaySettings.exploded;
+    if (familyScene.setExplode) {
+      familyScene.setExplode(exploded?.enabled === true ? Number(exploded.amount) || 0 : 0);
+      outputBounds = familyScene.bounds;
     }
+    viewport.sceneClip ??= createSceneClip(THREE, { stage: viewport.scene });
+    viewport.sceneClip.sync(familyScene, context.displaySettings.clip);
     if (outputTimings) outputTimings.updateModelMs = Math.round(performance.now() - stageStarted);
     stageStarted = performance.now();
     const cameraSpec = resolveOutputCameraSpec(context, output.camera || null);
     const outputProjection = resolveOutputCameraProjection(context, cameraSpec);
     const usePerspectiveCamera = outputProjection === CAMERA_PROJECTION.PERSPECTIVE;
     const cameraView = usePerspectiveCamera ? null : resolveView(cameraSpec);
-    const useTightFrame = !captureOptions.frameBounds && tightFrameEnabled(job);
+    const useTightFrame = tightFrameEnabled(job);
     if (usePerspectiveCamera && useTightFrame) {
       viewport.scene.updateMatrixWorld(true);
     }
@@ -958,10 +646,7 @@ export async function captureModel(viewport, captureOptions = {}) {
         })
       : fitCamera(viewport.orthographicCamera, cameraView, outputBounds, width, height, null, padding, sceneScale);
     const renderCamera = usePerspectiveCamera ? viewport.perspectiveCamera : viewport.orthographicCamera;
-    // The tight frame is a per-POSE refinement: it re-fits to the vertices the
-    // records project right now. Running it on every frame of a sequence is the
-    // breathing `frameBounds` exists to stop, and there is no one pose to run it
-    // against, so a locked frame keeps the bounds fit and skips it.
+    // The tight frame refines the bounds fit to the vertices the records project in this pose.
     if (!usePerspectiveCamera && useTightFrame) {
       viewport.scene.updateMatrixWorld(true);
       applyTightOrthographicFrame(renderCamera, viewport.model.displayRecords, width, height, padding, cameraView?.zoom);
@@ -969,8 +654,7 @@ export async function captureModel(viewport, captureOptions = {}) {
     // Every preset draws with ordinary depth, fitted to what this output frames, as the viewer
     // fits its own every frame (`fitCameraDepthToBounds` in useViewerRuntime.js).
     const fitDepth = () => fitCameraDepthToBounds(renderCamera, outputBounds, {
-      placedObjects: viewport.model.runtime ? viewport.model.displayRecords : viewport.model.placedObjects(),
-      modelGroup: viewport.model.runtime?.modelGroup ?? null,
+      placedObjects: viewport.model.placedObjects(),
       groundZ: viewport.studioRuntime?.photographicStudio?.ground?.position.z ?? null,
       gridBounds: viewport.gridBounds ?? null,
       pivot: resolvedCamera?.target ?? null
@@ -983,8 +667,8 @@ export async function captureModel(viewport, captureOptions = {}) {
         bounds: outputBounds,
         // The floor and its contact shadow are sized and centred from the REST placement, as the
         // viewer's are (and as `renderModel` placed them), so an exploded view or a pose never
-        // rescales or slides them; a video's locked frame keeps its union box for both.
-        groundBounds: captureOptions.frameBounds ? null : restBounds,
+        // rescales or slides them.
+        groundBounds: restBounds,
         shadowMapSize: context.quality.shadowMapSize,
         ditherScale: viewport.renderer.getPixelRatio?.() ?? 1,
         frame: SNAPSHOT_STUDIO_FRAME
@@ -994,17 +678,15 @@ export async function captureModel(viewport, captureOptions = {}) {
     }
     stageStarted = performance.now();
     syncViewportAnnotation(viewport, job, { height });
-    // Render is drawn through its studio's frame, every sample of it; anything else is one draw.
+    // Render is drawn through its studio's frame, every sample of it; anything else is one draw, as
+    // the scene's own rig blends it.
     const studioFrame = viewport.studioRuntime?.photographicStudio?.frame || null;
     if (studioFrame) {
       studioFrame.renderStill(viewport.renderer, viewport.scene, renderCamera, {
-        samples: snapshotStudioSamples({
-          video: Boolean(captureOptions.frameBounds),
-          softwareRendering: isSoftwareWebGlRenderer(viewport.renderer)
-        })
+        samples: snapshotStudioSamples({ softwareRendering: isSoftwareWebGlRenderer(viewport.renderer) })
       });
     } else {
-      viewport.renderer.render(viewport.scene, renderCamera);
+      renderWithSceneRig(viewport.sceneRig, viewport.renderer, viewport.scene, renderCamera);
     }
     if (outputTimings) outputTimings.drawSubmitMs = Math.round(performance.now() - stageStarted);
     // WebGL submission can return before GPU completion. PNG readback may
@@ -1039,26 +721,8 @@ export async function captureModel(viewport, captureOptions = {}) {
     timings: {
       sceneBuildMs,
       renderMs,
-      meshCount: viewport.model.displayRecords.length || (meshData ? listRenderableParts(meshData).length : 0) || 1
+      meshCount: viewport.model.displayRecords.length || 1
     },
     warnings
   };
-}
-
-export async function renderMeshJob(meshData, job = {}) {
-  const context = renderJobContext(meshData, job);
-  const model = buildModel(THREE, meshData, modelOptionsForRenderJob(context, job));
-  if (context.mode === "list") {
-    try {
-      return await captureModel({ model, context }, { job });
-    } finally {
-      model.dispose();
-    }
-  }
-  const viewport = renderModel(THREE, model, { job, context });
-  try {
-    return await captureModel(viewport, { job });
-  } finally {
-    viewport.dispose();
-  }
 }

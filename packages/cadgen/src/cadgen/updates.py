@@ -96,7 +96,10 @@ def _load(path: Path) -> dict[str, Any]:
     return kept if isinstance(kept, dict) else {}
 
 
-def _save(path: Path, kept: dict[str, Any]) -> None:
+def _save(path: Path, checked: float, feed: dict[str, Any] | None) -> None:
+    """The file as it is read: when the feed was last asked for (``checked``) and the feed as last
+    read (``feed``), and nothing else."""
+    kept: dict[str, Any] = {"checked": checked, **({"feed": feed} if feed is not None else {})}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         write_bytes_atomic(path, json.dumps(kept, sort_keys=True).encode("utf-8"))
@@ -133,11 +136,11 @@ def feed(*, fetch: bool = True, now: float | None = None, path: Path | None = No
     if fetch and checking() and _due(kept, "checked", now):
         # The day's attempt is spent before it is made: a process that exits mid-request, or a feed
         # that never answers, costs one wait a day.
-        _save(path, {**kept, "checked": now})
+        _save(path, now, known)
         fresh = parse_feed((get or _get)(f"{api_url()}/versions"))
         if fresh is not None:
             known = fresh
-            _save(path, {**_load(path), "checked": now, "feed": fresh})
+            _save(path, now, fresh)
     return known
 
 

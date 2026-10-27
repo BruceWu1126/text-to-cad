@@ -74,14 +74,30 @@ scene. The shared UI discovers no host APIs.
 ## Rendering costs and camera behavior
 
 The photographic rig stays lazy. Preview's Render creates its photographic
-softbox environment; the other modes use neutral CAD lighting. Authored materials are read-only. Color
+softbox environment; the other modes use neutral CAD lighting, but for an engine document
+(`.xbf`), whose scene brings its engine's look as its own rig (core's `lib/xbf/xbfLook.js`,
+`lib/viewer/sceneRig.js`): the viewport lights it by that in place of the theme's lights, with
+the look's environment and under its own tone curve. Authored finishes show in Solid and Shaded:
+a file's reflect a small neutral environment; an engine document's reflect its look's
+environment, the studio image its engine serves beside the look (`GET /api/look/environment`),
+which lights every surface of the document and which the engine's OCCT stills reflect too, and
+every surface of it answers light as OCCT's PBR program does (core's `lib/viewer/surfaceBrdf.js`,
+the look's `brdf`), not by three's own physical model. Parts draws a plain finish. An engine
+document's X-ray is its look's colour-only model (the scene's `rigFor` its own rig): no finish, an
+ambient term and plain lights, no environment, three's own physical model, as the engine's OCCT
+stills draw it by Phong, its see-through layers blended in linear light as OCCT blends them (the
+rig's `blend`): the viewport draws the surfaces through a half-float frame of the rig's and encodes
+them once, its edges, highlights and ink over them as before (core's `renderWithSceneRig`), where
+three's canvas would blend each layer after encoding it and draw dark see-through parts too dark.
+It holds about 60 bytes a pixel while X-ray is on; every other mode, and every other file, is
+drawn as before. Authored materials are read-only. Color
 overrides are presentation settings, not edits to the model or its material
 assignments.
 
-| Lighting quality | Screen error | Shadow map | Environment | Capture scale | Samples at rest |
-| --- | --- | --- | --- | --- | --- |
-| Preview | 1 px | 2048 px | 256 px | 1× | 32 |
-| Final | 0.25 px | 4096 px | 512 px | 2× | 64 |
+| Lighting quality | Shadow map | Environment | Capture scale | Samples at rest |
+| --- | --- | --- | --- | --- |
+| Preview | 2048 px | 256 px | 1× | 32 |
+| Final | 4096 px | 512 px | 2× | 64 |
 
 Render is drawn through the studio's frame (core's `studioFrame.js`, see
 [the render pipeline](../../core/docs/render-pipeline.md#the-studios-frame)): ambient
@@ -93,8 +109,9 @@ samples are owed it asks for the next frame itself, and once the picture has con
 draws nothing more. A drag, a routine's frame or a setting starts the picture again; the
 damped tail of an orbit, moving the model less than a quarter of a pixel, does not. So
 orbiting pays one draw and a few small passes a frame (about 1.5 ms more at 3024 × 1964 on
-an M1 Max) and a still view converges in about half a second. A snapshot draws its still's
-32 samples at once (video frames one). Software WebGL has no frame: one draw, as before.
+an M1 Max) and a still view converges in about half a second. A snapshot is OCCT's, drawn in
+the engine (`engine/render/occt.py`), not through this frame. Software WebGL has no frame: one
+draw, as before.
 
 Each interactive viewport keeps its renderer (a view of the page's one GPU device:
 [the GPU device](cad-renderer.md#the-gpu-device)), canvas and camera controls
@@ -114,21 +131,22 @@ of lines fades only once its cells crowd under about 3.5 pixels, so there is no 
 out or at a grazing angle; the sheet is at full strength to 1.5 framings from the origin, past
 the default view's corners, and dissolves gently by 6, and fades a little as the plane turns
 edge-on, so it reaches the edges of the view yet has no edge of its own. Display has no separate Axes setting. The grid, the stage and the Render studio's floor are
-SIZED from the model's rest placement for every renderer, STEP included: a pose, a
+SIZED from the model's rest placement for every renderer: a pose, a
 playing routine, or a pose set in Preview never rescales or
 slides the ground; its height, the lighting and the shadow reach follow the model. Enabling photographic effects updates that live scene;
 it never clears or covers the canvas with a loading screen. Only actual context
 recovery replaces the renderer. Quality never changes a mesh: every mode draws
-cadgen's one display mesh. Picking/topology stays demand-driven in every mode.
+the meshes the file's document holds.
 
 Enabling Clip prepares its shader/cap variants before presentation. Moving an
 enabled cut stays live. Explicit neutral boundaries
 still avoid unnecessary caps. See [responsive View updates](view-updates.md)
 for scheduling, resource caching, loading presentation and capture readiness.
 
-Render's floor stands at the document's Z=0 plane (Model origin), at 60% opacity, its opacity
-letting geometry below that plane show; Lowest point is a choice away and is remembered in Render, as Glossy is. A snapshot's Render floor stands
-where the viewer's does: both resolve it from the same mode default (`RENDER_FLOOR_PLACEMENT`).
+Render's floor stands under the model's lowest point (`RENDER_FLOOR_PLACEMENT`, `lowest`), at 60%
+opacity, its opacity letting geometry below it show; Model origin (the document's Z=0 plane) is a
+choice away and is remembered in Render, as Glossy is. A snapshot's Preview floor stands where
+the viewer's does.
 Render's floor carries a studio's soft grounding shadow, as deep
 as the floor is opaque: darkest where the model touches it, the key light's cast
 shadow softening and fading away from the model. The viewer re-renders its
@@ -160,7 +178,7 @@ color) and above the horizon. Its opacity carries the gradient; at zero it draws
 Light Render defaults to a pure white background and retains the slightly gray
 floor (`#e7e7e5`); dark Render's background and floor are one charcoal (`#202226`), never
 black. Explicit background colors still override the mode default.
-External STEP pose and animation passes publish current placed bounds before
+Pose and animation passes publish current placed bounds before
 drawing, and so does the exploded view wherever it comes to rest (a slider move,
 the end of its ease) and at most every 100 ms while it eases in or out. Depth and
 lighting follow moving parts without changing camera framing or the floor's
@@ -193,7 +211,7 @@ alone, as its renderer declares to the shell (`useRendererShell`'s `previewable`
 
 | Renderer | Files | Display and Preview |
 | --- | --- | --- |
-| `step` | STEP, STP | Yes |
+| `xbf` | `.xbf`, STEP, STP | Yes |
 | `glb` | GLB | Yes |
 | `mesh` | STL, 3MF | Yes |
 | `robot` | URDF, SRDF, SDF | Yes |

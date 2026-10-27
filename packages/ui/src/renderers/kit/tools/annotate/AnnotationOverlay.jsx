@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { annotationAt, highlighterMark, penMark, shapeMarks, textMark, withGroups } from "../../../../annotation/geometry.js";
 import { DEFAULT_OVERLAY_ANNOTATION_COLOR } from "../../../../annotation/toolbar.jsx";
 import { capturePointer } from "../../../../lib/pointerCapture.js";
 import { annotationsOnScreen, projectAnnotations } from "./annotation3d.js";
 import { TOUCH_HIT_PX } from "../../viewport/dom.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 // Someone who took up a drawing tool came to draw: Pencil opens on the pen, Shapes on the rectangle, each in the neon red
 // (the highlighter, in the session's yellow).
@@ -86,6 +87,7 @@ function paintOutline(context, ink, { color }) {
  *     onScreen(items: readonly object[], size: { width: number, height: number }): object[], view(): Element | null } | null }} props
  */
 export default function AnnotationOverlay({ annotation, runtimeRef = null, viewOf = null, touchesAt = null, surface = null }) {
+  const { t } = useI18n();
   const root = useRef(null);
   const canvas = useRef(null);
   const gesture = useRef(null);
@@ -279,7 +281,7 @@ export default function AnnotationOverlay({ annotation, runtimeRef = null, viewO
     onMouseDown={onMouseDown} onKeyDown={onKeyDown} onKeyUp={onKeyUp} onBlur={() => setPassing(false)} onWheel={onWheel}
     onContextMenu={event => event.preventDefault()}>
     <canvas ref={canvas} className="pointer-events-none absolute inset-0 h-full w-full" />
-    {text ? <textarea autoFocus aria-label="Text" value={text.value} rows={1}
+    {text ? <textarea autoFocus aria-label={t("annotate.tool.text")} value={text.value} rows={1}
       onChange={event => setText(current => current && { ...current, value: event.target.value })}
       onKeyDown={event => {
         event.stopPropagation();

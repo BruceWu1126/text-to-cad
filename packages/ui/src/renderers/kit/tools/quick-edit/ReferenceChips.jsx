@@ -2,12 +2,14 @@ import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState
 import { Check, Copy, X } from "lucide-react";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@text-to-cad/ui/primitives/popover";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
+import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { cn } from "@text-to-cad/ui/utils";
 import { useViewerMobile } from "../../../../file-viewer/responsive.js";
 import { FLOATING_SURFACE_CLASS } from "../../../../lib/floatingSurface.js";
 import { useCopyFlash } from "../../inspector/copyFlash.js";
 import { InfoRow } from "../../inspector/referenceRows.jsx";
 import { PickGlyph, compactSuffix, hasPickGlyph } from "../../inspector/pickGlyph.jsx";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 /**
  * One chip: what a renderer says a piece of its selection is. Several picks of one kind on one part
@@ -17,8 +19,9 @@ import { PickGlyph, compactSuffix, hasPickGlyph } from "../../inspector/pickGlyp
  * @property {string} label  Its words: "base · face 3", "base · 6 faces", "upper_arm". Its accessible
  *   name always, and what it shows unless it has a `compact` one.
  * @property {import("../../inspector/pickGlyph.jsx").CompactName} [compact]  What it shows, short:
- *   its part, then its kind's glyph and its number or count ("base ◧3", "base ◧×6").
- * @property {string} [id]  Its id in its file, as its card shows it: "o1.2.f3", "upper_arm".
+ *   its part, then its kind's glyph and its number or count ("base ◧3", "base ◧×6"); with no part name
+ *   (a document of one part, which the page already names), its `words` after the glyph ("◧face 1").
+ * @property {string} [id]  Its id in its file, as its card shows it: "f:base.make_box1.3", "upper_arm".
  * @property {string | (() => string)} [copy]  What a click on it copies: its reference, the file's path and its
  *   id; or a reference resolved at the click. Annotation and measurement chips omit this.
  * @property {import("react").ReactNode} [card]  What it is, for its card: its key measurements.
@@ -30,6 +33,19 @@ import { PickGlyph, compactSuffix, hasPickGlyph } from "../../inspector/pickGlyp
  * @property {() => void} [onRemove]  Drops these picks from the selection.
  * @property {(on: boolean) => void} [onHover]  Lights these picks in the view while the pointer is on the chip.
  */
+
+// A part's name on a chip is cut to this many characters, an ellipsis last: the chip's card (or, with
+// none, its hint) gives the whole name.
+export const CHIP_NAME_CHARS = 16;
+// A card's ID row is one line of this many characters at most, its middle cut: the whole reference is
+// its hint, and what a click on it copies.
+export const CARD_ID_CHARS = 28;
+export const capName = (name, chars = CHIP_NAME_CHARS) => (name.length > chars ? `${name.slice(0, chars - 1).trimEnd()}…` : name);
+export function elideMiddle(text, chars = CARD_ID_CHARS) {
+  if (text.length <= chars) return text;
+  const head = Math.ceil((chars - 1) / 2), tail = Math.floor((chars - 1) / 2);
+  return `${text.slice(0, head)}…${text.slice(text.length - tail)}`;
+}
 
 // The chips the box shows before the rest go under "+N more": one or two lines at the box's width.
 export const VISIBLE_REFERENCE_CHIPS = 4;
@@ -69,18 +85,30 @@ function useHoverOpen(card) {
 // What a chip shows: its compact name where it has one (its part, then a glyph and a number), else its words.
 // Every chip leads with its icon (`icon`, else the glyph of what it names), then its words: its compact
 // name's part and its number or count where it has one, else its own.
+// A part's name is cut to `CHIP_NAME_CHARS` (a compact name's part, a whole part's chip); the number
+// after it is never cut. A chip with a card shows the whole name in its card's title; one with none,
+// in a hint.
+function PartName({ name, hinted }) {
+  const shown = capName(name);
+  const text = <span className="min-w-0 truncate" data-chip-name="">{shown}</span>;
+  return hinted && shown !== name ? <TooltipHint content={name}>{text}</TooltipHint> : text;
+}
+
 function ChipText({ chip }) {
   const { compact } = chip;
   const glyph = chip.glyph ?? compact?.kind;
   const icon = chip.icon ?? (hasPickGlyph(glyph)
     ? <PickGlyph kind={glyph} color={chip.glyphColor} className={cn("size-2.5 shrink-0", !chip.glyphColor && "text-muted-foreground")} /> : null);
   const named = compact && hasPickGlyph(compact.kind);
+  const hinted = !(chip.card || chip.id);
+  const words = chip.text ?? chip.label;
   return <span className="inline-flex min-w-0 max-w-full items-center gap-1 align-top" data-chip-compact={named ? "" : undefined}>
     {icon}
-    {named ? <>
-      {compact.name ? <span className="min-w-0 truncate">{compact.name}</span> : null}
+    {named ? compact.name ? <>
+      <PartName name={compact.name} hinted={hinted} />
       <span className="shrink-0 text-muted-foreground">{compactSuffix(compact)}</span>
-    </> : <span className="min-w-0 truncate">{chip.text ?? chip.label}</span>}
+    </> : <span className="min-w-0 truncate">{compact.words ?? words}</span>
+      : glyph === "solid" ? <PartName name={words} hinted={hinted} /> : <span className="min-w-0 truncate">{words}</span>}
   </span>;
 }
 
@@ -88,6 +116,7 @@ function ChipText({ chip }) {
 const copyChip = (flash, chip) => flash.copy(typeof chip.copy === "function" ? chip.copy() : chip.copy);
 
 function useChip(chip) {
+  const { t } = useI18n();
   const card = Boolean(chip.card || chip.id);
   const hover = useHoverOpen(card);
   const flash = useCopyFlash();
@@ -118,13 +147,14 @@ function useChip(chip) {
         if (pointer.current !== "mouse" && card) hover.setOpen(open => !open);
         pointer.current = "";
       },
-      children: copied ? <span className="inline-flex items-center gap-1"><Check className="size-2.5" aria-hidden="true" />Copied</span> : <ChipText chip={chip} />,
+      children: copied ? <span className="inline-flex items-center gap-1"><Check className="size-2.5" aria-hidden="true" />{t("chip.copied")}</span> : <ChipText chip={chip} />,
     },
   };
 }
 
 function RemoveButton({ chip }) {
-  return chip.onRemove ? <button type="button" className={CHIP_REMOVE_CLASS} aria-label={`Remove ${chip.label}`}
+  const { t } = useI18n();
+  return chip.onRemove ? <button type="button" className={CHIP_REMOVE_CLASS} aria-label={t("chip.remove", { name: chip.label })}
     onClick={() => { chip.onHover?.(false); chip.onRemove(); }}><X className="size-2.5" aria-hidden="true" /></button> : null;
 }
 
@@ -132,11 +162,12 @@ function RemoveButton({ chip }) {
 // what the chip does (no hint: the icon says it), the icon a tick for a moment once it has.
 function CardTitle({ chip }) {
   const flash = useCopyFlash();
+  const { t } = useI18n();
   if (!chip.copy || !flash.canCopy) return <p className="truncate px-2 pt-1.5 text-tiny text-foreground">{chip.label}</p>;
   const Icon = flash.copied ? Check : Copy;
   // Only the name and its icon are the button, tight together; the rest of the row is not.
   return <div className="flex min-w-0 px-2 pt-1.5">
-    <button type="button" aria-label={`Copy reference ${chip.label}`} data-copied={flash.copied ? "" : undefined}
+    <button type="button" aria-label={t("chip.copyReference", { name: chip.label })} data-copied={flash.copied ? "" : undefined}
       onClick={() => void copyChip(flash, chip)}
       className="group/title inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-sm text-left text-tiny text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/45">
       <span className="min-w-0 truncate">{chip.label}</span>
@@ -157,6 +188,17 @@ function useCardPlace() {
   return mobile ? { side: "top", align: "start", sideOffset: 6 } : { side: "left", align: "start", sideOffset: 14 };
 }
 
+// A card's ID: one monospace line, its middle cut where it is long (`elideMiddle`), the whole of it
+// its hint; a click copies the chip's whole reference, what its title copies.
+function IdRow({ chip }) {
+  const { t } = useI18n();
+  const shown = elideMiddle(chip.id);
+  const value = <span className="inline-block max-w-full whitespace-nowrap align-top font-mono" data-chip-id="">{shown}</span>;
+  return <InfoRow label={t("chip.id")} copy={() => (typeof chip.copy === "function" ? chip.copy() : chip.copy || chip.id)}>
+    {shown === chip.id ? value : <TooltipHint content={chip.id}>{value}</TooltipHint>}
+  </InfoRow>;
+}
+
 function ChipCard({ chip, state }) {
   const place = useCardPlace();
   return state.card ? <PopoverContent {...place} collisionPadding={8} className={cn(POPOVER_CLASS, "w-56 max-w-[calc(100vw-1rem)]")}
@@ -165,7 +207,7 @@ function ChipCard({ chip, state }) {
     <CardTitle chip={chip} />
     <ScrollArea className="min-w-0" viewportProps={{ style: CARD_ROWS_STYLE }}>
       <div className="px-2 pb-1.5">
-        {chip.id ? <InfoRow label="ID"><span className="tabular-nums">{chip.id}</span></InfoRow> : null}
+        {chip.id ? <IdRow chip={chip} /> : null}
         {chip.card}
       </div>
     </ScrollArea>
@@ -202,15 +244,16 @@ function MoreChip({ chip }) {
 
 // The rest, under one chip: a narrow list of them, each a chip in all but its look.
 function MoreChips({ chips }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const place = useCardPlace();
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
       <button type="button" className={cn(CHIP_CLASS, CHIP_LABEL_CLASS, "text-muted-foreground hover:text-foreground")}
-        data-quick-edit-ref-more="">+{chips.length} more</button>
+        data-quick-edit-ref-more="">{t("chip.more", { count: chips.length })}</button>
     </PopoverTrigger>
     <PopoverContent {...place} collisionPadding={8} className={cn(POPOVER_CLASS, "w-max min-w-28 max-w-44")}
-      onOpenAutoFocus={event => event.preventDefault()} aria-label="More references">
+      onOpenAutoFocus={event => event.preventDefault()} aria-label={t("chip.moreReferences")}>
       <ScrollArea className="min-w-0" viewportProps={{ style: LIST_STYLE }}>
         <ul className="flex flex-col p-1">
           {chips.map(chip => <MoreChip key={chip.key} chip={chip} />)}
@@ -234,7 +277,8 @@ function MoreChips({ chips }) {
  *
  * @param {{ chips: readonly ReferenceChip[], className?: string, label?: string, below?: boolean, rows?: number }} props
  */
-export default function ReferenceChips({ chips, className, label = "References", below = false, rows = 0 }) {
+export default function ReferenceChips({ chips, className, label, below = false, rows = 0 }) {
+  const { t } = useI18n();
   const box = useRef(null);
   const key = chips.map(chip => chip.key).join("\n");
   // With `rows`: how many chips fit in that many rows with "+N more" after them, for these chips.
@@ -271,7 +315,7 @@ export default function ReferenceChips({ chips, className, label = "References",
   const shown = chips.slice(0, count);
   const rest = chips.slice(shown.length);
   return <ChipsBelowContext.Provider value={below}>
-    <div ref={box} className={cn("flex min-w-0 flex-wrap gap-1", className)} aria-label={label} data-quick-edit-refs="">
+    <div ref={box} className={cn("flex min-w-0 flex-wrap gap-1", className)} aria-label={label ?? t("chip.references")} data-quick-edit-refs="">
       {shown.map(chip => <Chip key={chip.key} chip={chip} />)}
       {rest.length ? <MoreChips chips={rest} /> : null}
     </div>

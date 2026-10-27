@@ -1,12 +1,15 @@
 import { useMemo } from "react";
 import { formatPromptReference } from "@text-to-cad/core/prompt";
 import { InfoRow, MonoValue } from "../../inspector/referenceRows.jsx";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 const EMPTY = Object.freeze([]);
 
-/** A part's card: its reference id, then what its scene says of it (`describePart`'s facts). */
+/** A part's card: its reference id, then what its scene says of it (`describePart`'s facts), each
+ * fact's name by its `key` in the view's language where it has one. */
 function ScenePartCard({ facts }) {
-  return <>{facts.map(fact => <InfoRow key={fact.label} label={fact.label}><MonoValue>{fact.value}</MonoValue></InfoRow>)}</>;
+  const { t } = useI18n();
+  return <>{facts.map(fact => <InfoRow key={fact.label} label={fact.key ? t(fact.key) : fact.label}><MonoValue>{fact.value}</MonoValue></InfoRow>)}</>;
 }
 
 /**

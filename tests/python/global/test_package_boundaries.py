@@ -1,8 +1,8 @@
 """The dependency-direction and ships-alone laws, held by test rather than prose.
 
 Boundary law (packages/README.md and each package's README): apps import
-packages; packages never import apps; @text-to-cad/core is framework-free — no
-React, no app or workflow state. Ships-alone law: cadgen (the built PyPI
+packages; packages never import apps (here for cadgen's Python; the JavaScript's
+direction, and core being framework-free, are scripts/test/check-dependencies.mjs's). Ships-alone law: cadgen (the built PyPI
 distribution) and every skill (the Skills CLI installs
 skills/<name> ALONE; plugin installers copy the published tree, which has no
 models/ and whose packages/ is never installed) each work in isolation outside
@@ -19,52 +19,7 @@ from pathlib import Path
 
 from tests.python.support.paths import repo_path
 
-CADGEN_JS_SRC = repo_path("packages/core/src")
-CADGEN_JS_BIN = repo_path("packages/core/bin")
 CADGEN_SRC = repo_path("packages/cadgen/src")
-
-_IMPORT_RE = re.compile(
-    r"""(?:^|\n)\s*(?:import\s[^;]*?from\s+["']([^"']+)["']|import\s+["']([^"']+)["']|require\(\s*["']([^"']+)["']\s*\))""",
-)
-
-
-def _js_files(*roots: Path):
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for suffix in ("*.js", "*.mjs"):
-            for path in root.rglob(suffix):
-                if "node_modules" in path.parts:
-                    continue
-                yield path
-
-
-def _import_specifiers(path: Path) -> list[str]:
-    text = path.read_text(encoding="utf-8", errors="replace")
-    found = []
-    for match in _IMPORT_RE.finditer(text):
-        specifier = next(group for group in match.groups() if group)
-        found.append(specifier)
-    return found
-
-
-class CadgenJsIsFrameworkFree(unittest.TestCase):
-    def test_no_react_and_no_app_imports(self) -> None:
-        offenders: list[str] = []
-        for path in _js_files(CADGEN_JS_SRC, CADGEN_JS_BIN):
-            for specifier in _import_specifiers(path):
-                lowered = specifier.lower()
-                if lowered == "react" or lowered.startswith("react/") or lowered.startswith("react-"):
-                    offenders.append(f"{path}: {specifier}")
-                if "apps/" in specifier.replace("\\", "/"):
-                    offenders.append(f"{path}: {specifier}")
-        self.assertEqual(
-            offenders,
-            [],
-            "@text-to-cad/core is framework-free shared code (its README, Boundary "
-            "laws): no React, nothing from apps/. Move app-flavored code "
-            "into the app that owns it.",
-        )
 
 
 class PackagesNeverImportApps(unittest.TestCase):
@@ -86,14 +41,6 @@ class PackagesNeverImportApps(unittest.TestCase):
             "packages never reach into apps/ (dependency-direction law): the "
             "distribution must build and run with the apps deleted.",
         )
-
-    def test_no_js_import_into_apps(self) -> None:
-        offenders: list[str] = []
-        for path in _js_files(CADGEN_JS_SRC, CADGEN_JS_BIN):
-            for specifier in _import_specifiers(path):
-                if specifier.replace("\\", "/").startswith(("../../apps", "../../../apps")):
-                    offenders.append(f"{path}: {specifier}")
-        self.assertEqual(offenders, [])
 
 
 # The ships-alone law. Two surfaces leave this repo whole:

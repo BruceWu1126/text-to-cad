@@ -7,9 +7,7 @@ import {
   clipAtForAmount,
   clipAxisBounds,
   clipAxisPosition,
-  normalizeStepClipSettings,
-  pointVisibleByClipPlane,
-  stepClipSettingsEqual
+  normalizeStepClipSettings
 } from "./clipPlane.js";
 
 const bounds = {
@@ -57,20 +55,6 @@ test("the slider's amount is the share cut away, both ways and on both sides", (
   assert.equal(clipAmount({ axis: "z", at: 50, invert: true, partColors: true }, bounds), 0);
 });
 
-test("clip plane point visibility matches the side rendered by Three.js clipping", () => {
-  const clipPlane = {
-    distanceToPoint(point) {
-      return point.distance;
-    }
-  };
-
-  assert.equal(pointVisibleByClipPlane(clipPlane, { distance: 2 }), true);
-  assert.equal(pointVisibleByClipPlane(clipPlane, { distance: 0 }), true);
-  assert.equal(pointVisibleByClipPlane(clipPlane, { distance: -1e-6 }), true);
-  assert.equal(pointVisibleByClipPlane(clipPlane, { distance: -0.01 }), false);
-  assert.equal(pointVisibleByClipPlane(null, { distance: -0.01 }), true);
-});
-
 test("a patch merges into the clip, and a new axis without a coordinate drops the old one", () => {
   const cut = { enabled: true, axis: "y", invert: false, partColors: true, at: 4 };
   assert.deepEqual(buildStepClipPatch(cut, { at: 6 }), { ...cut, at: 6 });
@@ -87,18 +71,10 @@ test("a patch merges into the clip, and a new axis without a coordinate drops th
   assert.deepEqual(buildStepClipPatch(null, { axis: "y", at: 5 }), { enabled: true, axis: "y", invert: false, partColors: true, at: 5 });
 });
 
-test("compares clip settings after normalization", () => {
-  assert.equal(stepClipSettingsEqual({ axis: "X", at: 2 }, { enabled: true, axis: "x", at: 2, invert: false, partColors: true }), true);
-  assert.equal(stepClipSettingsEqual({ axis: "y", at: -4.5 }, { axis: "y", at: 4.5 }), false);
-  assert.equal(stepClipSettingsEqual({ axis: "y" }, { axis: "y", at: 0 }), false);
-  assert.equal(stepClipSettingsEqual({ at: 1 }, { enabled: false, at: 1 }), false);
-});
-
 test('Part colors defaults on and patches never apply or move the cut', () => {
   const neutral = normalizeStepClipSettings();
   const off = buildStepClipPatch(neutral,{partColors:false});
   assert.deepEqual(off,{...neutral,partColors:false});
-  assert.equal(stepClipSettingsEqual(neutral,off),false);
   const applied = buildStepClipPatch(off,{axis:'z',at:4});
   assert.equal(applied.partColors,false);
   assert.deepEqual(buildStepClipPatch(applied,{partColors:true}),{...applied,partColors:true});

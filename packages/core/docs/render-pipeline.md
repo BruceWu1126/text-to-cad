@@ -1,16 +1,17 @@
 # Render Pipeline
 
-`@text-to-cad/core` exposes a staged render pipeline for shared viewer, docs, and generated
-snapshot browser-runtime work. A STEP document goes:
+`@text-to-cad/core` exposes a staged render for the viewer, the docs hero and the OCCT parity
+bench's headless page: a family's scene builder makes the scene, `renderModel` draws it on a
+canvas, and `captureModel` (the parity page's) returns its pictures.
 
 ```js
-const source = await loadSource(input, sourceOptions);
-const model = buildModel(THREE, source, modelOptions);
-const viewport = renderModel(THREE, model, viewportOptions);
+const scene = createGlbScene(THREE, document, options);      // or buildMeshScene, createRobotScene, createXbfScene
+const viewport = renderModel(THREE, { root: scene.root, bounds: scene.bounds }, viewportOptions);
 const result = await captureModel(viewport, captureOptions);
 ```
 
-Every other file family (GLB, STL, 3MF, URDF, SRDF, SDF) is drawn by ITS OWN scene
+Every file family (GLB, STL, 3MF, URDF, SRDF, SDF, and an engine document: an `.xbf`, or a
+STEP, which the viewer and a snapshot open as one) is drawn by ITS OWN scene
 builder, the one the viewer's renderer for it calls too: the snapshot page loads the
 file with that family's loader, builds the scene with that family's builder, dresses it
 in the look the viewer's viewport would, and hands it to the same `renderModel` and
@@ -19,12 +20,16 @@ render.
 
 The stages keep ownership narrow:
 
-- `loadSource` owns STEP source and sidecar loading plus file-kind validation.
-- `buildModel` owns the CAD object graph, records, selection, clipping,
-  materials, topology/display edges, and STEP parameter effects.
 - A family builder owns its scene: `createGlbScene` (`lib/render/glbScene.js`),
   `buildMeshScene` (`lib/render/meshScene.js`), `createRobotScene`
-  (`lib/urdf/robotScene.js`). Each returns the scene contract of
+  (`lib/urdf/robotScene.js`), `createXbfScene` (`lib/xbf/xbfScene.js`, a cadgen engine
+  document read by `loadXbfDocument` from the engine that serves it: one geometry per
+  prototype over its XBM2 buffer's own typed-array views, one placed group per instance, CAD
+  edges by class from the edge table, faces, edges and vertices picked by ordinal; the
+  document's edges are the view's `edges`, which the scene wears through `setEdgeLook`; its
+  regular modes are drawn in the engine's look, `GET /api/look`, and its environment image,
+  `GET /api/look/environment`, read beside the document: `lib/xbf/xbfLook.js`). Each returns the
+  scene contract of
   `lib/viewer/sceneContract.js`, and each scene gives a sibling (`createSibling()`): a
   second scene of the same file with its own objects, materials and look over the first's
   geometry (`lib/render/sharedGeometry.js`), which the viewer's Preview draws beside
@@ -33,18 +38,40 @@ The stages keep ownership narrow:
   has its own links and pose, and its own vertex colours. Ownership is
   [resource-ownership §1](resource-ownership.md#1-shared-ownership-and-disposal).
 - `renderModel` owns renderer, scene, camera, lighting, background, floor,
-  framing, resizing, and render loop concerns.
-- `captureModel` owns deterministic snapshot outputs without filesystem writes.
-
-The CAD skill's Python snapshot CLI remains responsible for job parsing, path
-resolution, Playwright routing, and writing returned outputs to disk.
+  framing, resizing, and render loop concerns. A scene that brings its own lighting (the
+  contract's `rig`: an engine document's, its engine's look) is lit by it outside Render in place
+  of the theme's lights, its environment the scene's (one PMREM per image and renderer, which every
+  surface reflects, an authored finish in Solid and Shaded among them), its tone curve three's
+  `CustomToneMapping` (`lib/viewer/sceneRig.js`, which the viewer's viewport puts up the same way);
+  every other scene keeps the theme's rig. Such a scene's surface look may name a surface model
+  too (`brdf`, `lib/viewer/surfaceBrdf.js`): an engine document's lit surfaces answer light as
+  OCCT's PBR program does, which its look is defined by, in place of three's own physical model.
+  A scene may light one look otherwise (the contract's `rigFor`, asked through `sceneRigFor`): an
+  engine document's X-ray is its look's colour-only model, an ambient term and plain directional
+  lights, no environment, three's own surface model and no finish, as OCCT draws it by Phong. A
+  rig may blend in linear light too (`blend: "linear"`, an engine document's X-ray): its
+  see-through surfaces composite as OCCT's sRGB frame buffer composites them, where three's canvas
+  blends each layer after encoding it to sRGB and draws dark see-through parts too dark. Every
+  stage draws a scene by `renderWithSceneRig`, which for such a rig draws the surfaces into a
+  half-float target in linear light (XR-flagged, so each fragment keeps the rig's tone curve),
+  multisampled as the canvas is, encodes that to the canvas with its depth in one pass, and then
+  draws what three orders after the surfaces (transparent, a later `renderOrder`: the edges, a
+  highlight, ink) over it as three always has, so a line's antialiased pixels stay resolved in
+  sRGB, as OCCT's are (`drawnOverSurfaces`); every other scene, mode and rig is three's own draw.
+  The target is the drawing buffer's size and lives with the rig: about 60 bytes a pixel at 4×
+  MSAA (some 360 MB at 3024 × 1964) while X-ray is on. Neither renderer orders see-through faces
+  as the other: three sorts each object back to front and draws a two-sided one back faces first,
+  OCCT draws them as they were displayed, which is most of what still differs.
+- `captureModel` draws the scene headless and returns its pictures, with no filesystem
+  writes. cadgen's stills are OCCT's (`cadgen snapshot`); this headless scene is what the
+  renderer parity measurement drives beside OCCT (`scripts/bench/occt_parity.py`).
 
 ## Modules
 
 ### `common/viewSettings.js` and `common/sceneSettings.js`
 
-`normalizeViewSettings(display)` is the strict public schema shared with the
-snapshot CLI. It preserves omitted groups and inherited appearance, defaulting
+`normalizeViewSettings(display)` is the strict public schema shared with the parity page's
+snapshot job and mirrored by `cadgen snapshot`'s `--display`. It preserves omitted groups and inherited appearance, defaulting
 only `mode` to `solid`. A file's modes, in order, are `solid`, `shaded`, `parts`,
 `xray`, `hidden-line`, and `wireframe` (`VIEW_MODE_VALUES`); `grid` is a boolean
 switch every mode draws, off unless said. Appearance, camera, clip and exploded are
@@ -71,8 +98,9 @@ has no fill and all edges, both lighter on a dark backdrop. With `preview: true`
 resolves Render whatever the mode: perspective, no edges, no grid and the photographic
 studio, from `previewSettings`. The modes use the shared camera, orthographic by default.
 The grid is the same measuring grid in every mode (`viewGridDefaults`). The view's
-capabilities are explicit injected lists (`viewFeaturesForKind`): a STEP every mode, any
-other 3D file Solid, and Parts where it has several parts (`scenePartCount`); a saved mode
+capabilities are explicit injected lists (`viewFeaturesForKind`): an engine document (a STEP,
+an `.xbf`) every mode (one part: no Parts, no Explode), a drawing Solid alone, any other 3D
+file Solid, and Parts where it has several parts (`scenePartCount`); a saved mode
 a view does not offer resolves as Solid without rewriting storage. Surface opacity
 multiplies authored opacity; colours remain presentation settings, never model material
 edits.
@@ -106,8 +134,7 @@ controls photographic illumination and PMREM allocation. `theme` retains the
 neutral workbench recipe whenever photographic lighting is disabled, including
 when a custom background or floor is present. Consumers build CAD models with
 `surfaceSettings: resolved.view.surfaces` and the resolved edges; they must not
-reapply historical mode-owned edge forcing. `resolveSceneSettings()` remains an
-internal compatibility resolver for older low-level consumers.
+reapply historical mode-owned edge forcing.
 
 Background opacity follows the ordinary alpha convention: 0 is transparent and
 1 is opaque. Fractional alpha is carried by the renderer clear color with
@@ -120,11 +147,12 @@ share of a dark color than of a light one). It writes the clear's alpha, premult
 as three's clear is, so a half-transparent background keeps its gradient; at alpha 0 it
 is not drawn, and a caller that renders with `scene.background` taken away and a clear
 alpha of 0 (a thumbnail) gets nothing of it. The floor's mirrored draw leaves it out.
-The floor is independent of background alpha. Render's stands at authored
-Z=0 (`placement: "origin"`, `RENDER_FLOOR_PLACEMENT`, the Render recipe's backdrop
-default too); `placement: "lowest"` follows the current model minimum without moving
-geometry or lighting. Its double-sided plane uses one transparency pass,
-keeping geometry below the origin visible. Depth fitting includes the actual floor elevation;
+The floor is independent of background alpha. Render's stands at the model's
+lowest point (`placement: "lowest"`, `RENDER_FLOOR_PLACEMENT`, the Render recipe's
+backdrop default too, and the stills' Preview floor): it follows the current model
+minimum without moving geometry or lighting. `placement: "origin"` pins it to authored
+Z=0 instead. Its double-sided plane uses one transparency pass, keeping geometry below
+the origin visible. Depth fitting includes the actual floor elevation;
 orthographic views can use a signed near plane when the floor crosses the eye.
 
 Lighting quality is `preview` or `final`, mapping to standard/high scene policy.
@@ -132,10 +160,10 @@ The viewer passes `lightingQuality: "preview"`; the CLI baseline is `final`.
 That environment default also feeds Preview's default comparison and does not pin a saved
 override. An explicit Preview `lighting.quality` wins in the viewer; a snapshot's `preview`
 is always `final`.
-Final uses the bounded L3 mesh rung, a 0.25px viewport target, 4096px spotlight
-shadows, a 512px procedural environment and 2x snapshot capture, and a still view
-in the viewer converges over 64 samples of the studio's frame (Preview: 32). Technical
-`quality.tessellation` and `output.renderScale` remain explicit overrides.
+Final is the High scene preset: 4096px spotlight shadows, a 512px procedural environment
+and 2x snapshot capture, and a still view in the viewer converges over 64 samples of the
+studio's frame (Preview: 32). `output.renderScale` is an explicit raster override; every
+mesh is the engine's, at its one tolerance.
 PNG output retains requested dimensions by resampling the full drawing buffer.
 
 The two studios use one physical Render pipeline. A neutral HDR key card, a rear
@@ -301,10 +329,9 @@ No global material, no color grading, no arbitrary lights, no floor physics, no
 glow controls. Adding one of these is a change to the law in the package
 README, not a new option here.
 
-Materials reaching that scene stay authored. STEP package material channels are
-inputs to the rig: assigned sparse materials use roughness 0.42, metalness 0.03,
-clearcoat 0, clearcoat roughness 0.26, and opacity 1; an absent base color
-retains the STEP color, and authored opacity multiplies its source alpha.
+Materials reaching that scene stay authored. An engine document's parts wear the material and
+colour the structure gives them (`lib/xbf/xbfLook.js`); a part with none wears the studio's
+surface (`PHOTOGRAPHIC_STUDIO_MATERIAL_SETTINGS`).
 A GLB, a mesh file and a robot reach the studio as the scene their viewer renderer
 builds. A GLB is its native glTF hierarchy, so its textures and PBR channels stay
 attached and Render wears them exactly as authored; an STL, a 3MF and a robot author no
@@ -313,9 +340,9 @@ robot description's colour, else its link mesh's own).
 
 Snapshots use the same grouped display contract. Photographic lighting supports
 only the `view` capture mode. Camera,
-selection, clipping, exploded view, guides, part colour, animation, video,
-kinematics, robot joints, tessellation quality, per-output cameras and output
-sizing remain composable.
+selection, clipping, exploded view, guides, part colour, animation,
+kinematics, robot joints, per-output cameras and output sizing remain
+composable.
 
 Photographic lighting creates its WebGL renderer with
 `logarithmicDepthBuffer: false`. Three's logarithmic depth shader path does not
@@ -328,202 +355,37 @@ plane and bounds independently of Floor. Otherwise the subject's near plane
 clips foreground guides, or the far plane truncates their finite span. A
 perspective camera passes its `pivot` (the point it looks at): its near plane
 never comes nearer than 1/256 of the pivot's depth, so a closeup the fit cannot
-measure (the camera inside a part's own box, or a routine deforming what it
-measures) keeps its depth resolution instead of making close surfaces fight.
+measure (the camera inside a part's own box, or a part with no bounds to
+measure) keeps its depth resolution instead of making close surfaces fight.
 Snapshots draw every preset the same way: ordinary depth, fitted to each output
-with the same inputs (its placed records, the studio floor's elevation, the
-drawn grid's span and the camera's target as pivot). A logarithmic buffer would
-also lose the instanced CAD edges, which write no logarithmic depth: under a
-perspective camera every edge failed its depth test against the surfaces.
-
-### `common/source.js`
-
-```js
-import {
-  loadSource,
-  stepParameterRuntime
-} from "@text-to-cad/core/common/source.js";
-```
-
-`loadSource(input, options)` returns a normalized STEP render source:
-
-```js
-{
-  kind,
-  meshData,
-  selectorRuntime,
-  displayEdgeRuntime,
-  stepParameterSource,
-  resolved,
-  url,
-  glbUrl,
-  cadPath
-}
-```
-
-Accepted input fields:
-
-- `kind`: `step` or `stp`, or inferred from a URL. A GLB, STL, 3MF, URDF, SRDF
-  or SDF is refused by name: it is drawn by its own scene builder
-  (`common/headlessScene.js`), never flattened into mesh data here.
-- `meshData`: already-loaded mesh data. If present, no mesh URL fetch is needed.
-- `glbUrl` or `resolved.glbUrl`: STEP/STP hidden GLB sidecar URL.
-- `cadPath` or `resolved.inputPath`: CAD path used by STEP selectors.
-- A caller that passes a `resolved` packet together with any source URL must also pass
-  `resolved.inputPath`. Render asset caches are page-lifetime, so a resolved job has to name the
-  source its cache entries belong to; a resolved job without `inputPath` is rejected rather than
-  cached under an unidentified source. Callers with no `resolved` packet (the interactive viewer and
-  the docs hero renderer) render one source per page and need nothing.
-- `selectorRuntime` and `displayEdgeRuntime`: preloaded runtimes when a caller
-  already owns sidecar loading.
-- `kinematics`: pose values for the model's kinematics — a declared preset name,
-  or `{dof: value}`. Same spelling as the `--kinematics` flag, the snapshot job
-  key and the sidecar section.
-- `stepParameterUrl` or `resolved.stepParameterUrl`: model sidecar
-  (`.step.json`) URL, whose `kinematics` section is compiled here.
-- `quality.tessellation`: explicit STEP tolerances in every mode. When
-  omitted, `preview: true` selects the bounded final mesh rung.
-
-STEP-only options are rejected for non-STEP sources. The old shared `params`
-field is rejected, and so is the retired `stepParameters` spelling; use
-`kinematics`.
-
-Use `stepParameterRuntime(stepParameterSource)` to turn the loaded parameter
-source into the runtime object `buildModel` accepts.
-
-### `common/cadScene.js`
-
-```js
-import {
-  buildModel,
-  fitCameraToModel
-} from "@text-to-cad/core/common/cadScene.js";
-```
-
-`buildModel(THREE, source, settings)` returns a model API:
-
-```js
-{
-  source,
-  meshData,
-  root,
-  modelGroup,
-  edgesGroup,
-  displayRecords,
-  records,
-  bounds,
-  restBounds,
-  radius,
-  runtime,
-  update(nextSettings),
-  dispose()
-}
-```
-
-`source` can be a `loadSource()` result or raw mesh data. The model owns the
-Three.js object graph and its mutable state.
-
-`bounds` follows the live pose — what lighting, the floor, shadows and clipping
-need. `restBounds` is the same model at its ZERO pose, before a parameter, mate
-or animation frame moved a record, and it is what a camera fit is grounded on so
-that posing a model never re-frames it. A package that declares its whole box
-(assembly.json's `bbox`, `declaredBounds` in its composition) rests in that box,
-as the scene contract has it: the viewer frames and grounds it, and a snapshot
-sizes its ground and radiates an exploded view from it. A family scene carries
-its own (`restBounds` in the scene contract): a robot's is every joint at its
-default.
-
-Common settings:
-
-- `theme`: normalized or raw CAD scene settings. Render passes none and supplies
-  `materialSettings` instead.
-- `displayMode`: `shaded`, `shaded_edges`, `transparent`, `hidden_edges`,
-  `hidden_lines_removed`, `unshaded`, or `wireframe`.
-- `edgeSettings`: display-owned CAD edge style. Themes do not own edges.
-- `materialOverrides`: sparse explicit PBR overrides; authored PBR otherwise
-  wins over studio material fallbacks.
-- `scale`/`sceneScale`: CAD or robot scene scale.
-- `selection`: internal selection/filtering state. `focus` and `hide`
-  filter rendered parts before records are built. Viewer-only fields such as
-  `selectedPartIds`, `hiddenPartIds`, and `showEdges` affect visual state.
-- `clip`: normalized clip-plane settings.
-- `stepParameters`: compiled kinematics runtime object, from
-  `stepParameterRuntime()`.
-- `parameterSetup`: set `false` to skip sidecar setup lifecycle calls.
-- `renderPartsIndividually`: build per-part records instead of a whole mesh.
-- `edgeRendering`: declarative edge rendering configuration.
-
-Declarative screen-space edge rendering:
-
-```js
-buildModel(THREE, source, {
-  edgeRendering: {
-    mode: "screen-space",
-    Line2,
-    LineGeometry,
-    LineSegments2,
-    LineSegmentsGeometry,
-    LineMaterial,
-    wireframeEdgeColor: "#111827"
-  }
-});
-```
-
-The model keeps screen-space line material bookkeeping internal through
-`runtime.screenSpaceLineMaterials` and `runtime.syncScreenSpaceLineMaterials()`.
-Callers should not provide callbacks that create edge objects.
-
-`model.update(nextSettings)` merges mutable settings, rebuilds geometry only
-when needed, reapplies material/selection/clip/STEP parameter state, and returns
-the same model API. `model.dispose()` releases model-owned scene objects and
-STEP parameter cleanup hooks.
-
-Source colors: a GLB's material base colors and its `COLOR_0` vertex attribute
-both count as source colors (`lib/render/glbMeshData.js`). A vertex-colored
-part renders on a white base so the ramp shows unmixed — an FEA result or scan
-heatmap keeps its colors even when the file declares no materials at all — and
-`overrideSourceColors` in material settings replaces both kinds with display
-fills.
-Package components carry no vertex colors; their coloring is the descriptor's
-occurrence/component/face colors.
-
-`fitCameraToModel(THREE, camera, bounds, options)` is the shared orthographic
-camera framing helper used by interactive rendering.
+with the same inputs (its placed objects, the studio floor's elevation, the
+drawn grid's span and the camera's target as pivot).
 
 ### Display modes, CAD edges and geometry sharing
 
 Internal draw modes are `shaded`, `shaded_edges`, `transparent`,
-`hidden_edges`, `hidden_lines_removed`, `unshaded`, and `wireframe`. Public
-presets resolve to those implementation details plus independent surface and
+`hidden_edges`, `hidden_lines_removed`, `unshaded` and `wireframe`
+(`common/displaySettings.js`). Public presets resolve to those implementation details plus independent surface and
 edge settings; never feed a public preset into `normalizeDisplayMode()`. Normal CAD
 keeps authored albedo, opacity and finish. Workbench PBR channels are fallbacks;
 a small neutral reflection environment makes authored metals readable without
-loading the photographic studio.
+loading the photographic studio (an engine document's: its look's environment,
+which its rig brings).
 `resolveDisplayMaterialSettings()` applies the shared Original, Single color
 and Color by part policy without app state.
 
-**Scene geometry is the tessellator's INDEXED output.** A surf component's
-`meshData` shares the tessellation's vertex, normal and index buffers by
-reference (a decoded `.tess` cache entry is copied out of its one entry
-buffer) and is never expanded per triangle corner.
+**Scene geometry is the engine's part buffers, read in place.** An engine document's parts
+are XBM2 buffers (`lib/xbf/xbm.js`): positions, normals, indices, the face and edge tables
+and the edge polylines, read as typed-array views (`lib/xbf/xbfDocument.js`) and never
+expanded per triangle corner. One geometry per prototype serves every instance
+(`lib/render/sharedGeometry.js`).
 
-**CAD edges are not a surface shader.** `surfMeshData.js` emits indexed line
-segments (`cadEdgePositions` + `cadEdgeIndices` + `cadEdgeClassRanges`, from
-the same tessellation's boundary polylines, ~1.5 bytes per surface triangle)
-and `cadScene.js` draws them as ONE instanced screen-space line draw per
-component (`cadEdgeInstances.js`): the instances are every (segment,
-occurrence) pair, decoded in the vertex shader from a per-component segment
-texture (32 B per drawn segment, cached on the component) and a per-set
-instance texture (128 B per occurrence: matrix, colour, opacity, visibility,
-highlight).
-
-**Every mode draws the same edges, Wireframe included.** Wireframe is the CAD
-edges through the model with no fill, never the tessellation's triangles: a
-switch to it reuses the segment textures (or, for a baked mesh without segments,
-the one cached edge geometry per component, keyed by no mode) that Solid, X-ray
-and Hidden line draw, so it builds nothing per triangle. It once built three's
-`WireframeGeometry` over every triangle on the main thread: 10 s and +1 GB on a
-437 MB STEP, for a picture that read as a solid blob.
+**CAD edges are not a surface shader.** An engine document draws one line set per edge class
+(`lib/xbf/xbfScene.js`: a `LineBasicMaterial` each, in the class's ink) from the buffer's edge
+polylines, and a highlighted edge as screen-space segments (`createScreenSpaceLineSegments`,
+`common/renderEdges.js`). Every mode draws the same edges, Wireframe included: Wireframe is
+the CAD edges with no fill, never the tessellation's triangles, so it builds nothing per
+triangle.
 
 `cadInk.js` fixes one dark model-edge palette and nominal widths per class:
 feature 1, tangent 0.65, seam 0.8, and degenerate 0 (hidden). Public
@@ -547,33 +409,11 @@ nominal width even for subpixel lines, and zero width has zero coverage. Both
 line paths share the filter; antialiasing does not inflate thin lines or depend
 on the framebuffer sample count.
 
-Per-occurrence highlight, dim, hide, focus, exploded placement and selection
-are slots in that texture, written by the same record passes
-(`applyDisplayRecordTransform`, `applyPartVisualState`,
-`syncRecordEdgeMaterials`) that drive a plain line object; highlighted
-occurrences draw in a second pass at the highlight render order. A deformed
-tube leaves its slot for private screen-space lines, one per drawn class, that
-bend with the surface and preserve the same class weights and colours.
-Basic-only hosts use separate per-class materials too, so appearance changes
-retain private edge geometry and cannot recolour another scene's component.
-GPU cost per component: two textures, one 4-vertex quad, two materials, one
-draw call (+1 while any occurrence is highlighted).
-
-**One upload per component.** Geometry built from a shared component is cached
-on the component object (`part.sourceMesh`), never on the composed package
-`meshData`: a package is re-composed on every progressive publish and LOD swap,
-and every occurrence, publish and swap reuses the one upload. A publish of the
-same model reaches the live scene through `api.update({ source })`, which
-reconciles records by occurrence id — records already on screen keep their
-mesh, materials, visual and deformation state and BVH; only new occurrences are
-built and only departed ones disposed (ownership and disposal:
-[resource-ownership.md](resource-ownership.md)). Effects that change vertex
-positions or normals acquire writable attributes before deforming them;
-material refreshes leave component data unchanged. This keeps large assemblies
-from duplicating these buffers for display. Assemblies keep geometry in their
-component buffers; they allocate no combined copy of all positions, normals and
-indices. Rendering visits the placed components directly, and
-the Viewer accepts that component geometry.
+Per-occurrence highlight, dim, hide, isolation, exploded placement and selection are the
+scene's own state (`setHighlight`, `setHiddenPartIds`, `setExplode` on the scene contract,
+`lib/viewer/sceneContract.js`); a rebuild of the open file keeps every part buffer and
+geometry whose key the new version still holds, and builds only the parts the edit changed
+(ownership and disposal: [resource-ownership.md](resource-ownership.md)).
 
 ### `common/renderModel.js`
 
@@ -624,6 +464,10 @@ Common options:
 root from the scene, and disposes the created renderer/model unless ownership
 was explicitly retained by options.
 
+It frames the model with `fitCameraToModel(THREE, camera, bounds, options)`, the
+orthographic fit the module exports: the bounds' corners inside `padding` (0 to 0.15, as
+`framePadding` bounds a snapshot's) from `direction`.
+
 ### `common/renderMeshScene.js`
 
 Use this module for deterministic headless snapshot rendering.
@@ -631,28 +475,22 @@ Use this module for deterministic headless snapshot rendering.
 ```js
 import {
   renderJobContext,
-  modelOptionsForRenderJob,
   renderModel,
-  captureModel,
-  renderMeshJob
+  captureModel
 } from "@text-to-cad/core/common/renderMeshScene.js";
 ```
 
 `renderJobContext(meshData, job)` resolves the shared scene contract plus
-snapshot-owned output policy: display, camera, quality, scene scale, outputs,
-STEP topology edge visibility, and warnings. Studio scene quality is Preview's final
-when the job asks for `preview`; `job.quality` contains technical tessellation only. A
-family scene passes `{ bounds, partCount, explodeParts }` for `meshData`; its job's kind
-resolves the view features (`viewFeaturesForKind`): anything but a STEP has no edges,
-Parts only with several parts, and Explode only for a GLB of several.
+snapshot-owned output policy: display, camera, quality, scene scale, outputs, the edges
+the view offers, and warnings. Studio scene quality is Preview's final when the job asks
+for `preview`; `quality` is the scene preset's render scale and shadow and environment
+sizes, and the job's `output.renderScale` overrides the first. A family scene passes
+`{ bounds, partCount, explodeParts }` for `meshData`; its job's kind resolves the view
+features (`viewFeaturesForKind`): an engine document has edges and every mode, any other
+family none, Parts only with several parts, and Explode only for a GLB of several.
 
-`modelOptionsForRenderJob(context, job)` converts that policy into
-`buildModel()` settings.
-
-Snapshot `renderModel(THREE, model, { job, context })` holds either a CAD model from
-`buildModel` or a family scene wrapped by `headlessSceneModel`; only a CAD model has a
-runtime, so only it takes the exploded view, topology edges and screen-space line
-widths. It returns a headless viewport:
+Snapshot `renderModel(THREE, model, { job, context })` holds a family scene wrapped by
+`headlessSceneModel` and returns a headless viewport:
 
 ```js
 {
@@ -673,14 +511,13 @@ This `renderModel` is intentionally separate from `common/renderModel.js`.
 Render is drawn through the studio's frame, every sample of it at once
 (`renderStill`: `PHOTOGRAPHIC_STUDIO_FRAME.stillSamples`, 32, re-rendering shadows only for a
 sample that moved the key), with no MSAA of its own: the snapshot supersamples at its render
-scale. A video's frame and a software renderer draw one sample (`snapshotStudioSamples`).
+scale. A software renderer draws one sample (`snapshotStudioSamples`).
 It uses snapshot sizing, studio environment, the shared stage floor/glow/shadow,
 model-scaled lights with a fitted shadow frustum, canonical camera projection,
 and deterministic renderer settings. Automatic perspective cameras fit the
 current visible vertices to `output.padding` when `output.tightFrame` is true;
 otherwise they fit the model bounds. An explicit camera position is never
-reframed. Video capture fits its precomputed sequence-union bounds once so the
-camera does not breathe between frames. As in the viewer, a still's studio floor
+reframed. As in the viewer, a still's studio floor
 and its contact shadow stay sized and centred on the rest placement however the
 model is posed or exploded (`groundBounds`), and an exploded view radiates from
 that rest box.
@@ -688,28 +525,31 @@ that rest box.
 `captureModel(viewport, { job })` returns data only:
 
 - `mode: "view"`: PNG data URLs in `outputs`.
-- `mode: "list"`: part list and bounds. A CAD model lists its composed part
-  occurrences; a family scene lists what it drew, one row per mesh, in its scene
-  graph's order (a robot's scene attaches a link's meshes before the joints it
+- `mode: "list"`: part list and bounds. A family scene lists what it drew, one row per mesh,
+  in its scene graph's order (a robot's scene attaches a link's meshes before the joints it
   carries, so its rows run down the tree from the root).
 
-It does not write files. The CAD skill snapshot CLI writes the returned data to
-disk. Consumers use compiled `@text-to-cad/core` exports; generated snapshot browser assets
-bundle this entrypoint into cadgen's packaged runtime (`cadgen/_runtime/browser`).
-
-`renderMeshJob(meshData, job)` is a compatibility wrapper that builds a context,
-builds a model, renders/captures it, and disposes owned resources.
+It does not write files: its caller does. Consumers use compiled `@text-to-cad/core`
+exports; the OCCT parity bench bundles this entrypoint into a snapshot page of its own, built
+on demand outside the wheel, and loads it in a headless Chromium to compare with OCCT's stills.
+cadgen's own snapshots are drawn by OCCT and never load it.
 
 ### `common/headlessScene.js`
 
 The snapshot page's half of "one scene builder per file family". `headlessSceneFamily(job)`
 answers, from the job's resolved kind, the family whose loader and builder draw it (GLB;
-STL and 3MF; URDF, SRDF and SDF), or null for a STEP document. A family is
+STL and 3MF; URDF, SRDF and SDF; an engine document, `xbf`, whose `resolved.url` is its API
+URL on the engine: `loadXbfDocument` + `createXbfScene`), or null for a STEP document. The
+dress carries the view's `edges` too, for a scene that draws CAD edges of its own (an engine
+document's), as the xbf renderer hands them to its scene in the viewer. A family is
 `{ load(job, { resources }), build(THREE, loaded, job), release(loaded) }`, each a call to
 the module the viewer's renderer calls: `loadRenderGlbDocument` + `createGlbScene`,
 `loadRenderMeshByUrl` + `buildMeshScene`, `loadRobot` + `createRobotScene`. A robot is
-posed as it is built, at `robotOpeningPose` (every joint's default, then an SRDF's `home`
-group state: where the viewer opens it) with the job's `jointValues` on top.
+drawn from the payload cadgen resolved for it (`resolved.robot`: the articulation, the
+visuals at their rest placements, each mesh by a URL the snapshot's asset server answers)
+and posed as it is built, at the articulation's opening (every control at rest, then an
+SRDF's `home` group state: where the viewer opens it) with the job's `resolved.controls` on
+top, the bench's control values (`cadgen snapshot` poses a robot by `--pose`).
 
 `headlessSceneModel(THREE, scene, headlessSceneDress(context.sceneSettings))` dresses the
 scene exactly as the viewer's viewport dresses one it adopts, with the look
@@ -721,98 +561,59 @@ The still's tight frame reads a skinned or morphed mesh where the GPU draws it.
 
 ## Kinematics
 
-Two names, two things, and they are not interchangeable:
-
-* `kinematics` is the POSE INPUT — what `loadSource()` and the snapshot job
-  packet take. A declared preset name, or direct DOF values:
-
-  ```json
-  { "drive": 180, "ringVisible": false }
-  ```
-
-  Animation envelopes (`animate`, `fps`, `durationSeconds`, `duration`, `loop`)
-  are retired and throw: a still renders one frame at the given values.
-
-* `stepParameters` is the compiled RUNTIME OBJECT that `buildModel()` takes,
-  produced by `stepParameterRuntime(source.stepParameterSource)`.
-
-`common/stepParameters.js` validates the pose values against the loaded
-definition and normalizes defaults.
-`loadSource()` uses it to populate `source.stepParameterSource`; callers then
-pass `stepParameterRuntime()` into `buildModel()`.
+A still of a robot is posed as the viewer opens it — every control at rest, then an SRDF's
+`home` group state — with the job's `resolved.controls` on top (`scene.setControlValues`,
+`common/articulation.js`), the parity bench's control values. `cadgen snapshot` poses a
+document's or a robot's mechanism by `--pose`: a mechanism state's name, or a JSON object of
+joint values; a Quick Edit packet carries the same as `jointValues`.
 
 ## Examples
 
-Interactive viewer/docs usage:
+Docs usage, the hero: one GLB cadgen exported, read and played the way the viewer reads
+and plays a GLB, and drawn by `renderModel` from a model of a root and its bounds:
 
 ```js
 import * as THREE from "three";
-import { loadSource, stepParameterRuntime } from "@text-to-cad/core/common/source.js";
-import { buildModel } from "@text-to-cad/core/common/cadScene.js";
+import { buildGlbDocumentFromBuffer } from "@text-to-cad/core/lib/render/glbMeshData.js";
+import { createGlbAnimationRuntime, setGlbAnimationTime } from "@text-to-cad/core/lib/render/glbAnimationRuntime.js";
 import { renderModel } from "@text-to-cad/core/common/renderModel.js";
 
-const source = await loadSource({
-  kind: "step",
-  glbUrl: "/models/.part.step.glb",
-  sourceSidecarUrl: "/models/part.step.json",
-  cadPath: "models/part.step",
-  kinematics: { drive: 180 }
-});
+const glb = await buildGlbDocumentFromBuffer(await (await fetch("/hero/planetary.glb")).arrayBuffer(), {});
+const placed = new THREE.Group();                 // the file in CAD space: millimetres, Z up
+placed.matrix.fromArray(glb.cadRootMatrix);
+placed.matrixAutoUpdate = false;
+placed.add(glb.scene);
+const root = new THREE.Group();
+root.add(placed);
 
-const model = buildModel(THREE, source, {
-  theme,
-  displayMode: "shaded_edges",
-  edgeSettings,
-  stepParameters: stepParameterRuntime(source.stepParameterSource)
-});
-
-const viewport = renderModel(THREE, model, {
+const clip = glb.clips.find((candidate) => candidate.name === "meshCycle");
+const animation = createGlbAnimationRuntime(THREE, glb.scene, clip);
+let elapsed = 0;
+const viewport = renderModel(THREE, { root, bounds: glb.animatedBounds }, {
   canvas,
   hostElement: canvas.parentElement,
   theme,
-  autoStart: true
+  autoStart: true,
+  beforeRender: ({ deltaSeconds }) => {
+    elapsed = (elapsed + deltaSeconds) % clip.duration;
+    setGlbAnimationTime(animation, elapsed);
+  }
 });
 ```
 
-Headless snapshot usage (a STEP document; `headlessRenderEntry.js` routes every other
-family through `common/headlessScene.js` into the same `renderModel`/`captureModel`):
-
-```js
-import * as THREE from "three";
-import { loadSource } from "@text-to-cad/core/common/source.js";
-import { buildModel } from "@text-to-cad/core/common/cadScene.js";
-import {
-  captureModel,
-  modelOptionsForRenderJob,
-  renderJobContext,
-  renderModel
-} from "@text-to-cad/core/common/renderMeshScene.js";
-
-const source = await loadSource(job);
-const context = renderJobContext(source.meshData, job);
-const model = buildModel(THREE, source, modelOptionsForRenderJob(context, job));
-const viewport = renderModel(THREE, model, { job, context });
-
-try {
-  const result = await captureModel(viewport, { job });
-  // Write result.outputs in the CAD skill snapshot CLI or another caller-owned layer.
-} finally {
-  viewport.dispose();
-}
-```
+A headless snapshot (`headlessRenderEntry.js`) paints a DXF on a 2D canvas
+(`common/headlessDrawingRender.js`) and draws a file family through
+`common/headlessScene.js` into the same `renderModel`/`captureModel`; a STEP is drawn as
+the engine document it opens as.
 
 ## Ownership Rules
 
 - Do not write files from shared render APIs. Return data to the owning CLI or
   application layer.
-- Do not expose object-construction callbacks for edges. Use declarative
-  `edgeRendering`.
-- Keep STEP-only options explicitly STEP-named and reject them for non-STEP
-  sources.
 - Dispose viewports and models that you create.
-- Prefer `loadSource -> buildModel -> renderModel -> captureModel` for new
+- Prefer a family's scene builder, then `renderModel` and `captureModel`, for new
   shared render code instead of loading assets or constructing render scenes
   inline.
-- Draw a GLB, a mesh file or a robot with its family's scene builder, in the viewer
-  and in a snapshot alike. Never give one host its own way to draw a family:
+- Draw a GLB, a mesh file, a robot or an engine document with its family's scene builder, in
+  the viewer and on the parity page alike. Never give one host its own way to draw a family:
   `scripts/test/check-kit-boundaries.mjs` (`checkSharedSceneBuilders`) refuses it.

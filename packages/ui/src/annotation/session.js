@@ -3,6 +3,10 @@ import { sameView } from './views.js';
 import { useViewerHistory } from '../renderers/kit/shell/useViewerHistory.js';
 import { strokeWidthAt } from './geometry.js';
 import { DEFAULT_PENCIL_TOOL, DEFAULT_SHAPE_TOOL, styleSlot, toolFamily } from './tools.js';
+import { useControlUsage } from '../usage/controls.js';
+
+// A drawing tool as telemetry names it (`usage/controls.js`): its strip tool's name, then its own.
+const toolControl = tool => `${toolFamily(tool)}_${tool === 'freedraw' ? 'pen' : tool}`;
 
 /**
  * @typedef {{ color: string, strokeWidth: number, placement: import('./toolbar.jsx').AnnotationPlacement }} DrawingStyle
@@ -25,7 +29,7 @@ import { DEFAULT_PENCIL_TOOL, DEFAULT_SHAPE_TOOL, styleSlot, toolFamily } from '
  * @property {import('./tools.js').AnnotationTool} tool  The drawing tool in hand: Shapes' `shape` while Shapes is the strip tool,
  *   else Pencil's `pencil`.
  * @property {import('./tools.js').PencilTool} pencil  What Pencil draws with (the pen first), kept while Shapes is up.
- * @property {import('./tools.js').ShapeTool} shape  What Shapes draws with (the line first), kept while Pencil is up.
+ * @property {import('./tools.js').ShapeTool} shape  What Shapes draws with (the rectangle first), kept while Pencil is up.
  * @property {DrawingStyle} style  What the tool in hand puts down next: its slot's colour, stroke width and placement
  *   (`surface`, the default, each point on the visible surface under it, or `plane`, each on the plane of the surface the
  *   mark starts on; off the model both carry on at that plane: `annotation3d.js`'s `projectAnnotations`).
@@ -123,13 +127,16 @@ export function useAnnotationSession(family = 'pencil', initial = {}, history = 
     setSelected(current => (current.every(id => items.some(item => item.id === id)) ? current
       : current.filter(id => items.some(item => item.id === id))));
   }, [items]);
-  const add = useCallback(items => { if (items.length) step(current => [...current, ...items]); }, [step]);
+  // What a person did to the ink, counted (`usage/controls.js`): a mark put down, ink deleted, a style chosen.
+  const controls = useControlUsage();
+  const add = useCallback(items => { if (items.length) { controls.used('annotate_mark'); step(current => [...current, ...items]); } }, [step, controls]);
   const remove = useCallback(ids => {
     const gone = new Set(ids);
     if (!gone.size) return;
+    controls.used('annotate_delete');
     step(current => (current.some(item => gone.has(item.id)) ? current.filter(item => !gone.has(item.id)) : current));
     setSelected(current => current.filter(id => !gone.has(id)));
-  }, [step]);
+  }, [step, controls]);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const tool = family === 'shapes' ? shape : pencil;
@@ -143,14 +150,15 @@ export function useAnnotationSession(family = 'pencil', initial = {}, history = 
       : { ...current, [target]: { ...current[target], ...change } }));
   }, []);
   const actions = useMemo(() => ({
-    selectTool: next => (toolFamily(next) === 'shapes' ? setShape(next) : setPencil(next)),
-    selectColor: next => setStyle({ color: next }),
-    selectStrokeWidth: next => setStyle({ strokeWidth: next }),
-    selectPlacement: next => setStyle({ placement: next }),
+    selectTool: next => { controls.used(toolControl(next)); return toolFamily(next) === 'shapes' ? setShape(next) : setPencil(next); },
+    selectColor: next => { controls.changed('annotate_color'); setStyle({ color: next }); },
+    selectStrokeWidth: next => { controls.used('annotate_stroke_width'); setStyle({ strokeWidth: next }); },
+    selectPlacement: next => { controls.used(next === 'plane' ? 'annotate_on_plane' : 'annotate_on_surface'); setStyle({ placement: next }); },
     // Not a style: ink already down, selected or not, stays where it lies.
     restyle: ({ color: nextColor, width }) => {
       const ids = new Set(selectedRef.current);
       if (!ids.size) return;
+      controls.changed('annotate_restyle');
       step(current => {
         let changed = false;
         const next = current.map(item => {
@@ -170,6 +178,7 @@ export function useAnnotationSession(family = 'pencil', initial = {}, history = 
     },
     fill: (shape, areas) => {
       if (!areas.length) return;
+      controls.used('annotate_fill');
       step(current => {
         const target = current.find(item => item.id === shape);
         if (!target) return current;
@@ -191,7 +200,7 @@ export function useAnnotationSession(family = 'pencil', initial = {}, history = 
       viewsRef.current = [];
       setViews([]);
     },
-  }), [step, put, setStyle]);
+  }), [step, put, setStyle, controls]);
   const hasContent = items.length > 0;
   return { ready: true, tool, pencil, shape, style: styles[slot ?? 'pen'], styles, items, selected, views,
     canUndo: log.canUndo, canRedo: log.canRedo, hasContent, hasAnnotation: hasContent,

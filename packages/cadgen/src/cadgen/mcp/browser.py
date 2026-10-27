@@ -1,60 +1,89 @@
-"""A link to a model in the CAD Viewer, for an app that cannot show CAD views itself.
+"""Links to the installation's viewer page, for text-only hosts, and the open the stdio peer makes.
 
-``cadgen viewer --json --detach`` reuses this machine's Viewer or starts one in the background (its
-own session, its output to the viewer log in the state directory), prints its ``{url, port, action}``
-line and exits. So a started Viewer outlives this server, as one an agent starts from a shell does, and
-nothing it writes later comes back here. The Viewer opens any model by its absolute path, so the
-launch runs from the user's home folder: where it starts only decides how a developer's relative
-links resolve. It never opens a browser: the link is the user's to open.
+A text host's ``cad_show`` opens the model's page in the person's browser, but never from the
+engine: the engine runs in the environment of whatever started it (another agent's shell, another
+``BROWSER``, no display), so its open could land in the wrong browser, or nowhere. The stdio peer
+the host started (``shim.py``), which runs in the agent's own environment, opens it instead. It
+says at initialize that it opens a browser for its host, and whether it can
+(``transport_browser``); the engine's answer then carries the page to open in its result's
+``_meta`` (``OPEN``), which the peer opens and strips before the host sees the result
+(``deliver``), and before that tells the engine on its session whether the page opened
+(``OPENED``): the engine counts a page as open in the person's browser only once told it opened,
+so after a failed open the next ``cad_show`` opens it again. A client with no such peer is given
+the URL in words and nothing opens.
 """
-
 from __future__ import annotations
 
-import json
 import os
-import subprocess
-import sys
-from urllib.parse import quote
+from typing import Any, Callable
 
-LAUNCH = (sys.executable, "-P", "-m", "cadgen.cli", "viewer", "--host", "127.0.0.1", "--json", "--detach")
-LAUNCH_SECONDS = 30.0
+from cadgen.engine.client import request
+
+# A text host's cad_show result: ``{"url", "said", "failed"}``, the page the stdio peer opens, the
+# sentence of the result that says it opened, and the one it says in its place where the open
+# fails (``{reason}`` the failure). Only the peer that declared ``transport_browser`` is sent it.
+OPEN = 'dev.texttocad/open'
+# The peer's word on that page, the notification it sends on its session once its open returned and
+# before its host has the answer: ``{"url", "opened"}``, the page asked and whether it opened. The
+# engine reads only the first word on a page it asked that session's peer for (``Server.notify``).
+OPENED = 'notifications/dev.texttocad/opened'
 
 
 class ViewerUnavailable(Exception):
-    """The CAD Viewer could not be started."""
+    """The engine could not provide its viewer page."""
 
 
-def viewer_url(*, cwd: str | None = None, command=LAUNCH, timeout: float = LAUNCH_SECONDS) -> str:
-    """The URL of this machine's CAD Viewer: the running one, or one started now from ``cwd`` (the
-    user's home folder by default)."""
-    from cadgen.analytics import NOTICE_ENV
-
+def viewer_url(model: str | None = None, *, cwd: str | None = None) -> str:
+    """The viewer page of ``model`` (an absolute CAD file path, or a document id the engine holds),
+    ``/<id>``, the file registered by the launch; the home's without one."""
     try:
-        # Its stderr is thrown away, so the analytics notice a command says once would reach nobody.
-        # No window on Windows: a host that started this server without a console would otherwise
-        # give the launcher a new console, with a window, for as long as it waits on the Viewer (#597).
-        process = subprocess.Popen(list(command), cwd=cwd or os.path.expanduser("~"), stdin=subprocess.DEVNULL,
-                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                   env={**os.environ, NOTICE_ENV: "0"},
-                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        answer = request({'op': 'viewer', 'start': cwd or os.path.expanduser('~'),
+                          'files': [model] if model else []})
     except OSError as error:
         raise ViewerUnavailable(str(error)) from error
+    if not answer or 'failed' in answer:
+        raise ViewerUnavailable((answer or {}).get('failed', 'engine did not answer'))
+    return answer['url']
+
+
+def transport_browser() -> dict[str, Any]:
+    """What the stdio peer says of its browser at initialize: that it opens one for its host, and
+    ``refusal``, why none can be opened from its environment (no display, a remote shell), or None."""
+    from cadgen.viewer.browser_open import display_refusal
+
+    return {'refusal': display_refusal()}
+
+
+def deliver(result: Any, opener: Callable[[str], bool] | None = None,
+            tell: Callable[[str, bool], None] = lambda url, opened: None) -> Any:
+    """``result`` as the host is given it: a page the engine asked this process to open (``OPEN``)
+    opened here, through an owner-only redirect file (``browser_open``) by ``opener``
+    (``webbrowser.open``, which reads this process's ``BROWSER``), and the request removed; where
+    no browser opens, the sentence that said it did replaced by the one that says why not. Whether
+    it opened is told, ``tell(url, opened)`` (the engine, ``OPENED``), before the result is returned."""
+    meta = result.get('_meta') if isinstance(result, dict) else None
+    if not isinstance(meta, dict) or OPEN not in meta:
+        return result
+    asked = meta.pop(OPEN)
+    if not meta:
+        del result['_meta']
+    if not isinstance(asked, dict):
+        return result
+    url, said, failed = asked.get('url'), asked.get('said'), asked.get('failed')
+    if not isinstance(url, str) or not url.startswith(('http://', 'https://')):
+        return result  # only a page the engine serves is opened, never a file or a program
+    import webbrowser
+
+    from cadgen.viewer.browser_open import CannotOpen, open_page
     try:
-        output, _ = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.communicate()
-        raise ViewerUnavailable(f"`cadgen viewer` gave no URL within {timeout:.0f} s") from None
-    for raw in output.splitlines():
-        try:
-            payload = json.loads(raw)
-        except ValueError:
-            continue  # narration
-        if isinstance(payload, dict) and isinstance(payload.get("url"), str):
-            return payload["url"]
-    raise ViewerUnavailable(f"`cadgen viewer` exited ({process.returncode}) without a URL")
-
-
-def model_link(url: str, model: str) -> str:
-    """``url`` opened at ``model``, named by its absolute path: readable, with ``/`` and ``:`` kept."""
-    return f"{url}?file={quote(model.replace(os.sep, '/'), safe='/:')}"
+        open_page(url, opener=opener or webbrowser.open)
+    except CannotOpen as failure:
+        tell(url, False)
+        if isinstance(said, str) and isinstance(failed, str):
+            instead = failed.replace('{reason}', str(failure))
+            for item in result.get('content') or []:
+                if isinstance(item, dict) and isinstance(item.get('text'), str):
+                    item['text'] = item['text'].replace(said, instead, 1)
+    else:
+        tell(url, True)
+    return result

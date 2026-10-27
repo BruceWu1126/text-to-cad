@@ -53,7 +53,8 @@ claim cost or cycle-time optimization.
 ## Reproduce
 
 Use the repository's cadgen/build123d environment, plus trimesh, numpy, rtree,
-networkx, lxml and matplotlib for analysis/figure generation. From this folder:
+networkx, lxml and matplotlib for analysis/figure generation. From this folder (each
+script is described in [`src/README.md`](src/README.md)):
 
 ```sh
 for model in src/*.py; do python "$model"; done

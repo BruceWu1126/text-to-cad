@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
-import { Maximize } from 'lucide-react';
+import { ExternalLink, Maximize2 } from 'lucide-react';
 import { useAnalyticsConsent } from '@text-to-cad/ui/consent';
-import { useLanguage } from '@text-to-cad/ui/i18n';
+import { translator, useI18n, useLanguage } from '@text-to-cad/ui/i18n';
 import { UpdateButton, useUpdateNotice } from '@text-to-cad/ui/update';
 import { viewerLinks } from '@text-to-cad/ui/links';
 import { Button } from '@text-to-cad/ui/primitives/button';
@@ -10,6 +10,8 @@ import { createTabStore, memoryTabRecord } from '@text-to-cad/ui/tab-store';
 import { normalizePath } from '@text-to-cad/ui/cad-viewer';
 import { version } from '../package.json';
 import type { Bridge, HostContext } from './host/bridge';
+import { declaresOpenLinks } from './host/channel';
+import { hostDisplayName } from './host/hostName';
 import { captureSettled, fitCapture } from './host/capture';
 import { frameClipboard } from './host/clipboard';
 import { createLiveRegistry, describeView } from './host/live';
@@ -17,15 +19,16 @@ import { watchSupersession, type Presentation } from './host/presentation';
 import { chatReach } from './host/prompt';
 import type { Launch, Server } from './host/server';
 import { createViewSync } from './host/sync';
-import { createTunnelClient, createTunnelFetch } from './host/tunnel';
+import { createTunnelClient, createTunnelFetch, TUNNEL_ORIGIN } from './host/tunnel';
 import ModelView, { type ViewReporter } from './ModelView';
+import { UpdateNotice } from './CardCorner';
 import { Banner } from './Notice';
 
 interface Showing { launch: Launch; sequence: number }
 
 declare const __TEXT_TO_CAD_BUILD__: string | undefined;
 // Which build this page is, where it is not the release's own: vite.config.mjs names it
-// (`@text-to-cad/ui/build-id`), and the version then reads `0.7.15-dev.<build>`.
+// (`@text-to-cad/ui/build-id`), and the version then reads `<version>-dev.<build>` (`0.8.0-dev.<build>`).
 const BUILD = typeof __TEXT_TO_CAD_BUILD__ === 'string' ? __TEXT_TO_CAD_BUILD__ : '';
 
 // The host's sandbox need not be a secure context, where randomUUID is missing.
@@ -35,11 +38,18 @@ export function useHostContext(bridge: Pick<Bridge, 'hostContext' | 'onHostConte
   return useSyncExternalStore(listener => bridge.onHostContext(listener), () => bridge.hostContext, () => bridge.hostContext);
 }
 
-// What to do once this view's server has gone: the host started it, and only the host starts it again.
-const LOST: Record<Presentation, string> = {
-  tabs: 'The CAD plugin stopped responding in this thread. Restart Codex to reconnect it.',
-  inline: 'The CAD plugin stopped responding. Restart the app to reconnect it.',
+// What to do once this view's server has gone -- it answered before, and stopped: the host started
+// it, and only the host starts it again. (A chat that never carried a call is another state, with its
+// own words: `Unreachable`, `Connection.tsx`.)
+// Each said by its key in the view's language, naming the host to quit and reopen (`{host}`: what
+// the host called itself at `ui/initialize`, as a person knows it; "this app" for one not known).
+export const LOST: Record<Presentation, string> = {
+  tabs: 'cad.lost.tabs',
+  inline: 'cad.lost.inline',
 };
+export function lostNotice(say: (key: string, params?: Record<string, unknown>) => string, presentation: Presentation, hostName: string | null | undefined): string {
+  return say(LOST[presentation], { host: hostDisplayName(hostName) ?? say('cad.lost.thisApp') });
+}
 
 // Inline, a view is a card in the chat: as tall as its width suits, within what the host allows.
 const INLINE_ASPECT = 0.62, INLINE_MIN_HEIGHT = 320, INLINE_MAX_HEIGHT = 560;
@@ -80,31 +90,98 @@ function Frame({ bridge, context, insets, inline = false, floatingComposer = fal
 }
 
 /**
- * Inline, the card's way to full size: the last of the navbar's own controls (the view's follow it), and the home's.
- * Corner brackets, the host's own way to full size.
+ * Inline, the card's way to full size, where the host can show it so: in the navbar, before the
+ * host's other actions, over a file and on the home; in the file handler's corner (`CardCorner`),
+ * which has no navbar. Two diagonal arrows.
  */
 function FullSizeButton({ bridge }: { bridge: Bridge }) {
+  const { t } = useI18n();
+  const label = t('navbar.fullSize');
   const expand = () => void bridge.request('ui/request-display-mode', { mode: 'fullscreen' }).catch(() => {});
-  return <TooltipHint content="Full size">
-    <Button variant="ghost" size="icon-xs" className="size-6 text-muted-foreground hover:text-foreground" aria-label="Full size" onClick={expand}>
-      <Maximize className="size-3.5" aria-hidden="true" />
+  return <TooltipHint content={label}>
+    <Button variant="ghost" size="icon-xs" className="size-6 text-muted-foreground hover:text-foreground" aria-label={label} onClick={expand}>
+      <Maximize2 className="size-3.5" aria-hidden="true" />
+    </Button>
+  </TooltipHint>;
+}
+
+/**
+ * The CAD Viewer's page of each document a launch named, from its `browser` (`cadgen/mcp/server.py`'s
+ * `_reach`, the link a text client's `cad_show` gives): by absolute path, the home's under ''.
+ */
+type Pages = ReadonlyMap<string, string>;
+function withPage(pages: Pages, launch: Launch): Pages {
+  if (typeof launch.browser !== 'string') return pages;
+  return new Map(pages).set(launch.model ? normalizePath(launch.model) : '', launch.browser);
+}
+
+/**
+ * The page of what the view shows: the one its launch named, else (a file the person opened from the
+ * home, which no launch named) the web viewer's home with the same day link, where that file leads
+ * the library. Null where no launch carried a page.
+ */
+export function pageOf(pages: Pages, model: string | null): string | null {
+  const known = pages.get(model ?? '');
+  if (known) return known;
+  const any = pages.values().next().value;
+  if (!any) return null;
+  try {
+    const page = new URL(any);
+    const token = page.searchParams.get('token');
+    return `${page.origin}/${token ? `?${new URLSearchParams({ token })}` : ''}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Open the web viewer's page of `model` (the home's with none) in the person's browser. The server
+ * opens it itself, from this computer (`POST /__cad/browser/open`, the app's alone, naming the
+ * document and never a URL), as a host may not follow a link to a loopback page (Codex does not);
+ * where it cannot (no display, a remote shell) or is not reached that way (`direct`), the launch's
+ * page goes through the host's open-link request where it offers one, else as a plain link.
+ */
+async function openBrowserPage({ tunnel, direct, bridge, model, page }: {
+  tunnel: typeof fetch; direct: boolean; bridge: Bridge; model: string | null; page: string;
+}) {
+  if (!direct) {
+    const response = await tunnel(`${TUNNEL_ORIGIN}/__cad/browser/open`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }),
+    }).catch(() => null);
+    if (response?.ok) return;
+  }
+  const plain = () => { window.open(page, '_blank', 'noopener,noreferrer'); };
+  if (declaresOpenLinks(bridge.hostCapabilities)) await bridge.request('ui/open-link', { url: page }).catch(plain);
+  else plain();
+}
+
+/** The view's page in the person's browser (`openBrowserPage`): the navbar's last control, over every file and on the home. */
+function OpenInBrowserButton({ open }: { open: () => void }) {
+  const { t } = useI18n();
+  const label = t('navbar.openInBrowser');
+  return <TooltipHint content={label}>
+    <Button variant="ghost" size="icon-xs" className="size-6 text-muted-foreground hover:text-foreground" aria-label={label} onClick={open}>
+      <ExternalLink className="size-3.5" aria-hidden="true" />
     </Button>
   </TooltipHint>;
 }
 
 /** A view a newer one replaced: its last frame, and where to look now. */
-function Superseded({ still }: { still: string | null }) {
+function Superseded({ still, label }: { still: string | null; label: string }) {
   return <div className="relative flex h-full items-center justify-center bg-background" data-cad-superseded="">
     {still ? <img src={still} alt="" className="h-full w-full object-contain opacity-60" /> : null}
-    <span className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm">A newer view is below</span>
+    <span className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm">{label}</span>
   </div>;
 }
 
 /**
  * One CAD view. Which page it shows comes from its launch and from what the agent or the user
- * opens next; nothing here asks where the view is.
+ * opens next; nothing here asks where the view is. `direct`: the engine's routes reached over HTTP rather than through the host
+ * (`host/direct.ts`), where the host carries no call back (`Connection.tsx`): every viewer request
+ * goes that way, and the view makes no sync, which only the host could carry -- the agent cannot read
+ * or capture it, and the client reads its catalog again on its own.
  */
-export default function App({ bridge, server, launch: initial, presentation = 'tabs' }: { bridge: Bridge; server: Server; launch: Launch; presentation?: Presentation }) {
+export default function App({ bridge, server, launch: initial, presentation = 'tabs', direct }: { bridge: Bridge; server: Server; launch: Launch; presentation?: Presentation; direct?: typeof fetch }) {
   const surface = initial.surface || initial.page;
   // The host's file handler shows the file it opened, and only that: what the agent shows goes to
   // its thread's tab, never here (the server refuses it too).
@@ -140,6 +217,10 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   // The server stopped answering (its process has gone): the view keeps its model, and says so.
   const [lost, setLost] = useState(false);
   const shown = useRef<string | null>(null);
+  // What the view shows, for its page in the browser: the launch's until the view says.
+  const [showingModel, setShowingModel] = useState<string | null>(() => initial.model ? normalizePath(initial.model) : null);
+  // The pages the launches carried: the first one's, then each the agent's shows bring.
+  const [pages, setPages] = useState<Pages>(() => withPage(new Map(), initial));
   // The model the agent last showed here, until the view shows it (or anything after it): a capture
   // asked with the show, or right after it, is of that model, not of the one it is leaving.
   const asked = useRef<string | null>(null);
@@ -149,6 +230,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
     show: launch => {
       if (alone) return;
       asked.current = launch.model ? normalizePath(launch.model) : '';
+      setPages(current => withPage(current, launch));
       setShowing(previous => ({ launch, sequence: previous.sequence + 1 }));
     },
     capture: async () => fitCapture(await captureSettled(live, () => asked.current ?? shown.current)),
@@ -159,14 +241,15 @@ export default function App({ bridge, server, launch: initial, presentation = 't
     showing(model) {
       shown.current = model;
       asked.current = null;
+      setShowingModel(model);
       sync.focus();
     },
   }), [sync]);
   // Everything else the view asks of the server travels as viewer requests over `cad_http`: its
   // model, the library, Open, Reveal, the person's settings and the update check. The client polls
-  // nothing: the sync says when the file's catalog entry moved, and carries a STEP's build feed.
-  const tunnel = useMemo(() => createTunnelFetch(server), [server]);
-  const client = useMemo(() => createTunnelClient(tunnel, { pollIntervalMs: 0, editingPreviewFeed: sync.observePreview }), [tunnel, sync]);
+  // nothing: the sync says when the file's catalog entry moved.
+  const tunnel = useMemo(() => direct ?? createTunnelFetch(server), [server, direct]);
+  const client = useMemo(() => createTunnelClient(tunnel, direct ? {} : { pollIntervalMs: 0 }), [tunnel, direct]);
   useEffect(() => () => client.dispose(), [client]);
 
   useEffect(() => {
@@ -184,7 +267,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   }, [initial.order, initial.view, live, sync]);
 
   useEffect(() => {
-    if (superseded) return;
+    if (superseded || direct) return;
     const lifetime = new AbortController();
     sync.run(lifetime.signal);
     const stop = bridge.onTeardown(() => lifetime.abort());
@@ -198,7 +281,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
     window.addEventListener('pointerdown', touched, true);
     window.addEventListener('focus', touched);
     return () => { lifetime.abort(); stop(); window.removeEventListener('pointerdown', touched, true); window.removeEventListener('focus', touched); };
-  }, [bridge, sync, superseded]);
+  }, [bridge, sync, superseded, direct]);
 
   // The usage stats cadgen sends (its telemetry), the same as the browser viewer's: nothing asks here (a
   // cadgen command says it once), and the app menu's switch changes it.
@@ -208,10 +291,12 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   const { locale, language } = useLanguage(client.language, { preferred: [context.locale, ...(navigator.languages ?? [navigator.language])] });
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
   const { appSettings } = useAnalyticsConsent(client.consent, locale);
-  // A newer text-to-cad (`cadgen/updates.py`): the blue update button, first in the navbar and a row of
-  // its own on the home while this install is behind, from the launch's notice at once. Its prompt goes
-  // to the chat where the host takes messages, so the agent updates CAD; elsewhere it is copied.
+  // A newer text-to-cad (`cadgen/updates.py`), from the launch's notice at once, while this install is
+  // behind: the navbar's blue update button, first among its controls; in the file handler, which has
+  // no navbar, a notice at the view's top-right until the person closes it for this view. Its prompt
+  // goes to the chat where the host takes messages, so the agent updates CAD; elsewhere it is copied.
   const updateNotice = useUpdateNotice(client.version, initial.notice ?? null);
+  const [updateClosed, setUpdateClosed] = useState(false);
   const sendPrompt = chat.send
     ? (prompt: string) => bridge.request('ui/message', { role: 'user', content: [{ type: 'text', text: prompt }] }, { timeoutMs: 30_000 }).then(() => {})
     : undefined;
@@ -220,17 +305,23 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   // host (a frame cannot open one itself).
   const links = useMemo(() => viewerLinks({ version, build: BUILD, open: url => bridge.request('ui/open-link', { url }).then(() => {}) }),
     [bridge]);
+  // The view's page in the browser, last in the navbar, where a launch carried one; never in the file
+  // handler, which shows its file alone.
+  const page = alone ? null : pageOf(pages, showingModel);
+  const openInBrowser = page ? () => void openBrowserPage({ tunnel, direct: Boolean(direct), bridge, model: showingModel, page }) : null;
   const { launch } = showing;
   if (superseded) {
-    return <Frame bridge={bridge} context={context} insets={insets} inline={inline} floatingComposer={floatingComposer}><Superseded still={still} /></Frame>;
+    return <Frame bridge={bridge} context={context} insets={insets} inline={inline} floatingComposer={floatingComposer}><Superseded still={still} label={translator(locale)('cad.superseded')} /></Frame>;
   }
   return <Frame bridge={bridge} context={context} insets={insets} inline={inline} floatingComposer={floatingComposer}
-    overlay={lost ? <Banner message={LOST[presentation]} /> : null}>
+    overlay={lost ? <Banner message={lostNotice(translator(locale), presentation, bridge.hostInfo.name)} /> : null}>
     <ModelView launch={launch} sequence={showing.sequence} alone={alone} bridge={bridge} client={client} tunnel={tunnel}
       tabStore={tabStore} live={live} links={links} appSettings={appSettings}
-      update={updateNotice ? <UpdateButton notice={updateNotice} send={sendPrompt} copy={prompt => frameClipboard.writeText(prompt)}
-        onLink={openLink} /> : null}
+      update={!updateNotice ? null : !alone ? <UpdateButton notice={updateNotice} send={sendPrompt} copy={prompt => frameClipboard.writeText(prompt)} onLink={openLink} />
+        : updateClosed ? null : <UpdateNotice notice={updateNotice} send={sendPrompt} copy={prompt => frameClipboard.writeText(prompt)}
+          onLink={openLink} onClose={() => setUpdateClosed(true)} />}
       fullSize={inline && context.availableDisplayModes?.includes('fullscreen') !== false ? <FullSizeButton bridge={bridge} /> : null}
+      openInBrowser={openInBrowser ? <OpenInBrowserButton open={openInBrowser} /> : null}
       colorScheme={colorScheme} theme={theme} locale={locale} language={language} platform={initial.platform || 'darwin'} reporter={reporter} sync={sync} chat={chat} />
   </Frame>;
 }

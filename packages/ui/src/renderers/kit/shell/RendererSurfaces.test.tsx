@@ -2,9 +2,9 @@ import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-// The shell's surfaces a RENDERER fills — the viewport menu, Quick Edit, the camera-settled
-// report — driven end to end through the real RendererShell and useRendererShell under the shell
-// harness (a renderer that uses all three), with only the WebGL viewport replaced. The stand-in
+// The shell's surfaces a RENDERER fills — the viewport menu and Quick Edit — driven end to end
+// through the real RendererShell and useRendererShell under the shell
+// harness (a renderer that uses both), with only the WebGL viewport replaced. The stand-in
 // hands the overlay the same viewport context the real one does (a host the pointer events arrive
 // on, a runtime whose renderer's canvas is the scene's), and records the props the shell wired, so
 // the camera reports reach the renderer through exactly the callbacks the real viewport calls.
@@ -175,7 +175,7 @@ it("an annotation opens Quick Edit, which sends the note with the files made of 
     display: { mode: 'solid', grid: false }, width: 1600, height: 1200 }]);
   const context = send.mock.calls[0][0] as any;
   expect(context.parts.map((part: any) => [part.kind, part.label ?? part.id])).toEqual([['text', 'text'], ['reference', 'file'],
-    ['attachment', 'Snapshot (cadgen snapshot --job)']]);
+    ['attachment', 'Snapshot (cadgen snapshot --annotation)']]);
   expect(await context.parts[2].path).toBe('/tmp/p/one-1.snapshot.json');
   expect(context.parts.filter((part: any) => part.kind === 'attachment').map((part: any) => part.mimeType)).toEqual(['application/json']);
   expect(promptFiles.read).not.toHaveBeenCalled();
@@ -189,7 +189,7 @@ it('a clipboard destination has no snapshot in the navbar; the annotation is Qui
   const writeImage = vi.fn(async () => {}), deliver = vi.fn();
   const { navigation } = mount(testHost({
     promptContext: { getSnapshot: () => destination, subscribe: () => () => {}, deliver } as any,
-    clipboard: { writeText: async () => {}, readText: async () => '', writeImage },
+    clipboard: { writeText: async () => {}, writeImage },
   }));
   expect(navigation.mock.calls.flatMap(([actions]) => actions)).toEqual([]);
   fireEvent.click(screen.getByRole('button', { name: 'Pencil' }));
@@ -231,6 +231,23 @@ it("under Select a press on the annotation picks its mark before anything under 
   viewport.annotationAt = null;
 });
 
+it("Escape on the drawing surface with no ink picked puts Pencil or Shapes down and takes Select up", () => {
+  // The surface takes the keyboard on a press, so after a stroke its Escape is the one the key reaches.
+  mount(testHost(), undefined, 'panel-one.harness', { current: document.body });
+  const strip = within(screen.getByRole('group', { name: 'Interaction tools' }));
+  for (const name of ['Pencil', 'Shapes']) {
+    fireEvent.click(strip.getByRole('button', { name }));
+    act(() => viewport.props.annotation.add([ink(`${name}-mark`)]));
+    // The real surface is the viewport's (stood in here): a focusable layer marked as it is.
+    const surface = document.body.appendChild(Object.assign(document.createElement('div'), { tabIndex: -1 }));
+    surface.setAttribute('data-cad-annotation-overlay', '');
+    act(() => { surface.focus(); });
+    fireEvent.keyDown(surface, { key: 'Escape' });
+    surface.remove();
+    expect([strip.getByRole('button', { name }).getAttribute('aria-pressed'), strip.getByRole('button', { name: 'Select' }).getAttribute('aria-pressed')]).toEqual(['false', 'true']);
+  }
+});
+
 it("Pencil and Shapes are two plain tools on the strip; one row under the strip is theirs both: the tools of the one that is up, then Color, Stroke width, Placement and Clear, disabled with nothing to do", async () => {
   mount(testHost(), undefined, 'panel-one.harness');
   const strip = within(screen.getByRole('group', { name: 'Interaction tools' }));
@@ -247,7 +264,7 @@ it("Pencil and Shapes are two plain tools on the strip; one row under the strip 
   expect([row.closest('[data-cad-tool-stack]'), row.closest('[data-tool-panel]')]).toEqual([null, null]);
   const panel = () => within(screen.getByRole('toolbar', { name: 'Annotation controls' }));
   expect(panel().getAllByRole('button').map(button => button.getAttribute('aria-label')))
-    .toEqual(['Pen', 'Highlighter', 'Eraser', 'Color', 'Stroke width', 'Placement', 'Clear annotations']);
+    .toEqual(['Pen', 'Highlighter', 'Eraser', 'Colour', 'Stroke width', 'Placement', 'Clear annotations']);
   const clear = () => panel().getByRole('button', { name: 'Clear annotations' }).hasAttribute('disabled');
   expect(clear()).toBe(true);
   // Ink enables Clear. Undo and Redo are the keyboard's, ⌘Z and ⇧⌘Z (below), with no buttons.
@@ -459,7 +476,7 @@ it('text-only Quick Edit captures the current view at Copy without any annotatio
   fireEvent.click(screen.getByRole('menuitem', { name: 'Clear the note' }));
   expect(promptFiles.create).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Copy Prompt' }));
-  await waitFor(() => expect(copied).toContain('Snapshot JSON (cadgen snapshot --job):'));
+  await waitFor(() => expect(copied).toContain('Snapshot JSON (cadgen snapshot --annotation):'));
   expect(promptFiles.create.mock.calls[0][0]).toMatchObject({ annotation: null,
     views: [{ label: 'current view', camera: { position: [0, -100, 0] } }] });
 });

@@ -38,13 +38,14 @@ export const DEFAULT_VIEW_PLANE_ORIENTATION = Object.freeze({
   y: [0, 1, 0],
   z: [0, 0, 1]
 });
+// Each view's `title` is its English name; `viewPlaneTitle` says it in the view's language, from its `sides`.
 export const VIEW_PLANE_FACES = [
-  { id: "z", label: "Z", title: "Jump to top view", direction: [0, 0, 1], up: [0, 1, 0] },
-  { id: "zNeg", label: "-Z", title: "Jump to bottom view", direction: [0, 0, -1], up: [0, 1, 0] },
-  { id: "yNeg", label: "-Y", title: "Jump to front view", direction: [0, -1, 0], up: WORLD_UP },
-  { id: "y", label: "Y", title: "Jump to back view", direction: [0, 1, 0], up: WORLD_UP },
-  { id: "x", label: "X", title: "Jump to right view", direction: [1, 0, 0], up: WORLD_UP },
-  { id: "xNeg", label: "-X", title: "Jump to left view", direction: [-1, 0, 0], up: WORLD_UP }
+  { id: "z", label: "Z", title: "Jump to top view", sides: ["top"], direction: [0, 0, 1], up: [0, 1, 0] },
+  { id: "zNeg", label: "-Z", title: "Jump to bottom view", sides: ["bottom"], direction: [0, 0, -1], up: [0, 1, 0] },
+  { id: "yNeg", label: "-Y", title: "Jump to front view", sides: ["front"], direction: [0, -1, 0], up: WORLD_UP },
+  { id: "y", label: "Y", title: "Jump to back view", sides: ["back"], direction: [0, 1, 0], up: WORLD_UP },
+  { id: "x", label: "X", title: "Jump to right view", sides: ["right"], direction: [1, 0, 0], up: WORLD_UP },
+  { id: "xNeg", label: "-X", title: "Jump to left view", sides: ["left"], direction: [-1, 0, 0], up: WORLD_UP }
 ];
 // The view cube's corners: each looks at the model along a cube diagonal, a true isometric
 // view from that corner. Ids read x, y, z signs: "iso+-+" is right, front, top.
@@ -55,6 +56,7 @@ export const VIEW_CUBE_CORNERS = [-1, 1].flatMap((sz) => [-1, 1].flatMap((sy) =>
   return Object.freeze({
     id: `iso${sign(sx)}${sign(sy)}${sign(sz)}`,
     title: `Jump to ${name("y", sy)} ${name("x", sx)} ${name("z", sz)} isometric view`,
+    sides: [name("y", sy), name("x", sx), name("z", sz)],
     direction: [sx, sy, sz],
     up: WORLD_UP
   });
@@ -67,8 +69,21 @@ export const VIEW_CUBE_EDGES = [0, 1, 2].flatMap((along) => [-1, 1].flatMap((a) 
   direction[other[1]] = b;
   const names = other.map((axis) => CUBE_SIDE_NAMES[["x", "y", "z"][axis]][direction[axis] > 0 ? 1 : 0]);
   return Object.freeze({ id: `edge${direction.map((value) => value > 0 ? "+" : value < 0 ? "-" : "0").join("")}`,
-    title: `Jump to ${names.join(" ")} edge view`, direction, along, up: WORLD_UP });
+    title: `Jump to ${names.join(" ")} edge view`, sides: names, direction, along, up: WORLD_UP });
 })));
+/**
+ * A view's name for its button, in `t`'s language: a face's ("Jump to top view"), an edge's or a
+ * corner's, each from its sides' names.
+ * @param {{ title: string, sides?: readonly string[] }} view
+ * @param {(key: string, params?: Record<string, unknown>) => string} t
+ */
+export function viewPlaneTitle(view, t) {
+  const sides = (view.sides || []).map((side) => t(`viewCube.side.${side}`));
+  if (sides.length === 1) return t(`viewCube.view.${view.sides[0]}`);
+  if (sides.length === 2) return t("viewCube.edgeView", { a: sides[0], b: sides[1] });
+  if (sides.length === 3) return t("viewCube.cornerView", { a: sides[0], b: sides[1], c: sides[2] });
+  return view.title;
+}
 export const VIEW_PLANE_FACE_BY_ID = Object.fromEntries(
   [...VIEW_PLANE_FACES, ...VIEW_CUBE_EDGES, ...VIEW_CUBE_CORNERS].map((face) => [face.id, face])
 );
@@ -175,7 +190,7 @@ export function viewportFitScale({
 // A source fallback must also be authored bounds. Live modelBounds are never
 // a safe fallback: before adoption they may still describe another pose.
 export function runtimeFramingBounds(runtime, fallbackBounds = null) {
-  return runtime?.zeroPoseBounds || fallbackBounds || runtime?.cadScene?.restBounds || null;
+  return runtime?.zeroPoseBounds || fallbackBounds || null;
 }
 
 // When the camera fits, and why. A model is framed ONCE per viewing mode, on
@@ -196,10 +211,12 @@ export function runtimeFramingBounds(runtime, fallbackBounds = null) {
 //   its first publish and is never framed twice.
 //
 // An UPDATE is none of these. A rebuild of the open file -- a saved revision,
-// another publish of the same geometry -- keeps the camera exactly,
-// its pose and its zoom, even when the model grew or shrank: only the person's
-// Zoom to fit frames it again. Neither is a joint, a group state, a mate or an
-// animation frame, which never move the zero pose at all.
+// another publish of the same geometry -- is not a reframe: a camera the person
+// took keeps exactly its pose and its zoom, even when the model grew or shrank,
+// until their own fit. The one rebuild that fits again is decided apart from
+// this (`cameraTouch.js`'s `rebuildRefits`): a camera still untouched since the
+// last fit, and a box that changed. Neither is a joint, a group state, a mate or
+// an animation frame, which never move the zero pose at all.
 //
 // "complete" stands down once the user has taken the view: their camera is a
 // deliberate choice about this model, and an automatic fit would throw it away. A

@@ -10,7 +10,7 @@ const lazy = start => {
 
 /**
  * A paste into the note, line by line: each line that is a reference and nothing else — a file's
- * absolute path and the ids in it, `/models/base.step#o1.f2`, as Copy References and a chip's click
+ * absolute path and the ids in it, `/models/base.step#f:base.make_box1.2`, as Copy References and a chip's click
  * write one — is that reference (into any file); a paste that is the annotation as its chip copies
  * it (its annotation JSON, whole) is `[{ annotation }]`; every other line stays text. A reference
  * within a sentence is the sentence's. A line that is what one of the box's chips copied (`copied`:
@@ -50,9 +50,10 @@ export const quickEditSelection = references => references.filter(reference => r
  *   files?: Promise<{ snapshot?: string, inline?: string }> | null,
  *   read?: (path: string) => Promise<Blob> }} quickEdit
  */
-export function createQuickEditContext({ resource, references = [], text, views = [], files = null, read = null }) {
+export function createQuickEditContext({ resource, references = [], text, views = [], files = null, read = null, viewUnavailable = "" }) {
   const parts = [
     textPart(String(text || "").trim(), "text"),
+    ...(viewUnavailable ? [textPart(`View replay unavailable: ${viewUnavailable}`, "view-unavailable")] : []),
     referencePart({ resource: { ...resource }, target: { kind: "whole-resource" } }, "file"),
     ...quickEditSelection(references).map((reference, index) => referencePart({ ...reference, resource: { ...reference.resource } }, `reference-${index}`)),
   ];
@@ -61,8 +62,8 @@ export function createQuickEditContext({ resource, references = [], text, views 
     const made = pick => { const path = files.then(pick); path.catch(() => {}); return path; };
     const path = made(result => result.snapshot || "");
     const inlineText = made(result => typeof result.inline === "string"
-      ? `Snapshot JSON (cadgen snapshot --job):\n\`\`\`json\n${result.inline}\n\`\`\`` : null);
-    parts.push({ id: "snapshot", kind: "attachment", label: "Snapshot (cadgen snapshot --job)",
+      ? `Snapshot JSON (cadgen snapshot --annotation):\n\`\`\`json\n${result.inline}\n\`\`\`` : null);
+    parts.push({ id: "snapshot", kind: "attachment", label: "Snapshot (cadgen snapshot --annotation)",
       name: `${name}.snapshot.json`, mimeType: "application/json", path, inlineText,
       content: lazy(() => files.then(result => typeof result.inline === "string"
         ? new Blob([result.inline], { type: "application/json" }) : read(result.snapshot))), about: ["file"] });

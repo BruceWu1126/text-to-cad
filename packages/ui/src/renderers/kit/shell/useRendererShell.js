@@ -4,7 +4,8 @@ import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
 import { ViewerElementContext, useViewerHost, usePromptDestination } from "../../../host/context.js";
 import { hasOpenPopup } from "../../../lib/popups.js";
 import { useAnnotationSession } from "../../../annotation/session.js";
-import { DRAWING_TOOLS, annotationToolIcon, drawingToolVariant } from "../../../annotation/toolbar.jsx";
+import { DRAWING_TOOLS, annotationToolIcon, drawingToolLabel, drawingToolVariant } from "../../../annotation/toolbar.jsx";
+import { useI18n } from "@text-to-cad/ui/i18n";
 import { DRAWING_SHORTCUTS, pressToolKey } from "../tools/toolShortcuts.js";
 import { useViewerHistory } from "./useViewerHistory.js";
 import { promptView, promptViews } from "../../../annotation/views.js";
@@ -27,6 +28,10 @@ import { useViewerShortcuts } from "./useViewerShortcuts.js";
 import { DISPLAY_MODE_OPTIONS } from "../view-settings/DisplayModeOptions.js";
 import { normalizeViewFeatures } from "@text-to-cad/core/common/viewSettings.js";
 import { useWhenSettled } from "./useWhenSettled.js";
+import { useControlUsage, useToolControl } from "../../../usage/controls.js";
+
+// A Preview setting's group and field, as one control's name: `preview_lighting_exposure`.
+const previewControl = (group, field) => `preview_${group}_${field.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`)}`;
 
 
 /**
@@ -191,6 +196,8 @@ export function useRendererShell({
   sceneScaleMode = VIEWER_SCENE_SCALE.CAD
 }) {
   const host = useViewerHost();
+  const { t } = useI18n();
+  const controls = useControlUsage();
   const viewerElement = useContext(ViewerElementContext);
   const destination = usePromptDestination();
   const promptAvailable = destination.available;
@@ -207,13 +214,15 @@ export function useRendererShell({
   // a scene, a pose and a routine of its own over the editor's, which stays as it is. Crossing
   // touches nothing of either: it mounts Preview or takes it away.
   // Preview's Orbit, on or off: its alone, off each time it opens until its settings turn it on.
-  const [orbiting, setOrbiting] = useState(false);
+  const [orbiting, setOrbitingState] = useState(false);
+  // Orbit's toggle, the person's alone (Preview's opening turns it off without one).
+  const setOrbiting = useCallback(next => { controls.used("preview_orbit"); setOrbitingState(next); }, [controls]);
   // Preview's environment and code, prepared ahead of it (`previewPrepare`, below).
   const previewPrepare = useRef(null);
   const commitPreviewing = useCallback(entering => {
     if (entering === previewingRef.current) return;
     previewingRef.current = entering;
-    setOrbiting(false);
+    setOrbitingState(false);
     previewState.set(entering);
   }, [previewState.set]);
   const setPreviewing = useCallback(next => {
@@ -357,7 +366,7 @@ export function useRendererShell({
   // through their own normalizers, so a host that hands over less is still whole here.
   const preferences = services.preferences;
   const previewOrbitSpeed = playback.orbitSpeed;
-  const setPreviewOrbitSpeed = useCallback(speed => setPlayback({ orbitSpeed: speed }), [setPlayback]);
+  const setPreviewOrbitSpeed = useCallback(speed => { controls.used("preview_orbit_speed"); setPlayback({ orbitSpeed: speed }); }, [setPlayback, controls]);
   // The tool stack's layout — the sizes of the panels a person can size, the folded panels. A
   // change is a patch over the layout as it last stood (or a function of it), so two panels
   // written back in one turn both land.
@@ -370,7 +379,7 @@ export function useRendererShell({
     services.onPreferenceChange({ toolStack: next });
   }, [services.onPreferenceChange]);
   const autoplay = playback.autoplay;
-  const setAutoplay = useCallback(value => setPlayback({ autoplay: value === true }), [setPlayback]);
+  const setAutoplay = useCallback(value => { controls.used("animation_autoplay"); setPlayback({ autoplay: value === true }); }, [setPlayback, controls]);
   const hostRef = useRef(null);
   const [hostElement, setHostElement] = useState(null);
   useEffect(() => { setHostElement(hostRef.current); }, []);
@@ -385,8 +394,8 @@ export function useRendererShell({
   const reportActionError = useCallback(error => {
     if (!error) return;
     setRuntimeAlert({ severity: "error", kind: "status", blocking: false,
-      title: "Couldn’t complete the action", message: error instanceof Error ? error.message : String(error) });
-  }, [setRuntimeAlert]);
+      title: t("alert.actionFailed"), message: error instanceof Error ? error.message : String(error) });
+  }, [setRuntimeAlert, t]);
   const runtimeAlert = onRuntimeAlert ? null : ownRuntimeAlert;
   const viewerLoading = Boolean(load.busy);
   const hasContent = Boolean(scene) && !viewerLoading;
@@ -422,6 +431,13 @@ export function useRendererShell({
   const historyRef = useRef(history);
   historyRef.current = history;
   const annotation = useAnnotationSession(drawingFamily, CAD_ANNOTATION_DEFAULTS, history);
+  // The tool in hand and Preview, each on while it is (`usage/controls.js`): Preview puts the tools away.
+  useToolControl(previewing || !toolModes || !toolMode ? null : toolMode);
+  useEffect(() => {
+    if (!previewing) return undefined;
+    controls.active("preview", true);
+    return () => controls.active("preview", false);
+  }, [previewing, controls]);
 
 
   // ---- prompt snapshots, clipboard ------------------------------------------
@@ -462,9 +478,10 @@ export function useRendererShell({
     if (!viewerRef.current?.captureScreenshotBlob) return false;
     try {
       await host.clipboard.writeImage(viewerRef.current.captureScreenshotBlob());
+      controls.used("annotate_copy");
       return true;
     } catch (error) { reportActionError(error); return false; }
-  }, [host.clipboard, reportActionError]);
+  }, [host.clipboard, reportActionError, controls]);
   // ---- a prompt's views and files ---------------------------------------------
   // The view on screen as a prompt carries it: the camera, the mode on screen and the Grid switch, and
   // what places or hides the parts — the renderer's pose and visibility (`viewState`) — (`annotation/views.js`).
@@ -485,11 +502,14 @@ export function useRendererShell({
   // The file a prompt's views render: the one shown, by its absolute path.
   const promptFile = useCallback(() => {
     const shown = liveResourceRef.current?.() || resourceRef.current;
-    return shown?.kind === "workspace-file" ? shown.path : null;
+    return shown?.kind === "workspace-file" || shown?.kind === "cad-model" ? shown.path : null;
   }, []);
   // Quick Edit captures the current view and annotation views; the host prepares JSON at the press.
+  const replayUnavailable = useRef("");
+  replayUnavailable.current = String(load.replayUnavailable || "");
   const quickEditPrompt = useMemo(() => ({
-    views: () => (host.promptFiles && promptFile() ? promptViews(currentView(), annotationRef.current.views, annotationRef.current.items) : []),
+    unavailable: () => replayUnavailable.current,
+    views: () => (!replayUnavailable.current && host.promptFiles && promptFile() ? promptViews(currentView(), annotationRef.current.views, annotationRef.current.items) : []),
     files: views => {
       const input = promptFile();
       if (!host.promptFiles || !input || !views.length) return null;
@@ -539,16 +559,19 @@ export function useRendererShell({
     // has on screen (`toolKeys`, RendererShell's); never in preview.
     onKey: event => !previewing && !idle && pressToolKey(event, {
       tools: toolKeysRef.current, selectDrawing: tool => annotationRef.current.selectTool(tool),
-      fit: () => viewerRef.current?.resetZoom?.() }),
+      fit: () => { controls.used("fit"); viewerRef.current?.resetZoom?.(); } }),
     escapeActive: Boolean(escape.active || previewing || annotation.selected.length || (toolModes && toolMode !== toolModes.defaultMode)),
     onEscape(event) {
       // A popup opened in THIS viewer (a menu, a Select, a colour picker, Display) owns Escape before
       // preview; another viewer's popup is not this one's business.
       if (hasOpenPopup(viewerElement.current)) return;
       if (previewing) { setPreviewing(false); return; }
-      // Annotate's surface spends its own Escape (its editor deselects, or drops the stroke in hand).
-      if (annotateToolActive && event.target instanceof Element && event.target.closest("[data-cad-annotation-overlay]")) return;
-      if (annotationRef.current.selected.length) { annotationRef.current.select([]); return; }
+      // Picked ink goes first, wherever the key landed: Annotate's surface, which takes the keyboard
+      // on a press, lets go of it on its own Escape; with nothing picked, its Escape is the ladder's.
+      if (annotationRef.current.selected.length) {
+        if (!(annotateToolActive && event.target instanceof Element && event.target.closest("[data-cad-annotation-overlay]"))) annotationRef.current.select([]);
+        return;
+      }
       if (escapeRef.current?.()) return;
       // A renderer that left it: the tool in hand goes down, back to the file's default (Select).
       if (toolModes && toolMode !== toolModes.defaultMode) selectDefaultTool();
@@ -632,9 +655,9 @@ export function useRendererShell({
   const displayMode = {
     value: desiredScene.view.mode,
     options: DISPLAY_MODE_OPTIONS.filter(option => offeredModes.includes(option.value)),
-    onChange: viewSettingsStore.selectMode,
+    onChange: value => { controls.used(`display_${String(value).replace(/-/g, "_")}`); viewSettingsStore.selectMode(value); },
   };
-  const grid = { value: desiredScene.view.grid.enabled, onChange: viewSettingsStore.setGrid };
+  const grid = { value: desiredScene.view.grid.enabled, onChange: value => { controls.used("display_grid"); viewSettingsStore.setGrid(value); } };
   // The scene Preview's own view draws (`PreviewView.jsx`): Render over the file's settings as they stand.
   // Keyed on the store's resolved scene, not the colour scheme: the store takes a new scheme (its
   // `configure`) after this render, and only its scene says the appearance has arrived — keyed on
@@ -644,10 +667,14 @@ export function useRendererShell({
     [viewSettingsStore, desiredScene, displaySettings, previewLook, features]);
   // Preview's own settings, its panel's (`PreviewSettings.jsx`): Render's lighting, background, floor and part colours.
   const previewSettings = <PreviewRenderSettings settings={previewLook} display={displaySettings}
-    appearance={colorScheme} lightingQuality="preview" onPatch={viewSettingsStore.patchPreview} onReset={viewSettingsStore.resetPreview} />;
+    appearance={colorScheme} lightingQuality="preview" onReset={() => { controls.used("preview_reset"); viewSettingsStore.resetPreview(); }}
+    onPatch={patch => {
+      for (const [group, change] of Object.entries(patch || {})) for (const field of Object.keys(change || {})) controls.changed(previewControl(group, field));
+      viewSettingsStore.patchPreview(patch);
+    }} />;
   const projection = {
     value: desiredScene.view.camera.projection,
-    onChange: value => viewSettingsStore.patch({ camera: { projection: value } }),
+    onChange: value => { controls.used(`projection_${value}`); viewSettingsStore.patch({ camera: { projection: value } }); },
   };
   const stripTool = ({ id, label, icon, ...rest }) => ({
     id, label, icon, active: !previewing && toolMode === id, disabled: idle, onSelect: () => selectTool(id), ...rest
@@ -656,10 +683,10 @@ export function useRendererShell({
   // when it is put down, and a press takes that one up; choosing another is the one row under the strip
   // (`RendererShell.jsx`, `annotation/toolbar.jsx`'s `AnnotationToolbar`), up while either is. A second press does nothing.
   // Its tooltip names what it draws with now, with that tool's key ("Rectangle R").
-  const drawing = DRAWING_TOOLS.map(({ id, label, entries }) => {
+  const drawing = DRAWING_TOOLS.map(({ id }) => {
     const variant = drawingToolVariant(id, annotation);
     const Icon = annotationToolIcon(variant);
-    return stripTool({ id, label, tooltip: entries.find(entry => entry.id === variant)?.label ?? label, shortcut: DRAWING_SHORTCUTS[variant],
+    return stripTool({ id, label: drawingToolLabel(id, t), tooltip: drawingToolLabel(variant, t), shortcut: DRAWING_SHORTCUTS[variant],
       icon: <Icon className="size-3" strokeWidth={2} aria-hidden="true" /> });
   });
   const tools = {

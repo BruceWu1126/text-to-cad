@@ -18,8 +18,8 @@
  */
 
 // A palette has always been dealt over a file's objects in the order of this key
-// compared as text (`buildPartFillIndexMap`, common/cadScene.js), which is not file
-// order once there are more than ten. A saved "Color by part" view keeps its colours.
+// compared as text, which is not file order once there are more than ten. A saved
+// "Color by part" view keeps its colours.
 function paletteKey(range, index) {
   return [String(range?.occurrenceId || ""), String(range?.id || ""), String(range?.label || range?.name || ""),
     String(index).padStart(8, "0")].join("\u0000");

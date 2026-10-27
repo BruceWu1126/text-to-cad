@@ -9,17 +9,16 @@ because a plugin's config pins a release of cadgen that may predate a setting: a
 environment variable it does not know, where a flag it does not know would stop the server.
 
 Only the server hears it, though, and most of CAD's work is not the server's: a skill's ``cadgen``
-command, a model script, the CAD Viewer a skill opens and the build daemon run with nothing a plugin
-set. So the server writes its channel down for its installation (``remember``): uv keeps one
-installation per requirement, and the plugin's server and its skills run the same requirement, so
-the same installation -- the one the build daemon is named after. Any process of that installation
-that was not told a channel itself reports the one written down (``recorded``), re-read with each
-batch, as the build daemon outlives the server that wrote it. The build daemon serves every caller
-of its installation, so it takes no channel from whichever process started it, only the one written
-down (``cadgen.daemon.client``). Where two plugins pin the same release on one machine they share an
-installation, and the server that started last is the one written down: the app most likely in use.
-The CAD server itself never reads it: a server its plugin did not name is configured by hand, and says
-so as ``unknown``.
+command, a model script and the CAD Viewer a skill opens run with nothing a plugin set -- nor is the
+counting: the server's sessions are counted by the engine, whose environment is whoever started it,
+often ``python model.py``. So the server writes its channel down for its installation (``remember``): uv
+keeps one installation per requirement, and the plugin's server and its skills run the same requirement,
+so the same installation -- the one the engine daemon is named after. Any process of that installation
+that was not told a channel itself reports the one written down (``recorded``), re-read with each batch,
+as the engine outlives the server that wrote it. Where two plugins pin the same release on one machine
+they share an installation, and the server that started last is the one written down: the app most
+likely in use. A server no plugin named is configured by hand: what it counts says ``unknown``, unless
+a plugin's server once ran from its installation, whose channel it then shares.
 
 cadgen reads a channel as a token and nothing more: telemetry reports it, and nothing decides by
 its name but ``dev``, a development install (and a source tree, installed editable or imported from
@@ -63,15 +62,20 @@ def is_channel(value: object) -> bool:
 
 @functools.cache
 def _source_tree() -> bool:
-    """An editable install, or cadgen imported from a checkout by path -- as the build daemon and its
+    """An editable install, or cadgen imported from a checkout by path -- as the engine daemon and its
     workers are (``PYTHONPATH`` names the checkout's ``src`` first), where the first metadata found
-    can be a build's leftover rather than the editable install's record."""
+    can be a build's leftover rather than the editable install's record. Told by where cadgen is
+    imported from before any metadata is read: the scan costs every command that counts something
+    tens of milliseconds, and cadgen imported from a folder of installed packages is no source tree
+    (an editable install imports from its source)."""
+    package = Path(__file__).resolve().parents[1]  # cadgen/
+    if package.parent.name == "src" and (package.parents[1] / "pyproject.toml").is_file():
+        return True
+    if package.parent.name in ("site-packages", "dist-packages"):
+        return False
     from cadgen._internal.editable import editable_source
 
-    if editable_source() is not None:
-        return True
-    package = Path(__file__).resolve().parents[1]  # cadgen/
-    return package.parent.name == "src" and (package.parents[1] / "pyproject.toml").is_file()
+    return editable_source() is not None
 
 
 def named() -> str | None:
@@ -82,10 +86,10 @@ def named() -> str | None:
     return DEV if _source_tree() else None
 
 
-def channel(*, recorded_too: bool = True) -> str:
+def channel() -> str:
     """This install's channel: what its plugin named, else ``dev`` for a source tree, else the one written down for
-    this installation (``recorded``; not with ``recorded_too=False``, as the CAD server asks), else ``unknown``."""
-    return named() or (recorded() if recorded_too else None) or UNKNOWN
+    this installation (``recorded``), else ``unknown``."""
+    return named() or recorded() or UNKNOWN
 
 
 def _record_path() -> Path:
@@ -96,7 +100,7 @@ def _record_path() -> Path:
 
 @functools.cache
 def installation() -> str:
-    """This installation's short name: its cadgen folder's, as the build daemon's is (``cadgen.daemon.client``)."""
+    """This installation's short name: its cadgen folder's."""
     package = str(Path(__file__).resolve().parents[1])
     return hashlib.sha256(package.encode("utf-8")).hexdigest()[:16]
 
@@ -128,14 +132,14 @@ def remember(*, path: Path | None = None) -> str | None:
         return None
     try:
         from cadgen._internal.atomic_replace import write_bytes_atomic
-        from cadgen._internal.file_lock import exclusive
+        from cadgen._internal.file_lock import state
 
         path = path or _record_path()
         key = installation()
         if _load(path).get(key) == value:  # as nearly every start finds it: no lock to wait on, nothing to write
             return value
         path.parent.mkdir(parents=True, exist_ok=True)
-        with exclusive(path.with_name(RECORD + ".lock")):
+        with state(path.parent):  # the state folder's one lock
             kept = _load(path)
             if kept.get(key) == value:
                 return value

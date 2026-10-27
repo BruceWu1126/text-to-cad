@@ -4,7 +4,7 @@ import { compactSuffix, hasPickGlyph, pickGlyphNode } from "../../inspector/pick
 
 // Quick Edit's note is plain text with references inline: an editable field whose text is the
 // person's and whose chips are references pasted into it, each one atomic (a Backspace takes it
-// whole) and read back as the reference it stands for (`/models/base.step#o1.f2`), in its place.
+// whole) and read back as the reference it stands for (`/models/base.step#f:base.make_box1.2`), in its place.
 
 // A chip's own size and look (`ReferenceChips.jsx`): 20px tall, its background, its glyph first,
 // then its words. It is the note's 20px line, top to bottom, so it sits in the text's rows without
@@ -39,7 +39,7 @@ function notePill(document, { token, kind = "", color = null, text, suffix = "" 
  * A reference as the note shows it: a pill carrying its token, named as the view names it — a
  * reference into the file on screen by what the renderer calls it (`name`: a part "cam", or a pick
  * by its part, kind and number, `{ name: "cam", kind: "face", number: "3" }`), into any other by its
- * file and what in it ("hinge.step · o1.e4").
+ * file and what in it ("hinge.step · e:hinge.make_box1.4").
  */
 export function noteChip(reference, document = globalThis.document, name = "") {
   const token = referenceToken(reference);
@@ -50,9 +50,9 @@ export function noteChip(reference, document = globalThis.document, name = "") {
   return notePill(document, { token, text });
 }
 
-/** An annotation (its annotation file's JSON, as its chip copies it) as the note shows it. */
-export function noteAnnotation(annotation, document = globalThis.document) {
-  return notePill(document, { token: JSON.stringify(annotation), kind: "pencil", text: "Annotation" });
+/** An annotation (its annotation file's JSON, as its chip copies it) as the note shows it, named `text` (its chip's name). */
+export function noteAnnotation(annotation, document = globalThis.document, text = "Annotation") {
+  return notePill(document, { token: JSON.stringify(annotation), kind: "pencil", text });
 }
 
 /** The note as text: its words as written, each chip its reference's token, line breaks kept. */
@@ -131,16 +131,16 @@ export function insertAtCaret(root, nodes) {
 /**
  * A paste as the note's nodes: each line that is a chip's copy alone (`pastedLines`: a reference or
  * the annotation) its pill, followed by a space to type on after it; every other line
- * text, the lines' breaks kept.
+ * text, the lines' breaks kept. `annotationName` names the annotation's pill, as its chip is named.
  */
-export function pasteNodes(lines, document = globalThis.document, nameReference = null) {
+export function pasteNodes(lines, document = globalThis.document, nameReference = null, annotationName = "Annotation") {
   const nodes = [];
   lines.forEach((line, index) => {
     if (index) nodes.push(document.createTextNode("\n"));
     if (typeof line === "string") { if (line) nodes.push(document.createTextNode(line)); return; }
     const pill = line.chip ? notePill(document, { token: line.token, kind: line.chip.glyph ?? line.chip.compact?.kind,
       color: line.chip.glyphColor, text: line.chip.text ?? line.chip.label })
-      : line.annotation ? noteAnnotation(line.annotation, document)
+      : line.annotation ? noteAnnotation(line.annotation, document, annotationName)
         : noteChip(line, document, nameReference?.(line) || "");
     nodes.push(pill, document.createTextNode(" "));
   });

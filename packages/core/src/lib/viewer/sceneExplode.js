@@ -2,7 +2,7 @@
 // STEP's (`explodedView.js`: each level of the file's tree blooms radially out of its parent, over
 // one 0..1 slider), and the scene moves the objects it named as its parts: each by its own share
 // of the bloom, in its parent's frame, from where it was authored. The viewer's viewport and the
-// snapshot CLI's headless stage both explode through this, so the two cannot differ.
+// parity page's headless stage both explode through this, so the two cannot differ.
 
 import { applyExplodedViewProgress, computeExplodedViewLayout, explodedViewBounds } from "./explodedView.js";
 

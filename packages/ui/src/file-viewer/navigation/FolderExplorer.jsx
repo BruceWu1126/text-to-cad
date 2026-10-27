@@ -4,10 +4,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { TreeFilterInput } from "@text-to-cad/ui/primitives/tree-filter";
-import { TREE_GLYPH_CLASS, TREE_GLYPH_STROKE, TREE_INDENT_PX, TREE_ROW_INSET_PX, TreeRowChevron, TreeRowGuides, TreeRowLabel, TreeRowSurface } from "@text-to-cad/ui/primitives/tree-row";
+import { TREE_GLYPH_STROKE, TREE_INDENT_PX, TREE_ROW_INSET_PX, TreeRowChevron, TreeRowGuides, TreeRowLabel, TreeRowSurface } from "@text-to-cad/ui/primitives/tree-row";
 import { cn } from "@text-to-cad/ui/utils";
 import { useI18n } from "@text-to-cad/ui/i18n";
 import { FileIcon, FolderIcon } from "./icons.jsx";
+import { DOCUMENT_ROW_GLYPH_CLASS } from "./DocumentGlyph.jsx";
+import { useControlUsage } from "../../usage/controls.js";
 
 // The wait after a keystroke before the filter searches; each keystroke cancels the search before it.
 const SEARCH_DELAY_MS = 150;
@@ -93,7 +95,7 @@ function Row({ kind, path, detail = "", name, depth = 0, active = false, expande
     aria-expanded={kind === "directory" ? expanded : undefined} onClick={onClick} onDoubleClick={onDoubleClick}>
     <TreeRowGuides depth={depth} inset={ROW_INSET_PX} />
     {kind === "directory" ? <TreeRowChevron expanded={expanded} />
-      : <FileIcon className={TREE_GLYPH_CLASS} path={path} strokeWidth={TREE_GLYPH_STROKE} />}
+      : <FileIcon className={DOCUMENT_ROW_GLYPH_CLASS} path={path} strokeWidth={TREE_GLYPH_STROKE} />}
     <TreeRowLabel>{detail ? <span className="text-muted-foreground">{detail}</span> : null}{name}</TreeRowLabel>
   </TreeRowSurface></TooltipHint>;
 }
@@ -107,15 +109,21 @@ function Row({ kind, path, detail = "", name, depth = 0, active = false, expande
  * folders as fit whole -- the folder it is in always, cut only once it is alone -- and an ellipsis
  * whose menu holds the ones above them. "Filter files..." searches every CAD file nested under the
  * folder it is in (`source.search`, bounded by the server, which says when it stopped early). A
- * pick is `onOpen`; whoever holds the explorer puts it away.
+ * pick is `onOpen`; whoever holds the explorer puts it away. A document with no file of its own (a
+ * model's) starts in `folder`: where the explorer was last, else the person's home folder. Each
+ * folder it is in is `onFolderChange`'s, for the host to start it there next time.
  *
- * @param {{ source: Pick<import("../types").FileSource, "list" | "search">, file: string, onOpen(path: string): void }} props
+ * @param {{ source: Pick<import("../types").FileSource, "list" | "search">, file: string, folder?: string | null,
+ *   onOpen(path: string): void, onFolderChange?(folder: string): void }} props
  */
-export function FolderExplorer({ source, file, onOpen }) {
+export function FolderExplorer({ source, file, folder: start = null, onOpen, onFolderChange }) {
   const { t } = useI18n();
-  const [folder, setFolder] = useState(() => parentFolder(file));
+  const [folder, setFolder] = useState(() => start || parentFolder(file));
   const [listing, setListing] = useState({ folder: "", entries: null, error: null });
-  const [query, setQuery] = useState("");
+  const [query, setQueryState] = useState("");
+  // A search begun is a use (`usage/controls.js`); never what it looks for.
+  const usage = useControlUsage();
+  const setQuery = next => { if (!query.trim() && String(next).trim()) usage.used("explorer_filter"); setQueryState(next); };
   const [found, setFound] = useState(null);
   // The folders opened inline, by path, and what each holds once it has been read.
   const [open, setOpen] = useState(() => new Set());
@@ -126,6 +134,10 @@ export function FolderExplorer({ source, file, onOpen }) {
   const currentCrumb = useRef(null);
   const term = query.trim();
 
+  // The folder it is in, for the host to start in next time (the tab's settings).
+  const reportFolder = useRef(onFolderChange);
+  reportFolder.current = onFolderChange;
+  useEffect(() => { reportFolder.current?.(folder); }, [folder]);
   useEffect(() => {
     const controller = new AbortController();
     source.list(folder, { signal: controller.signal }).then(

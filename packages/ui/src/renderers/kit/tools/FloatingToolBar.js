@@ -9,6 +9,7 @@ import { cn } from "@text-to-cad/ui/utils";
 import { FLOATING_CHROME_SURFACE_CLASS, FLOATING_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
 import { STRIP_BUTTON_CLASS, StripTouchProvider, TOUCH_STRIP_BUTTON_CLASS } from "./stripTouch.js";
 import { ChangedDot } from "./ChangedDot.jsx";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 export { STRIP_BUTTON_CLASS, StripTouchProvider, TOUCH_STRIP_BUTTON_CLASS, useStripButtonClass, useStripTouch } from "./stripTouch.js";
 
@@ -26,7 +27,11 @@ export { STRIP_BUTTON_CLASS, StripTouchProvider, TOUCH_STRIP_BUTTON_CLASS, useSt
  * @property {import("react").ReactNode} icon
  * @property {boolean} [active]
  * @property {boolean} [disabled]
- * @property {() => void} onSelect  Every press of the button.
+ * @property {() => void} [onSelect]  Every press of the button (a tool with a `tile` has none).
+ * @property {import("react").ReactNode} [tile]  Drawn in place of the button: a model effect's, which opens
+ *   its row in a popover from its own tile (`model-effects/ModelTools.jsx`) and is never in hand.
+ * @property {(props: { anchor: import("react").RefObject<HTMLElement>, open: boolean, onOpenChange(open: boolean): void }) => import("react").ReactNode} [popover]
+ *   With a `tile`: that popover, opened from the touch strip's More button when the tile has no room.
  * @property {string} [description]  `aria-description`.
  * @property {import("react").ReactNode} [menu]  Its modes: the chevron after its button, and the menu it opens.
  * @property {boolean} [changed]  What it sets is off its default (an effect on the model): a dot in its tile's corner.
@@ -63,6 +68,7 @@ const SPLIT_BUTTON_CLASS = "rounded-r-none hover:bg-transparent data-[variant=se
 
 // A plain function, not a component: the strip's own output is the buttons.
 function toolButton(tool, className = STRIP_BUTTON_CLASS, touch = false) {
+  if (tool.tile) return tool.tile;
   const active = tool.active === true;
   const button = <ToolbarButton tooltipSide="top" label={tool.label} tooltip={tool.tooltip ?? true} shortcut={tool.shortcut} active={active} disabled={tool.disabled}
     className={cn(className, tool.changed && "relative", tool.menu && SPLIT_BUTTON_CLASS)} aria-pressed={active} aria-description={tool.description} onClick={() => tool.onSelect()}
@@ -94,13 +100,14 @@ const rule = <span role="separator" aria-orientation="vertical" className="mx-0.
  */
 export default function FloatingToolBar({ tools = [], views = [], touch = false }) {
   // Nothing to hold, no strip: an empty bar is never drawn.
+  const { t } = useI18n();
   if (!tools.length && !views.length) return null;
   if (touch) return <TouchStrip tools={tools} views={views} />;
   // Two sections at most, parted by one thin rule: the tools of the first group, then the rest. The view's
   // controls end the last section the tools have; with one section only, they are the second.
   const sectioned = tools.some((tool, index) => index > 0 && (tool.group || "") !== (tools[index - 1].group || ""));
   return (<div className="relative z-20 flex max-w-full shrink-0 flex-col items-end gap-1" data-cad-toolbar="tools">
-      <div role="group" aria-label="Interaction tools" className={cn(GROUP_CLASS, "flex-wrap")}>
+      <div role="group" aria-label={t("toolbar.tools")} className={cn(GROUP_CLASS, "flex-wrap")}>
         {tools.map((tool, index) => <Fragment key={tool.id}>
           {index > 0 && (tool.group || "") !== (tools[index - 1].group || "") ? rule : null}
           {toolButton(tool)}
@@ -145,6 +152,7 @@ export function touchStripFit(entries, room, { more = false } = {}) {
  * its press, or its popover, which then opens from More.
  */
 function TouchStrip({ tools, views }) {
+  const { t } = useI18n();
   const root = useRef(null);
   const more = useRef(null);
   const [room, setRoom] = useState(Infinity);
@@ -168,13 +176,14 @@ function TouchStrip({ tools, views }) {
   const count = touchStripFit(toolEntries, room, { more: viewEntries.length > 0 });
   const shown = toolEntries.slice(0, count), hidden = [...toolEntries.slice(count), ...viewEntries];
   const shownTools = shown.filter(entry => !entry.view), shownViews = shown.filter(entry => entry.view);
-  const overflowViews = hidden.filter(entry => entry.view).map(entry => entry.control);
-  const popoverView = overflowViews.find(view => view.id === openView && view.popover);
+  // What opens a popover from More: a view control's, or a model effect's (a tool with a `tile`).
+  const overflowPopovers = hidden.map(entry => entry.view ? entry.control : entry.tool).filter(item => item.popover);
+  const popoverView = overflowPopovers.find(item => item.id === openView);
   // A tool in hand that lives in More: More's button is drawn selected while it is (its row checked).
   const heldInMore = hidden.some(entry => !entry.view && entry.tool.active === true);
   return <StripTouchProvider value={true}>
     <div ref={root} className="relative z-20 flex max-w-full shrink-0 flex-col items-end gap-1" data-cad-toolbar="tools" data-touch-strip="">
-      <div role="group" aria-label="Interaction tools" className={cn(GROUP_CLASS, "flex-nowrap")}>
+      <div role="group" aria-label={t("toolbar.tools")} className={cn(GROUP_CLASS, "flex-nowrap")}>
         {shownTools.map(({ tool }) => <Fragment key={tool.id}>{toolButton(tool, TOUCH_STRIP_BUTTON_CLASS, true)}</Fragment>)}
         {shownTools.length && shownViews.length ? rule : null}
         {shownViews.length ? <span className="inline-flex items-center gap-1" data-view-controls="">
@@ -182,11 +191,11 @@ function TouchStrip({ tools, views }) {
         </span> : null}
         {hidden.length ? <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
-            <ToolbarButton ref={more} tooltipSide="top" label="More tools" active={heldInMore} className={TOUCH_STRIP_BUTTON_CLASS} data-strip-more="">
+            <ToolbarButton ref={more} tooltipSide="top" label={t("toolbar.more")} active={heldInMore} className={TOUCH_STRIP_BUTTON_CLASS} data-strip-more="">
               <Ellipsis aria-hidden="true" />
             </ToolbarButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" sideOffset={6} collisionPadding={8} aria-label="More tools"
+          <DropdownMenuContent align="end" sideOffset={6} collisionPadding={8} aria-label={t("toolbar.more")}
             className={cn(FLOATING_SURFACE_CLASS, "data-[state=closed]:animate-none!")}
             onCloseAutoFocus={event => {
               // A popover chosen here opens from More once the menu is gone, keeping the focus.
@@ -214,6 +223,10 @@ function TouchStrip({ tools, views }) {
                 onSelect={() => { if (entry.control.popover) pending.current = entry.control.id; else entry.control.onSelect?.(); }}>
                 <span className={MORE_ICON_CLASS} aria-hidden="true">{entry.control.icon}</span>{entry.control.label}
               </DropdownMenuItem>
+              : entry.tool.popover
+                ? <DropdownMenuItem key={entry.tool.id} disabled={entry.tool.disabled} onSelect={() => { pending.current = entry.tool.id; }}>
+                  <span className={MORE_ICON_CLASS} aria-hidden="true">{entry.tool.icon}</span>{entry.tool.label}
+                </DropdownMenuItem>
               : <DropdownMenuCheckboxItem key={entry.tool.id} checked={entry.tool.active === true} disabled={entry.tool.disabled}
                 onSelect={() => entry.tool.onSelect()}>
                 <span className={MORE_ICON_CLASS} aria-hidden="true">{entry.tool.icon}</span>{entry.tool.label}

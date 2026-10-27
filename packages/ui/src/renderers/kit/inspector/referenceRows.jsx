@@ -3,6 +3,7 @@ import { Check } from "lucide-react";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { cn } from "@text-to-cad/ui/utils";
 import { useCopyFlash } from "./copyFlash.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 // Onshape-style axis colour coding for coordinate triples.
 const AXES = Object.freeze([
@@ -28,18 +29,20 @@ export function formatNumber(value, digits = 2) {
 // `text-tiny`, numbers kept in tabular figures.
 //
 // The label carries what the row means (`title`), as a hint. A click on the value copies it, as
-// it reads (`copy` says otherwise: a coordinate's `CoordValue` carries its own, "x, y, z"), its
+// it reads (`copy` says otherwise: a coordinate's `CoordValue` carries its own, "x, y, z"; a chip's ID
+// row, its whole reference, made at the click where `copy` is a function), its
 // pointer the only sign it can; for a moment "Copied" is drawn over it, the value kept in place unseen, so
 // the row keeps its every line and baseline and nothing moves. `copy={false}` leaves a row
 // uncopyable: one whose value is a link (a file, a parent link), which keeps its own click.
 export function InfoRow({ label, children, title, copy }) {
+  const { t } = useI18n();
   const value = useRef(null);
   const flash = useCopyFlash();
   const copyable = flash.canCopy && copy !== false;
   const onClick = () => {
     if (!copyable) return;
     const element = value.current;
-    const text = typeof copy === "string" ? copy
+    const text = typeof copy === "function" ? copy() : typeof copy === "string" ? copy
       : element?.querySelector("[data-copy]")?.getAttribute("data-copy") || element?.textContent || "";
     void flash.copy(text);
   };
@@ -52,7 +55,7 @@ export function InfoRow({ label, children, title, copy }) {
           copyable && "cursor-pointer rounded-sm transition-colors hover:text-foreground")}>
         <div ref={value} className={copied ? "invisible" : undefined}>{children}</div>
         {copied ? <span className="absolute right-0 top-0 inline-flex items-center gap-1 whitespace-nowrap text-foreground">
-          <Check className="size-2.5" aria-hidden="true"/>Copied
+          <Check className="size-2.5" aria-hidden="true"/>{t("chip.copied")}
         </span> : null}
       </div>
     </div>

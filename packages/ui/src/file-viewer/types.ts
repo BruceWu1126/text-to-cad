@@ -8,12 +8,29 @@ export type { LanguageSetting };
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export interface FileEntry { path: string; name: string; kind: "file" | "directory" }
 export interface FileMetadata extends FileEntry {
+  /**
+   * The on-disk file to browse from and act on (its Files, Copy path, Reveal); omitted it is
+   * `path`. Null for a document with no file of its own (a model's, by its id): no file menu.
+   */
+  navigationPath?: string | null;
   size: number;
   extension: string;
   mime?: string;
   /** A source hint; each registration remains responsible for matching. */
   mediaType?: string;
   revision?: string;
+}
+/** A document of the host's library, as the name menu's Recent lists it (`@text-to-cad/ui/library`'s rows). */
+export interface RecentDocument {
+  /** A file's absolute path, a model's id: what `navigation.openFile` opens. */
+  path: string;
+  name: string;
+  /** `model` or `shape` for a document built from code; a file otherwise. */
+  kind?: string;
+  /** When a page last opened it, and when it was last updated, in seconds. */
+  opened?: number | null;
+  updated?: number | null;
+  missing?: boolean;
 }
 export interface FileActions {
   platform?: Platform;
@@ -65,7 +82,7 @@ export interface FileNavigationAction {
   active?: boolean;
   onInvoke: () => void | Promise<void>;
 }
-/** An on/off setting of the host's own, in a Settings section it names (the CAD apps' Analytics). */
+/** An on/off setting of the host's own, in a Settings section it names (the CAD apps' Telemetry). */
 export interface AppSetting {
   id: string;
   label: string;
@@ -102,11 +119,10 @@ export interface RendererViewProps {
   file: FileMetadata;
   source: FileSource;
   /**
-   * The navbar's box for the renderer's own view controls, last at its right end (the CAD
-   * viewer's Display and Preview, for a 3D view); null where no navbar is drawn (a compact view),
-   * when the renderer draws them over its view instead.
+   * The renderer's Preview is up (`true`) or has closed (`false`): FileViewer hides its navbar while
+   * it is, Preview drawing its own bar in its place.
    */
-  navbarSlot?: HTMLElement | null;
+  onPreviewChange?: (previewing: boolean) => void;
   onReady: (ready: boolean) => void;
   /**
    * Show another file, by its absolute path, in this view (a robot's mesh). Absent where the view
@@ -141,6 +157,9 @@ export interface RendererRegistration {
   prepare: (context: PrepareContext) => Promise<PreparedRenderer>;
 }
 export interface FileViewerProps {
+  /** Additive host actions at the navbar right, and persistent feedback below it. */
+  navbarActions?: ReactNode;
+  overlay?: ReactNode;
   /** The file on screen, by its absolute path; null shows the host's home. */
   file: string | null;
   host: ViewerHost;
@@ -161,21 +180,38 @@ export interface FileViewerProps {
    * controls, while the host's install is behind; nothing otherwise.
    */
   update?: ReactNode;
-  /**
-   * The host's Full size button, where the host shows the view small (inline in a conversation):
-   * last at the navbar's right end.
-   */
-  fullSize?: ReactNode;
   /** The view's own history, where the host keeps one: Back and Forward after the navbar's logo, over a file and on the home. */
   history?: ViewerHistory;
+  /**
+   * The host's library (a CAD host's Home), where it has one: the name menu's Models tab lists its
+   * models, by last activity, and a row opens its model through `navigation.openFile`.
+   */
+  recent?: { list(): Promise<readonly RecentDocument[]> };
+  /**
+   * Where the name menu's Files starts for a document with no file of its own (a model's): the folder
+   * the explorer was last in, else the person's home folder. Never the script it was built from. A
+   * file's Files starts in its own folder.
+   */
+  explorerFolder?: string | null;
+  /** The folder the explorer is in, each time it changes: the host keeps it for `explorerFolder`. */
+  onExplorerFolderChange?(folder: string): void;
   /** The host's notice, shown at the viewport's top-right once the file is on screen (`RendererViewProps.notice`). */
   notice?: ReactNode;
+  /**
+   * The chrome around the view: `"page"` (the default) draws the navbar over every file and over the
+   * home; `"bare"` draws none, the view alone, for a host whose own frame is the navigation (the CAD
+   * app's file handler). The renderer's own controls over the viewport are the same either way.
+   */
+  chrome?: "page" | "bare";
   onError?: (error: Error) => void;
   presentation?: {
-    /** The host's home, shown with no file: a page of its own under the navbar, which has only its logo's menu, Back and Forward, update and Full size there. */
+    /** The host's home, shown with no file: a page of its own under the navbar, which has only its logo's menu, Back and Forward, the update and the host's actions there. */
     home?: ReactNode;
     loading?: ReactNode;
-    /** A file that will not open: `missing` when it does not exist. */
-    error?: (failure: { message: string; missing: boolean }) => ReactNode;
+    /**
+     * A file that will not open: `missing` when it does not exist; `error`, what the source raised
+     * (a host reads its own fields on it); `reload` rereads only this file.
+     */
+    error?: (failure: { message: string; missing: boolean; error?: unknown; reload?: () => void }) => ReactNode;
   };
 }

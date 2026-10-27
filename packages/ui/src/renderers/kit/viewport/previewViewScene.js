@@ -3,10 +3,10 @@ import { previewDisplaySettings } from "../view-settings/viewerDisplaySettings.j
 
 // How Preview's own view (`kit/shell/PreviewView.jsx`) draws the file's Render settings.
 // The editor's view draws its scene exactly as the settings resolve it; Preview is for looking
-// at the model: no tool effects (`previewDisplaySettings`), drawn one scene-quality tier up (finer
-// tessellation, a higher idle pixel ratio, and at the top tier larger shadow and environment
-// maps), and it keeps its full pixel ratio while it moves: an orbit never rests, so the
-// interaction drop would be all it ever showed.
+// at the model: no tool effects (`previewDisplaySettings`), drawn one scene-quality tier up (a
+// higher idle pixel ratio, and at the top tier larger shadow and environment maps), and it keeps
+// its full pixel ratio while it moves: an orbit never rests, so the interaction drop would be all
+// it ever showed.
 
 const PREVIEW_QUALITY_TIER = Object.freeze({
   [SCENE_QUALITY.INTERACTIVE]: SCENE_QUALITY.STANDARD,

@@ -20,7 +20,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 export const KIT_ROOT = 'packages/ui/src/renderers/kit';
 
 // Core modules that belong to one file family, or to the STEP assembly pipeline.
-const FAMILY_CORE_IMPORT = /^@text-to-cad\/core\/(?:glb\/|lib\/(?:assembly|dxf|export|glb|render|selectors|step|surf|urdf)\/|lib\/(?:cadRefs|entryAssets|fileFormats|renderCapabilities|renderAssetClient|stepRenderAssetClient)\.js|common\/(?:cadScene|renderMeshScene|stepModule\w*|topology\w*|applySceneState)\.js)/;
+const FAMILY_CORE_IMPORT = /^@text-to-cad\/core\/(?:glb\/|lib\/(?:dxf|glb|parts|render|selectors|step|urdf|xbf)\/|lib\/(?:cadRefs|entryAssets|fileFormats|renderCapabilities|renderAssetClient)\.js|common\/(?:renderMeshScene|articulation|topology\w*)\.js)/;
 
 const FORBIDDEN_WORDS = [
   ['a file format', /urdf|srdf|(?<![a-z])sdf(?![a-z])|glb|gltf|dxf|(?<![a-z])stl(?![a-z])|3mf|b-?rep(?![a-z])/i],
@@ -30,7 +30,7 @@ const FORBIDDEN_WORDS = [
   ['selectors', /(?<!query)selector/i],
   ['STEP display records', /displayRecord/],
   ['explode', /explod/i],
-  ['section clipping', /clipplane(?!s)|sectioncap|clip(?:settings|bounds|axis|offset)/i],
+  ['section clipping', /clipplane(?!s)|sectioncap|clip(?:settings|bounds|axis|amount)/i],
 ];
 
 // The view-settings model names its opt-in sections, and the model-effects tools the
@@ -96,7 +96,7 @@ export function checkKitBoundaries(repo, { allowlist = KIT_WORD_ALLOWLIST } = {}
 // lazy-loaded and deleted alone. Every file family is on this list; `workspace`
 // is held to the same rule.
 export const RENDERERS_ROOT = 'packages/ui/src/renderers';
-export const RENDERER_SLICES = ['dxf', 'glb', 'mesh', 'robot', 'step', 'workspace'];
+export const RENDERER_SLICES = ['dxf', 'glb', 'mesh', 'robot', 'workspace', 'xbf'];
 const SLICE_SHARED = ['kit', 'workspace'];
 
 export function checkRendererSlices(repo, { slices = RENDERER_SLICES } = {}) {
@@ -131,9 +131,7 @@ export function checkRendererSlices(repo, { slices = RENDERER_SLICES } = {}) {
 // resolves which slice a file belongs to and lazy-loads it through the registry. So it must
 // not import one itself — a static edge into a slice defeats the split, pulling that
 // family's code (and three.js with it) into every host that shows any file at all. The kit
-// and the workspace module are shared, so those are fine. The empty CAD backdrop is the case
-// this rule was written for: it drew a stage with NO model in it and reached into the STEP
-// renderer to do it.
+// and the workspace module are shared, so those are fine.
 export const FILE_VIEWER_ROOT = 'packages/ui/src/file-viewer';
 
 export function checkFileViewerBoundary(repo, { shared = SLICE_SHARED } = {}) {
@@ -161,12 +159,13 @@ export function checkFileViewerBoundary(repo, { shared = SLICE_SHARED } = {}) {
   return { errors, sourceCount: files.length };
 }
 
-// ONE SCENE BUILDER PER FILE FAMILY, TWO CALLERS. The snapshot CLI's headless stage
+// ONE SCENE BUILDER PER FILE FAMILY, TWO CALLERS. The OCCT parity bench's headless page
 // (`HEADLESS_SCENE`) and the viewer's renderer for a family draw that family's files with
 // the same core module: the same loader, the same builder, the same look and the same
-// opening pose. So each shared piece is imported by BOTH from ONE module, is defined
+// player (a robot's pose is cadgen's articulation, played by `common/articulation.js` in
+// both). So each shared piece is imported by BOTH from ONE module, is defined
 // nowhere else, and the headless render path imports no mesh flattener of its own — a
-// snapshot that drew a GLB, a mesh or a robot its own way is exactly what this stops.
+// still that drew a GLB, a mesh or a robot its own way is exactly what this stops.
 export const HEADLESS_ENTRY = 'packages/core/src/common/headlessRenderEntry.js';
 export const HEADLESS_SCENE = 'packages/core/src/common/headlessScene.js';
 export const SHARED_SCENE_PIECES = [
@@ -177,18 +176,20 @@ export const SHARED_SCENE_PIECES = [
   { what: 'the robot scene', module: 'packages/core/src/lib/urdf/robotScene.js',
     viewer: ['packages/ui/src/renderers/robot/RobotRenderer.jsx', ['createRobotScene']], headless: ['createRobotScene'] },
   { what: 'the robot loader', module: 'packages/core/src/lib/urdf/loadRobot.js',
-    viewer: ['packages/ui/src/renderers/robot/useRobotDocument.js', ['loadRobotDescription', 'loadRobotMeshes', 'robotModel']], headless: ['loadRobot'] },
-  { what: 'the opening pose', module: 'packages/core/src/lib/urdf/motion.js',
-    viewer: ['packages/ui/src/renderers/robot/poseStore.js', ['robotOpeningPose']], headless: ['robotOpeningPose'] },
+    viewer: ['packages/ui/src/renderers/robot/useRobotDocument.js', ['loadRobotMeshes', 'robotModel']], headless: ['loadRobot'] },
+  { what: 'the engine document scene', module: 'packages/core/src/lib/xbf/xbfScene.js',
+    viewer: ['packages/ui/src/renderers/xbf/useXbfScene.js', ['createXbfScene']], headless: ['createXbfScene'] },
+  { what: 'the engine document loader', module: 'packages/core/src/lib/xbf/xbfDocument.js',
+    viewer: ['packages/ui/src/renderers/xbf/useXbfScene.js', ['loadXbfDocument']], headless: ['loadXbfDocument'] },
   { what: 'the surface look', module: 'packages/core/src/common/sceneSettings.js',
     viewer: ['packages/ui/src/renderers/kit/shell/ShellViewport.jsx', ['resolveSceneSurfaceLook']], headless: ['resolveSceneSurfaceLook'] },
 ];
 // Defined once, in their module: a second definition is a second way to draw a family.
 const SHARED_BUILDER_NAMES = ['createGlbScene', 'createMeshScene', 'buildMeshScene', 'createRobotScene', 'buildRobotParts',
-  'robotOpeningPose', 'resolveSceneSurfaceLook'];
+  'createXbfScene', 'resolveSceneSurfaceLook'];
 // What the headless render path used to flatten a family with, and must not reach for again.
-const HEADLESS_RENDER_PATH = [HEADLESS_ENTRY, HEADLESS_SCENE, 'packages/core/src/common/renderMeshScene.js', 'packages/core/src/common/source.js'];
-const MESH_FLATTENERS = ['buildMeshDataFromGlbBuffer', 'buildMeshDataFromStlBuffer', 'buildMeshDataFrom3MfBuffer', 'buildUrdfVisualParts', 'buildRobotParts'];
+const HEADLESS_RENDER_PATH = [HEADLESS_ENTRY, HEADLESS_SCENE, 'packages/core/src/common/renderMeshScene.js'];
+const MESH_FLATTENERS = ['buildMeshDataFromGlbBuffer', 'buildMeshDataFromStlBuffer', 'buildMeshDataFrom3MfBuffer', 'robotVisualParts', 'buildRobotParts'];
 
 // `import { a, b as c } from '...'` (across lines): each imported NAME with the specifier it came from.
 function namedImports(code) {
@@ -273,6 +274,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   const host = checkFileViewerBoundary(repo);
   const shared = checkSharedSceneBuilders(repo);
   const errors = [...kit.errors, ...slices.errors, ...host.errors, ...shared.errors];
-  if (errors.length) { console.error(errors.join('\n')); process.exitCode = 1; }
-  else console.log(`Kit boundaries passed (${kit.sourceCount} format-blind sources); renderer slices passed (${RENDERER_SLICES.join(', ')}: ${slices.sourceCount} sources); the file viewer imports no slice (${host.sourceCount} sources); the viewer and the snapshot CLI share ${shared.pieceCount} scene pieces.`);
+  if (errors.length) {
+    console.error(errors.join('\n'));
+    // Rule 2 reads every line, a comment's as much as code's: a comment naming a format fails it too.
+    if (kit.errors.some(error => / names /.test(error))) {
+      console.error('The kit names no format, STEP concept, file-kind switch, topology or selector, in code or in a comment: reword the line '
+        + '(a comment counts too) or move what needs the word into a renderer.');
+    }
+    process.exitCode = 1;
+  }
+  else console.log(`Kit boundaries passed (${kit.sourceCount} format-blind sources); renderer slices passed (${RENDERER_SLICES.join(', ')}: ${slices.sourceCount} sources); the file viewer imports no slice (${host.sourceCount} sources); the viewer and the parity page share ${shared.pieceCount} scene pieces.`);
 }

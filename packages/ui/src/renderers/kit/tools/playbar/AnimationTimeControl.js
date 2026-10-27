@@ -1,6 +1,20 @@
 import { useAnimationClockValue } from "./animationClock.js";
 import { Slider } from "@text-to-cad/ui/primitives/slider";
 import { FILE_SHEET_PRECISION_SLIDER_CLASSES } from "../../inspector/FileSheet.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
+
+/**
+ * The words a routine runtime's controls say, in `t`'s language, by its `noun`: "Animation" (the
+ * default) or "Motion", each its own set of keys (`playbar.animation.*`, `playbar.motion.*`).
+ * @param {{ noun?: string } | null | undefined} runtime
+ * @param {(key: string, params?: Record<string, unknown>) => string} t
+ */
+export function playbarWords(runtime, t) {
+  const kind = runtime?.noun === "Motion" ? "motion" : "animation";
+  const say = (word, params) => t(`playbar.${kind}.${word}`, params);
+  return { title: say("title"), reset: say("reset"), play: say("play"), pause: say("pause"), playback: say("playback"),
+    list: say("list"), current: name => say("current", { name }) };
+}
 
 // The file sidebar's Animation section (`AnimationSection.jsx`) is the one transport, in the tools
 // view and Preview alike: the routine, Play/Pause, this scrubber and the Playback settings
@@ -27,6 +41,7 @@ export function formatSeconds(value) {
  * clock store instead of React state.
  */
 export function AnimationTimeControl({ runtime, disabled = false, className = FILE_SHEET_PRECISION_SLIDER_CLASSES }) {
+  const { t } = useI18n();
   const activeClip = runtime?.clips?.find(clip => clip.id === runtime?.activeClipId);
   const duration = Math.max(Number(activeClip?.duration) || 1, 0.001);
   const liveElapsedSec = useAnimationClockValue(runtime?.clock);
@@ -41,7 +56,7 @@ export function AnimationTimeControl({ runtime, disabled = false, className = FI
       max={duration}
       step={0.01}
       onValueChange={(nextValue) => runtime?.onScrub?.(nextValue?.[0] ?? 0)}
-      thumbProps={{ "aria-label": "Animation time", "aria-valuetext": `${formatSeconds(value)} of ${formatSeconds(duration)}` }}
+      thumbProps={{ "aria-label": t("playbar.time"), "aria-valuetext": t("playbar.timeOf", { elapsed: formatSeconds(value), duration: formatSeconds(duration) }) }}
     />
   );
 }

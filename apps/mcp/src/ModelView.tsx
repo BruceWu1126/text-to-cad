@@ -10,7 +10,9 @@ import type { Bridge } from './host/bridge';
 import { frameClipboard } from './host/clipboard';
 import type { LiveRegistry } from './host/live';
 import { createChatPromptContext, type ChatReach } from './host/prompt';
+import { translator } from '@text-to-cad/ui/i18n';
 import type { Launch } from './host/server';
+import { CardCorner } from './CardCorner';
 import type { ViewSync } from './host/sync';
 import { TUNNEL_ORIGIN } from './host/tunnel';
 
@@ -24,13 +26,18 @@ export interface ViewReporter {
 
 /**
  * One view: the shared CAD viewer over this host — the model a launch names, by its absolute path,
- * or with none, the home (the library, and Open). A view browses from its model's folder, shows
- * what is opened in place, and adds what it shows to the library. Everything differs by data —
- * what a Quick Edit can do in the chat, whether the view has a home — never by where the view is.
- * Codex's file handler (`surface: file`, `alone`) shows its file alone: the host's own file tree is
- * its navigation.
+ * or with none, the home (the library, and Open) — under the navbar (`chrome: "page"`): its logo and
+ * app menu, Back and Forward, the file's name and menus, and the host's update, Full size and Open in
+ * browser. A view browses from its model's folder, shows what is opened in place, and adds what it
+ * shows to the library. Everything differs by data — what a Quick Edit can do in the chat, whether
+ * the view has a home — never by where the view is.
+ *
+ * Codex's file handler (`surface: file`, `alone`) shows its file alone (`chrome: "bare"`): the host's
+ * own file tree is its navigation, so it has no navbar, no home and no Open in browser; what the
+ * navbar would carry that it still has (the update notice, Full size where the host offers it) is its
+ * corner (`CardCorner`) at the viewport's top-right.
  */
-export default function ModelView({ launch, sequence, alone = false, bridge, client, tunnel, tabStore, live, links, colorScheme, theme, locale, language, platform, reporter, sync, chat, appSettings, update, fullSize }: {
+export default function ModelView({ launch, sequence, alone = false, bridge, client, tunnel, tabStore, live, links, colorScheme, theme, locale, language, platform, reporter, sync, chat, appSettings, update, fullSize, openInBrowser }: {
   launch: Launch; sequence: number; bridge: Bridge; tabStore: TabStore; live: LiveRegistry; links: ViewerLinks;
   /**
    * The view shows the one file its host opened, and nothing else (Codex's file handler): no home,
@@ -54,10 +61,15 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
   chat: ChatReach;
   /** This app's on/off settings, in the app menu: analytics. */
   appSettings?: readonly AppSetting[];
-  /** The update button, first in the navbar and on the home, while this install is behind. */
+  /**
+   * While this install is behind: the navbar's update button, first among its controls, over a file
+   * and on the home; in the file handler, the corner's notice under Full size.
+   */
   update?: ReactNode;
-  /** Inline, the card's way to full size, where the host can show it so: in the navbar, before the view's controls, and last on the home. */
+  /** Inline, the card's way to full size, where the host can show it so: in the navbar before the host's other actions; the corner's first in the file handler. */
   fullSize?: ReactNode;
+  /** The view's page in the person's browser, where a launch carried one: last in the navbar. Never in the file handler. */
+  openInBrowser?: ReactNode;
 }) {
   // Codex's file handler shows its file alone: the host's own file tree is its navigation, so it
   // has neither the home nor the explorer (a source that cannot list or search offers none).
@@ -85,7 +97,11 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
   showing.current = file;
   // A Quick Edit's views, annotation and pictures are made by the server, which is on this machine.
   const promptFiles = useMemo(() => createHttpPromptFiles({ origin: TUNNEL_ORIGIN, fetch: tunnel }), [tunnel]);
-  const chatContext = useMemo(() => chat.queue || chat.send ? createChatPromptContext(bridge, { reach: chat }) : null,
+  // What the chat's port says to the person, in the view's language as it is when it speaks.
+  const sayRef = useRef(translator(locale));
+  sayRef.current = translator(locale);
+  const chatContext = useMemo(() => chat.queue || chat.send
+    ? createChatPromptContext(bridge, { reach: chat, t: (key, params) => sayRef.current(key, params) }) : null,
     [chat.queue, chat.send, bridge]);
   useEffect(() => () => chatContext?.dispose(), [chatContext]);
   const promptContext = chatContext ?? unavailablePromptContext;
@@ -100,8 +116,8 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
   }), [sync, client]);
   useEffect(() => { reporter.showing(file || null); }, [reporter, file]);
 
-  // Every other view has the home: the models opened before, from every view and the web viewer,
-  // and Open with the desktop's chooser where there is one. What it opens is shown in place.
+  // Every other view has the home: the models opened before, from every view and the web viewer.
+  // What it opens is shown in place.
   // The home's first list came with its launch: the cards draw at once, and later reads ask.
   const seeded = useRef(launch.recents ?? null);
   const library = useMemo<ModelLibrarySource | undefined>(() => homed ? {
@@ -113,6 +129,7 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
     change: (action, entry) => client.changeRecents({ action, path: entry.path }),
     thumbnail: name => client.thumbnail(name),
     open: async entry => { navigate(normalizePath(entry.path)); },
+    // Open, with the desktop's chooser where this computer has one: what it picks is shown in place.
     ...(launch.pick ? { pick: async () => { const picked = await client.pick(); if (picked) navigate(normalizePath(picked)); } } : {}),
   } : undefined, [client, homed, launch.pick, navigate]);
   // Back and Forward, wherever the view can go elsewhere: not a file handler's, which shows its file alone.
@@ -122,13 +139,18 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
   const host = useMemo<Omit<ViewerHost, 'navigation'>>(() => ({
     files: source, fileActions, clipboard: frameClipboard, promptContext, promptFiles, links,
     // A Quick Edit copied, queued or sent, counted by the CAD app's server for its telemetry.
-    usage: { used: feature => { if (feature === 'quickEdit') client.reportActivity({ quickEdit: true }); } },
+    usage: { used: feature => { if (feature === 'quickEdit') client.reportActivity({ quickEdit: true }); },
+      // The controls a person used, and how long a tool was up, counted by the shared viewer.
+      controls: counts => client.reportActivity({ controls: counts }) },
     environment: { colorScheme, locale, platform },
   }), [client, source, fileActions, promptContext, promptFiles, links, colorScheme, locale, platform]);
 
+  // The navbar carries the host's controls; the file handler, which has none, has its corner: the
+  // host's notice at the viewport's top-right, Quick Edit under it.
   // The file on screen joins the library every CAD view shares, with its picture.
-  return <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={navigate}
+  return <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={navigate} chrome={homed ? 'page' : 'bare'}
     onShown={path => { if (path) void client.changeRecents({ action: 'open', path }).catch(() => {}); }}
-    library={library} appSettings={appSettings} colorScheme={theme} language={language} update={update} fullSize={fullSize} history={viewerHistory}
+    library={library} appSettings={appSettings} colorScheme={theme} language={language} history={viewerHistory}
+    {...homed ? { update, fullSize, openInBrowser } : { notice: <CardCorner fullSize={fullSize} update={update} /> }}
     onThumbnail={(png, pictured) => client.keepThumbnail(png, pictured)} />;
 }

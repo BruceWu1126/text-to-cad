@@ -1,6 +1,6 @@
 {
   "name": "@text-to-cad/ui",
-  "version": "0.7.26",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "files": [
@@ -44,10 +44,6 @@
     "./file-viewer/presentation": {
       "types": "./dist/file-viewer/presentation.d.ts",
       "import": "./dist/file-viewer/presentation.js"
-    },
-    "./file-viewer/empty": {
-      "types": "./dist/file-viewer/empty.d.ts",
-      "import": "./dist/file-viewer/empty.js"
     },
     "./host": {
       "types": "./dist/host/index.d.ts",
@@ -105,6 +101,7 @@
     "clsx": "^2.1.1",
     "tailwind-merge": "^3.7.0",
     "perfect-freehand": "1.2.3",
+    "sonner": "2.0.8",
     "vaul": "1.1.2"
   },
   "devDependencies": {

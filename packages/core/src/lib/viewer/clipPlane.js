@@ -46,18 +46,6 @@ export function normalizeStepClipSettings(value = null) {
   };
 }
 
-export function stepClipSettingsEqual(left, right) {
-  const a = normalizeStepClipSettings(left);
-  const b = normalizeStepClipSettings(right);
-  return (
-    a.enabled === b.enabled &&
-    a.axis === b.axis &&
-    a.invert === b.invert &&
-    a.partColors === b.partColors &&
-    (a.at ?? null) === (b.at ?? null)
-  );
-}
-
 export function axisIndex(axis) {
   return AXIS_INDEX[String(axis || "").toLowerCase()] ?? AXIS_INDEX.x;
 }
@@ -100,14 +88,6 @@ export function clipAtForAmount(settings, bounds, amount) {
   const { min, max } = clipAxisBounds(bounds, clip.axis);
   const share = clamp(normalizeNumber(amount, 0), 0, 1);
   return clip.invert ? min + (share * (max - min)) : max - (share * (max - min));
-}
-
-export function pointVisibleByClipPlane(clipPlane, point, epsilon = 1e-5) {
-  if (!clipPlane || !point || typeof clipPlane.distanceToPoint !== "function") {
-    return true;
-  }
-  const tolerance = Math.abs(normalizeNumber(epsilon, 1e-5));
-  return clipPlane.distanceToPoint(point) >= -tolerance;
 }
 
 /**

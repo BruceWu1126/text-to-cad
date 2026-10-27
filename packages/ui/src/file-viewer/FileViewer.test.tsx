@@ -1,5 +1,4 @@
-import { createPortal } from 'react-dom';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { isMissingFileError } from '@text-to-cad/core/client';
@@ -19,7 +18,7 @@ const renderer = defineFileRenderer({
 // A host that shows one file and browses nothing, has no home and can do nothing with the file.
 const host = {
   files: { id: 'one', stat: async (path: string) => ({ path, name: path.split('/').pop()!, kind: 'file' as const, extension: 'step', size: 1 }) },
-  clipboard: { writeText: async () => {}, readText: async () => '', writeImage: async () => {} },
+  clipboard: { writeText: async () => {}, writeImage: async () => {} },
   promptContext: unavailablePromptContext, environment: { colorScheme: 'light' as const }, navigation: { openFile(_path: string) {} },
 };
 const open = (props: { host?: object; file?: string | null; presentation?: object }) =>
@@ -28,7 +27,7 @@ const navbar = () => document.querySelector('[data-viewer-navbar]');
 const fileName = () => document.querySelector<HTMLElement>('[data-file-name]')!;
 const labels = (selector = '[data-viewer-navbar]') => [...document.querySelectorAll(`${selector} a, ${selector} button`)].map(node => node.getAttribute('aria-label'));
 
-it('draws the navbar over every file, named by its name, and over the home with only its menu, update and Full size; never over a view shown small', async () => {
+it('draws the navbar over every file, named by its name, and over the home with only its menu, Back and Forward, the update and the host\'s actions; never over a view shown small', async () => {
   open({});
   await screen.findByText('shown');
   // The name, as words where nothing can be browsed; no logo with no home, no ⋯ where the host can do nothing.
@@ -40,45 +39,77 @@ it('draws the navbar over every file, named by its name, and over the home with 
   expect(navbar()).toBeNull();
   cleanup();
   // The home has the same navbar: the logo's menu, Back and Forward where the host keeps the view's
-  // history, and the host's update and Full size, as over a file; no file, no box for view controls.
+  // history, and the host's update and actions, as over a file; no file, no box for view controls.
   const back = vi.fn();
   open({ host: { ...host, links: viewerLinks({ version: '0.7.4' }), navigation: { openFile() {}, home() {} } }, file: null,
     history: { canGoBack: true, canGoForward: false, back, forward() {} },
-    update: <button type="button" aria-label="Update to 0.7.5" />, fullSize: <button type="button" aria-label="Full size" />,
+    update: <button type="button" aria-label="Update to 0.7.5" />, navbarActions: <button type="button" aria-label="Export" />,
     presentation: { home: <p>home</p> } } as any);
   await screen.findByText('home');
   expect([labels(), document.querySelector('[data-file-name]'), document.querySelector('[data-view-controls]')])
-    .toEqual([['Menu', 'Back', 'Forward', 'Update to 0.7.5', 'Full size'], null, null]);
+    .toEqual([['Menu', 'Back', 'Forward', 'Update to 0.7.5', 'Export'], null, null]);
   expect((screen.getByRole('button', { name: 'Forward' }) as HTMLButtonElement).disabled).toBe(true);
   await userEvent.setup().click(screen.getByRole('button', { name: 'Back' }));
   expect(back).toHaveBeenCalledOnce();
   await userEvent.setup().click(screen.getByRole('button', { name: 'Menu' }));
-  expect(screen.queryByRole('menuitem', { name: 'Back to files' })).toBeNull();
+  expect(screen.queryByRole('menuitem', { name: 'Back to home' })).toBeNull();
 });
 
-it('keeps the right of the navbar for the host\'s update button and Full size, then hands the renderer a box for its own view controls, last; a view shown small has no navbar and no box', async () => {
-  // A renderer that draws its view controls into the box it is handed (the CAD viewer's Display
-  // and Preview), and over its view where it is handed none.
-  const handed: (HTMLElement | null)[] = [];
-  const slotted = defineFileRenderer({
-    id: 'slotted', priority: 2, matches: () => true, prepare: async () => ({ data: null }),
+it('heads the home and a document with the one C mark, in one button that never changes', async () => {
+  const homed = { ...host, links: viewerLinks({ version: '0.7.4' }), navigation: { openFile() {}, home() {} } };
+  const view = (file: string | null) => <FileViewer file={file} host={homed as any} renderers={[renderer]} state={{}} onStateChange={() => {}}
+    presentation={{ home: <p>home</p> } as any} />;
+  const { rerender } = render(view(null));
+  await screen.findByText('home');
+  const logo = screen.getByRole('button', { name: 'Menu' });
+  // One mark, the C: no wordmark beside or behind it, and nothing that moves between the two.
+  const images = () => [...logo.querySelectorAll('img')].map(image => image.getAttribute('src'));
+  expect([logo.getAttribute('data-logo'), images()]).toEqual(['mark', [expect.stringMatching(/C(%20| )logo/)]]);
+  rerender(view(FILE));
+  await screen.findByText('shown');
+  expect(screen.getByRole('button', { name: 'Menu' })).toBe(logo);
+  expect([logo.getAttribute('data-logo'), images()]).toEqual(['mark', [expect.stringMatching(/C(%20| )logo/)]]);
+  expect(document.querySelector('.cad-navbar-wordmark, .cad-navbar-logo-box')).toBeNull();
+});
+
+it('draws no navbar where the host asks for the view alone (`chrome: "bare"`): over a file or the home, whatever it hands the navbar', async () => {
+  const homed = { ...host, links: viewerLinks({ version: '0.7.4' }), navigation: { openFile() {}, home() {} } };
+  const everything = { host: homed, chrome: 'bare', history: { canGoBack: true, canGoForward: false, back() {}, forward() {} },
+    update: <button type="button" aria-label="Update to 0.7.5" />,
+    navbarActions: <button type="button" aria-label="Export" />, presentation: { home: <p>home</p> } };
+  open(everything);
+  await screen.findByText('shown');
+  expect([navbar(), document.querySelector('[data-file-name]'), screen.queryAllByRole('button').map(button => button.getAttribute('aria-label'))]).toEqual([null, null, []]);
+  cleanup();
+  open({ ...everything, file: null });
+  await screen.findByText('home');
+  expect([navbar(), screen.queryAllByRole('button')]).toEqual([null, []]);
+  cleanup();
+  // The default is the page's chrome: the same props draw the navbar.
+  open({ ...everything, chrome: undefined });
+  await screen.findByText('shown');
+  expect(labels()).toEqual(['Menu', 'Back', 'Forward', 'Update to 0.7.5', 'Export']);
+});
+
+it('keeps the right of the navbar for the host\'s update button and its actions, and hides the navbar while the renderer says its Preview is up', async () => {
+  // A renderer whose Preview a test opens and closes, as the CAD shell reports it.
+  let report: ((previewing: boolean) => void) | undefined;
+  const previewed = defineFileRenderer({
+    id: 'previewed', priority: 2, matches: () => true, prepare: async () => ({ data: null }),
     load: async () => ({ default: (props: any) => {
-      handed.push(props.navbarSlot ?? null);
-      expect('onFullscreenChange' in props).toBe(false);
-      const control = <button type="button" aria-label="Preview" />;
-      return props.navbarSlot ? createPortal(control, props.navbarSlot) : control;
+      report = props.onPreviewChange;
+      expect(['navbarSlot' in props, 'onFullscreenChange' in props]).toEqual([false, false]);
+      return <p>shown</p>;
     } }),
   });
-  const view = (extra: object = {}) => render(<FileViewer file={FILE} host={{ ...host, ...extra } as any} renderers={[slotted]} state={{}} onStateChange={() => {}}
-    update={<button type="button" aria-label="Update to 0.7.5" />} fullSize={<button type="button" aria-label="Full size" />} />);
-  view();
-  await screen.findByRole('button', { name: 'Preview' });
-  expect([labels(), screen.getByRole('button', { name: 'Preview' }).parentElement!.hasAttribute('data-view-controls')]).toEqual([['Update to 0.7.5', 'Full size', 'Preview'], true]);
-  cleanup();
-  handed.length = 0;
-  view({ environment: { colorScheme: 'light', compact: true } });
-  await screen.findByRole('button', { name: 'Preview' });
-  expect([navbar(), handed.at(-1)]).toEqual([null, null]);
+  render(<FileViewer file={FILE} host={host as any} renderers={[previewed]} state={{}} onStateChange={() => {}}
+    update={<button type="button" aria-label="Update to 0.7.5" />} navbarActions={<button type="button" aria-label="Export" />} />);
+  await screen.findByText('shown');
+  expect([labels(), document.querySelector('[data-view-controls]')]).toEqual([['Update to 0.7.5', 'Export'], null]);
+  act(() => report!(true));
+  expect([navbar(), screen.getByText('shown')]).toEqual([null, expect.anything()]);
+  act(() => report!(false));
+  expect(navbar()).not.toBeNull();
 });
 
 it('draws Back and Forward between the logo and the file\'s name where the host keeps the view\'s own history, each disabled where it has nowhere to go', async () => {
@@ -102,7 +133,7 @@ it('draws Back and Forward between the logo and the file\'s name where the host 
   expect(left()).toEqual(['Menu', 'name:a.step']);
 });
 
-it('opens the app menu from the logo: Back to files where the host has a home, the person\'s settings and the host\'s links; its ⋯ offers what the host can do with the file', async () => {
+it('opens the app menu from the logo: Back to home where the host has a home, the person\'s settings and the host\'s links; its ⋯ offers what the host can do with the file', async () => {
   const user = userEvent.setup();
   const home = vi.fn();
   const share = vi.fn();
@@ -114,7 +145,7 @@ it('opens the app menu from the logo: Back to files where the host has a home, t
   expect(labels()).toEqual(['Menu', 'File actions']);
   await user.click(screen.getByRole('button', { name: 'Menu' }));
   const menu = document.querySelector('[data-app-menu]')!;
-  expect([...menu.querySelectorAll('[role^="menuitem"]')].map(item => item.textContent)).toEqual(['Back to files', 'Share anonymous usage data', 'Send feedback', 'GitHub', 'Discord']);
+  expect([...menu.querySelectorAll('[role^="menuitem"]')].map(item => item.textContent)).toEqual(['Back to home', 'Share anonymous usage data', 'Send feedback', 'GitHub', 'Discord']);
   expect(menu.querySelector('[data-menu-footer]')?.textContent).toContain('v0.7.4');
   // Send feedback: a new issue on the project's tracker, begun "Feedback: ", for the person to
   // finish, naming the version and the platform; no label: the project has none for feedback.
@@ -122,21 +153,21 @@ it('opens the app menu from the logo: Back to files where the host has a home, t
   expect([`${feedback.origin}${feedback.pathname}`, feedback.searchParams.get('title'), feedback.searchParams.get('labels')])
     .toEqual(['https://github.com/earthtojake/text-to-cad/issues/new', 'Feedback: ', null]);
   expect(feedback.searchParams.get('body')).toMatch(/- CAD: 0\.7\.4\n- Platform: win32$/);
-  // A setting turns without closing the menu; Back to files goes home.
+  // A setting turns without closing the menu; Back to home goes home.
   await user.click(screen.getByRole('menuitemcheckbox', { name: 'Share anonymous usage data' }));
   expect([share.mock.calls, Boolean(document.querySelector('[data-app-menu]'))]).toEqual([[[false]], true]);
-  await user.click(screen.getByRole('menuitem', { name: 'Back to files' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Back to home' }));
   expect(home).toHaveBeenCalledOnce();
   await user.click(screen.getByRole('button', { name: 'File actions' }));
   expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Copy path', 'Show in Explorer']);
   await user.click(screen.getByRole('menuitem', { name: 'Show in Explorer' }));
   expect(perform.reveal).toHaveBeenCalledWith({ path: FILE, kind: 'file' });
   cleanup();
-  // A host with no home still has the menu, without Back to files; one that can only copy offers only that.
+  // A host with no home still has the menu, without Back to home; one that can only copy offers only that.
   open({ host: { ...host, links, fileActions: { perform: { 'copy-path': perform['copy-path'] } } } });
   await screen.findByText('shown');
   await user.click(screen.getByRole('button', { name: 'Menu' }));
-  expect(screen.queryByRole('menuitem', { name: 'Back to files' })).toBeNull();
+  expect(screen.queryByRole('menuitem', { name: 'Back to home' })).toBeNull();
   await user.keyboard('{Escape}');
   await user.click(screen.getByRole('button', { name: 'File actions' }));
   expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Copy path']);
@@ -220,6 +251,39 @@ it('opens the explorer from the file\'s name where the host\'s files can be brow
   expect(fileName().tagName).toBe('SPAN');
 });
 
+it('has no file menu on a document with no file of its own, which its name names, and no name menu where it has nothing to list', async () => {
+  const id = '6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab';
+  const list = vi.fn(async () => []);
+  const model = { ...host, fileActions: { platform: 'darwin', perform: { 'copy-path': async () => {} } }, files: { id: 'one', list,
+    search: async () => ({ paths: [], truncated: false }),
+    stat: async (path: string) => ({ path, name: 'bracket', navigationPath: null, kind: 'file' as const, extension: 'xbf', size: 0 }) } };
+  open({ host: model, file: id });
+  await screen.findByText('shown');
+  // Its name is the model's, a name and no button; no file menu; nothing is listed.
+  expect([fileName().tagName, fileName().textContent]).toEqual(['SPAN', 'bracket']);
+  expect(labels()).not.toContain('File actions');
+  expect(list).not.toHaveBeenCalled();
+  cleanup();
+  // With the host's library and where the explorer was last: the name opens Models first, and Files
+  // lists that folder -- never the folder of the script the model was registered from -- and says
+  // each folder it is in, for the host to keep.
+  const user = userEvent.setup();
+  const registered = { ...model, navigation: { openFile: vi.fn() }, files: { ...model.files,
+    stat: async (path: string) => ({ path, name: 'bracket', navigationPath: null, kind: 'file' as const, extension: 'xbf', size: 0 }) } };
+  const rows = [{ path: id, name: 'bracket', kind: 'model', opened: null, updated: Date.now() / 1000 }];
+  const kept = vi.fn();
+  render(<FileViewer file={id} host={registered as any} renderers={[renderer]} state={{}} onStateChange={() => {}} recent={{ list: async () => rows }}
+    explorerFolder="/home/me/last" onExplorerFolderChange={kept} />);
+  await screen.findByText('shown');
+  expect(fileName().tagName).toBe('BUTTON');
+  await user.click(fileName());
+  expect(screen.getByRole('tab', { name: 'Models' }).getAttribute('aria-selected')).toBe('true');
+  await user.click(screen.getByRole('tab', { name: 'Files' }));
+  await waitFor(() => expect(list).toHaveBeenCalledWith('/home/me/last', expect.anything()));
+  expect(kept).toHaveBeenCalledWith('/home/me/last');
+  expect(labels()).not.toContain('File actions');
+});
+
 it('says why a file will not open, and that it does not exist when it is missing', async () => {
   const missing = Object.assign(new Error('File does not exist: /models/gone.step'), { code: 'cad-file-missing' });
   expect(isMissingFileError(missing)).toBe(true);
@@ -231,10 +295,36 @@ it('says why a file will not open, and that it does not exist when it is missing
   cleanup();
   open({ host: failing(new Error('The disk is gone')), presentation });
   await screen.findByText('failed');
-  expect(failures.at(0)).toEqual({ message: 'File does not exist: /models/gone.step', missing: true });
-  expect(failures.at(-1)).toEqual({ message: 'The disk is gone', missing: false });
+  // What the source raised comes with it, for a host to read its own fields on.
+  expect(failures.at(0)).toEqual({ message: 'File does not exist: /models/gone.step', missing: true, error: missing, reload: expect.any(Function) });
+  expect(failures.at(-1)).toEqual({ message: 'The disk is gone', missing: false, error: expect.any(Error), reload: expect.any(Function) });
   cleanup();
   // A host with no page of its own for it gets the viewer's.
   open({ host: failing(new Error('The disk is gone')) });
   expect(await screen.findByText('Could not open that file')).toBeTruthy();
+});
+
+it('a missing-file presentation can reread the requested file through its injected reload', async () => {
+  const missing = Object.assign(new Error('File does not exist'), { code: 'cad-file-missing' });
+  const stat = vi.fn().mockRejectedValueOnce(missing).mockImplementation(host.files.stat);
+  let retry = () => {};
+  open({ host: { ...host, files: { ...host.files, stat } },
+    presentation: { error: ({ reload }: { reload: () => void }) => { retry = reload; return <button onClick={reload}>Retry missing file</button>; } } });
+  await userEvent.click(await screen.findByRole('button', { name: 'Retry missing file' }));
+  expect(await screen.findByText('shown')).toBeTruthy();
+  act(() => retry());
+  expect(stat.mock.calls.map(([path]) => path)).toEqual([FILE, FILE]);
+});
+
+it('takes the keyboard as its file is shown, so a tool key works with no press first; never from a field that has it', async () => {
+  const view = open({});
+  await screen.findByText('shown');
+  await waitFor(() => expect(document.activeElement?.classList.contains('text-to-cad-file-viewer')).toBe(true));
+  view.unmount();
+  const field = document.body.appendChild(document.createElement('input'));
+  field.focus();
+  open({});
+  await screen.findByText('shown');
+  expect(document.activeElement).toBe(field);
+  field.remove();
 });

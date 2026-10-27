@@ -1,5 +1,6 @@
 import { createViewportBuffer } from "./viewportBuffer.js";
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { useI18n } from "@text-to-cad/ui/i18n";
 import { isEditableTarget, prefersCoarsePointer } from "./dom.js";
 import {
   isWebGlContextCreationError,
@@ -10,10 +11,12 @@ import {
   createCadWebGlRenderer
 } from "@text-to-cad/core/common/webglRenderer.js";
 import { fitCameraDepthToBounds } from "@text-to-cad/core/common/renderOptions.js";
+import { CAMERA_TOUCH, touchCamera } from "../camera/cameraTouch.js";
 import { keepOrthographicEyeOutside } from "../camera/orthographicEye.js";
 import {
   screenSpaceLineDeviceResolution
 } from "@text-to-cad/core/common/renderEdges.js";
+import { renderWithSceneRig } from "@text-to-cad/core/lib/viewer/sceneRig.js";
 import {
   resolveInteractionPixelRatioCap
 } from "@text-to-cad/core/lib/viewer/renderQuality.js";
@@ -97,7 +100,6 @@ export function useViewerRuntime({
   floorMode,
   renderMode = false,
   onViewportResize,
-  onContextLost,
   onContextRestored,
   onInitializationError,
   onFramePresented,
@@ -106,6 +108,10 @@ export function useViewerRuntime({
   runtimeResetToken = 0
 }) {
   const renderModeRef = useRef(renderMode);
+  // The view's language, read when the context is lost (in a listener that does not rerun for it).
+  const { t } = useI18n();
+  const tRef = useRef(t);
+  tRef.current = t;
   renderModeRef.current = renderMode;
   useLayoutEffect(() => {
     if (runtimeRef.current) runtimeRef.current.renderMode = renderMode;
@@ -350,10 +356,7 @@ export function useViewerRuntime({
       };
       const screenSpaceLineMaterials = new Set();
 
-      const getScreenSpaceLineMaterialCount = () => (
-        screenSpaceLineMaterials.size +
-        Number(runtimeRef.current?.cadScene?.runtime?.screenSpaceLineMaterials?.size || 0)
-      );
+      const getScreenSpaceLineMaterialCount = () => screenSpaceLineMaterials.size;
 
       // A screen-space line's `resolution` is the DRAWING BUFFER, in device
       // pixels — not the CSS size the container reports and `setSize` takes.
@@ -373,7 +376,6 @@ export function useViewerRuntime({
         for (const material of screenSpaceLineMaterials) {
           material?.resolution?.set?.(nextWidth, nextHeight);
         }
-        runtimeRef.current?.cadScene?.runtime?.syncScreenSpaceLineMaterials?.(nextWidth, nextHeight);
       };
       const syncScreenSpaceLineMaterials = () => {
         const { width: nextWidth, height: nextHeight } = lineMaterialResolution();
@@ -398,8 +400,7 @@ export function useViewerRuntime({
       const handleContextLost = (event) => {
         event.preventDefault();
         clearKeyboardOrbitState(keyboardOrbitState);
-        setError("WebGL context was lost. Restoring CAD Viewer...");
-        onContextLost?.();
+        setError(tRef.current("viewer.contextLost"));
       };
       const handleContextRestored = () => {
         interactionState.shadowsDirty = true;
@@ -474,14 +475,14 @@ export function useViewerRuntime({
       // draws nothing; a frame asked of it meanwhile is owed, and drawn the moment it is resumed.
       let suspended = false;
       let owedWhileSuspended = false;
+      const frameTime = () => (typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now());
       const requestRender = () => {
         if (released) return;
         if (suspended) { owedWhileSuspended = true; return; }
         if (interactionState.renderQueued) {
-          const now = typeof performance !== "undefined" && typeof performance.now === "function"
-            ? performance.now()
-            : Date.now();
-          if (interactionState.renderQueuedAt && now - interactionState.renderQueuedAt < 120) {
+          if (interactionState.renderQueuedAt && frameTime() - interactionState.renderQueuedAt < 120) {
             return;
           }
           window.cancelAnimationFrame(rafId);
@@ -489,23 +490,27 @@ export function useViewerRuntime({
           interactionState.renderQueuedAt = 0;
         }
         interactionState.renderQueued = true;
-        interactionState.renderQueuedAt = typeof performance !== "undefined" && typeof performance.now === "function"
-          ? performance.now()
-          : Date.now();
+        interactionState.renderQueuedAt = frameTime();
         rafId = window.requestAnimationFrame(renderFrame);
         if (interactionState.renderFallbackTimerId) {
           window.clearTimeout(interactionState.renderFallbackTimerId);
         }
+        // The frame is the browser's: drawn in its next animation frame, however late that comes. A
+        // VISIBLE document whose frame is late is a browser behind on the frames already handed to it
+        // (its GPU still drawing them, a software one by the second), and the frame waits for its turn:
+        // drawn from this timer instead, it would hand the GPU another frame every 120 ms for as long as
+        // frames were asked for, and leave it drawing them -- nothing shown, no pointer heard -- long after
+        // the camera had stopped (a drag in Preview under SwiftShader queued five draws for every frame it
+        // showed). A HIDDEN document (a background tab, an agent app's browser pane) gets no animation
+        // frames at all: its frame is drawn from this timer, and a document that hides while its frame
+        // waits draws it as it hides (`handleVisibilityChange`).
         interactionState.renderFallbackTimerId = window.setTimeout(() => {
-          if (!interactionState.renderQueued) {
+          interactionState.renderFallbackTimerId = 0;
+          if (!interactionState.renderQueued || document.visibilityState === "visible") {
             return;
           }
           window.cancelAnimationFrame(rafId);
-          renderFrame(
-            typeof performance !== "undefined" && typeof performance.now === "function"
-              ? performance.now()
-              : Date.now()
-          );
+          renderFrame(frameTime());
         }, 120);
         if (runtimeRef.current) {
           runtimeRef.current.rafId = rafId;
@@ -521,11 +526,7 @@ export function useViewerRuntime({
         if (interactionState.renderQueued) {
           window.cancelAnimationFrame(rafId);
         }
-        renderFrame(
-          typeof performance !== "undefined" && typeof performance.now === "function"
-            ? performance.now()
-            : Date.now()
-        );
+        renderFrame(frameTime());
       };
 
       function renderFrame(timestamp) {
@@ -541,6 +542,9 @@ export function useViewerRuntime({
         const cameraTransitionActive = stepCameraTransition(runtimeRef.current, timestamp);
         const keyboardOrbitMoved = stepKeyboardOrbit(runtimeRef.current, timestamp);
         const needsMoreFrames = updateOrbitControls(controls, timestamp, runtimeRef.current);
+        // Whether this frame's controls update still moved the camera (damping, autoRotate),
+        // which the `__cadCamera()` seam reports as `settling`.
+        if (runtimeRef.current) runtimeRef.current.controlsMovedLastFrame = needsMoreFrames;
         if (cameraTransitionActive || keyboardOrbitMoved) {
           emitPerspectiveChange(runtimeRef.current);
         }
@@ -560,10 +564,11 @@ export function useViewerRuntime({
               }
               const drawCamera = runtimeRef.current?.camera || camera;
               // Render's lighting is drawn through its studio's frame, which converges a still
-              // view over its next frames (`photographicStudio.js`); anything else is one draw.
+              // view over its next frames (`photographicStudio.js`); anything else is one draw, as
+              // the scene's own rig blends it (`sceneRig.js`).
               const studioFrame = runtimeRef.current?.photographicStudio?.frame;
               if (studioFrame) refining = studioFrame.render(renderer, scene, drawCamera, { still }).refining;
-              else renderer.render(scene, drawCamera);
+              else renderWithSceneRig(runtimeRef.current?.sceneRig, renderer, scene, drawCamera);
             },
             presentationRequestRef?.current,
           );
@@ -735,9 +740,7 @@ export function useViewerRuntime({
         // Any drag on the controls — orbit, pan or zoom — means the view is the
         // user's now. A progressive load with no declared box re-frames the camera
         // when the model finishes arriving, and must not do that over someone's shoulder.
-        if (runtimeRef.current) {
-          runtimeRef.current.userMovedCamera = true;
-        }
+        touchCamera(runtimeRef.current, CAMERA_TOUCH.DRAG);
         cancelCameraTransition(runtimeRef.current);
         beginInteraction();
       };
@@ -749,9 +752,7 @@ export function useViewerRuntime({
         scheduleIdleQuality();
       };
       const handleWheel = (event) => {
-        if (runtimeRef.current) {
-          runtimeRef.current.userMovedCamera = true;
-        }
+        touchCamera(runtimeRef.current, CAMERA_TOUCH.WHEEL);
         cancelCameraTransition(runtimeRef.current);
         controls.enableDamping = false;
         // Three input classes, three speeds. OrbitControls (r161+) normalizes the delta
@@ -808,6 +809,8 @@ export function useViewerRuntime({
       const ownsKey = (event) => {
         const target = event.target;
         if (target instanceof Node && keyOwner.contains(target)) return true;
+        // The file viewer around it has the keyboard (it takes it as its file is shown): its view's.
+        if (target instanceof Element && target.hasAttribute("data-viewer-layout") && target.contains(keyOwner)) return true;
         const ownerDocument = keyOwner.ownerDocument;
         return pointerOverViewer && (target === ownerDocument.body || target === ownerDocument.documentElement || target === ownerDocument);
       };
@@ -838,9 +841,7 @@ export function useViewerRuntime({
         keyboardOrbitState.directionCounts[command.direction] += 1;
         keyboardOrbitState.lastFrameTime = 0;
         // Orbiting by the keys makes the view the user's, as a drag does.
-        if (runtimeRef.current) {
-          runtimeRef.current.userMovedCamera = true;
-        }
+        touchCamera(runtimeRef.current, CAMERA_TOUCH.KEYS);
         cancelCameraTransition(runtimeRef.current);
         beginInteraction();
         applyOrbitDelta(
@@ -885,6 +886,12 @@ export function useViewerRuntime({
       const handleVisibilityChange = () => {
         if (document.visibilityState !== "visible") {
           clearKeyboardOrbit();
+          // A frame still waiting for an animation frame the hidden document will not get: drawn now, as
+          // the timer draws a hidden document's (`requestRender`).
+          if (interactionState.renderQueued) {
+            window.cancelAnimationFrame(rafId);
+            renderFrame(frameTime());
+          }
         }
       };
 
@@ -1008,8 +1015,8 @@ export function useViewerRuntime({
         registerScreenSpaceLineMaterial,
         unregisterScreenSpaceLineMaterial,
         // The scene sync calls this after building or updating a model so line
-        // materials created for it (the cadScene's own registry) start at the
-        // viewport's resolution rather than waiting for a resize.
+        // materials created for it start at the viewport's resolution rather than
+        // waiting for a resize.
         syncScreenSpaceLineMaterials,
         setScreenSpaceLineResolution
       };
@@ -1032,7 +1039,8 @@ export function useViewerRuntime({
         if (runtime.activeModelKey && runtime.interactiveFraming) previousViewStateRef.current = {
           modelKey: runtime.activeModelKey,
           framing: Object.fromEntries([
-            "zoomBaseDistance", "zoomBaseHalfHeight", "viewportFitScale", "interactiveFraming", "userMovedCamera"
+            "zoomBaseDistance", "zoomBaseHalfHeight", "viewportFitScale", "interactiveFraming", "userMovedCamera", "cameraTouch",
+            "autoFitBounds"
           ].map(key => [key, runtime[key]]))
         };
         if (runtime.interactionState.restoreTimerId) {

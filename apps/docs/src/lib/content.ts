@@ -1,7 +1,7 @@
 /**
  * The homepage's copy, which the README says too (README.md and apps/docs/README.md): the plugin's
- * description, the install message, the installs, the agents and the skills. The page renders it,
- * and so does /llms.txt (app/llms.txt/route.ts), so the two never drift apart.
+ * description, how it works, the install message, the installs, the agents and the skills. The page
+ * renders it, and so does /llms.txt (app/llms.txt/route.ts), so the two never drift apart.
  */
 import { siteConfig } from "@/lib/site";
 
@@ -16,6 +16,14 @@ export const support = {
   after: "framework, including Claude Code, Codex, Cursor, Gemini and Grok.",
 };
 
+// How a model is made, under the overview: the README's How it works, step for step. Code is in
+// backticks, which the page sets as code.
+export const howItWorks = [
+  "Your agent writes each model as a Python script, with build123d.",
+  "Running the script, `python model.py`, builds the model with cadgen's engine into an `.xbf` document (its parts, names, colours, materials and joints) and the STEP, GLB, STL or 3MF files the script declares. The engine keeps each model's work in memory, so an edit rebuilds only what it changed.",
+  "The CAD viewer shows the model in your agent app or your browser, and follows every rebuild.",
+];
+
 // The install: a message for the agent, which finds the install for its own app in the repository
 // (the README's Install, which says the same).
 export const agentInstallByline = "Send this message to your agent and it will install text-to-cad for you.";
@@ -25,7 +33,7 @@ export const agentInstallMessage = "Install text-to-cad from https://github.com/
 // not updated yet is never told less than it sends; the cadgen a person runs says the rest itself. The
 // README says it word for word. The command is in backticks, which the page sets as code.
 export const telemetryNote =
-  "By default, text-to-cad sends usage stats and crash reports, tagged with a random ID and never including your files, paths or prompts; turn them off with `uvx cadgen telemetry off`, or ask your agent to.";
+  "By default, text-to-cad sends usage stats and crash reports, tagged with a random ID and never including your files, paths or prompts; turn them off with `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen telemetry off`, or ask your agent to.";
 // The same message, opened in an agent app with its composer prefilled, never sent: Claude Code in
 // Claude Desktop (claude://code/new, Claude's help center, "Open Claude Desktop with a link"), the
 // Codex app (codex://threads/new, its commands reference) and Cursor (its prompt deeplink, Cursor's
@@ -132,7 +140,7 @@ export const skillGroups = [
     name: "CAD",
     path: "skills/cad",
     summary:
-      "Creates and edits CAD models from plain-language or image requests, with STEP as the main output along with options to export to STL, 3MF and GLB.",
+      "Creates and edits CAD models from plain-language or image requests as Python scripts, built into XBF documents with STEP, STL, 3MF and GLB exports.",
   },
   {
     name: "step.parts",

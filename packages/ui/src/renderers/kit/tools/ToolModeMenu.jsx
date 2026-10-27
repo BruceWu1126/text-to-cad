@@ -22,7 +22,7 @@ const CHEVRON_CLASS = "grid h-6 w-3 shrink-0 place-items-center rounded-l-none r
  */
 export function ToolSettingsMenu({ label, triggerLabel = label, disabled = false, trigger = "settings", triggerProps = null, onOpenChange, children }) {
   const chevron = trigger === "chevron";
-  // On a phone's strip the chevron is the 44px tile's height and wide enough to touch.
+  // On a phone's strip the chevron is the 36px tile's height and wide enough to touch.
   const touch = useStripTouch();
   return <DropdownMenu modal={false} onOpenChange={onOpenChange}>
     <DropdownMenuTrigger asChild>

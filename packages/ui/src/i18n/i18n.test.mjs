@@ -77,8 +77,43 @@ test("a locale's translator fills braces, is one function per locale, and an unk
 });
 
 test("a locale that misses a key reads English; a key nobody has reads as itself", () => {
-  assert.equal(translateIn("zh-CN", "home.byline"), "构建万物。");
-  assert.equal(translateIn("en", "home.byline"), "Build anything.");
+  assert.equal(translateIn("zh-CN", "home.kind.all"), "全部");
+  assert.equal(translateIn("en", "home.kind.all"), "All");
   assert.equal(translateIn("zh-CN", "no.such.key"), "no.such.key");
   assert.equal(translateIn("fr", "file.missing"), "File does not exist", "an unsupported locale reads English");
+});
+
+test("the words the viewer's tools once spelled in English are the dictionaries' now", async () => {
+  const { readFileSync } = await import("node:fs");
+  const read = path => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+  const spelled = {
+    "renderers/kit/shell/RendererShell.jsx": [">Preparing preview…"],
+    "renderers/kit/tools/PlaybackMenu.jsx": [">Loop<", ">Autoplay<"],
+    "renderers/kit/tools/select/SelectFilterMenu.jsx": [">Pick<"],
+    "renderers/kit/tools/quick-edit/ReferenceChips.jsx": [" />Copied<"],
+    "renderers/kit/tools/model-effects/ModelTools.jsx": [">Explode<"],
+    "renderers/kit/tools/quick-edit/QuickEdit.jsx": [">Describe your changes…<"],
+    "renderers/kit/status/ViewUpdateStatus.jsx": [" />Preview<"],
+    "renderers/xbf/XbfModelTree.jsx": [">Show all<", ">Exit<"],
+    "renderers/robot/LinkDetails.jsx": [">None<", ">Mesh object<"],
+  };
+  for (const [path, words] of Object.entries(spelled)) {
+    for (const word of words) assert.ok(!read(path).includes(word), `${path} spells ${word} itself`);
+  }
+  for (const key of ["preview.preparing", "playback.loop", "playback.autoplay", "select.pick", "chip.copied", "explode.label",
+    "quickEdit.describe", "status.buildPreview", "tree.showAll", "tree.exitIsolation", "robot.none", "robot.meshObject"]) {
+    for (const [locale, table] of Object.entries(TABLES)) assert.ok(table[key], `${locale} has ${key}`);
+    assert.notEqual(ja[key], en[key], `${key} is translated`);
+  }
+});
+
+test("every key is said in every language: a value left as English is a language's own name, or no words", () => {
+  // The guard that no view spells English itself is `scripts/test/check-ui-strings.mjs`, run with
+  // every JS suite; this half holds the dictionaries to it, so a key copied across untranslated fails.
+  for (const [locale, table] of Object.entries(TABLES)) {
+    if (locale === DEFAULT_LOCALE) continue;
+    const untranslated = Object.keys(en).filter(key => table[key] === en[key] && !key.startsWith("language.")
+      && /[A-Za-z]{2,}/.test(String(en[key]).replace(/\{\w+\}/g, "").replace(/\bID\b/g, "")));
+    assert.deepEqual(untranslated, [], `${locale} leaves these in English`);
+  }
 });

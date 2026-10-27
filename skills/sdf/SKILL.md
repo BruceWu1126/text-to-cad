@@ -14,18 +14,23 @@ Use this skill when the deliverable is an SDFormat document. SDFormat describes 
 
 This skill is for **SDFormat**, not signed-distance-field geometry.
 
-The `.sdf` file is the source of truth: author and edit the XML directly. There is no `gen_sdf()` contract.
+The `.sdf` file is the source of truth: author and edit the XML directly.
 
 ## Setup
 
-Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share
-one installation, and its warm build daemon, with the CAD app's server:
+Run cadgen through the `cadgen` command its installation writes, so this skill's commands
+share one installation, and its engine server, with the CAD app's:
 
-- `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.26 cadgen`
-- `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.26 python`
+- `cadgen` below means `cadgen +0.8.0` (`~/.local/bin/cadgen +0.8.0` where `~/.local/bin` is not on your PATH)
+- `python` below means `cadgen +0.8.0 run`
 
-The first run downloads that installation and the first snapshot its headless
-browser; later runs reuse both.
+If `cadgen` is not on your PATH, or it says 0.8.0 is not installed, run
+`uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen doctor` once,
+outside any sandbox or with its permission: it installs cadgen, registers it, writes the
+`cadgen` command and starts the engine. With the CAD app's server running, nothing else
+needs the sandbox's permission: it starts the engine and holds it. Without it, a sandboxed
+shell cannot start the engine; when a command says no engine is running, run `cadgen server`
+outside the sandbox once.
 
 ## Core rules
 
@@ -48,26 +53,36 @@ Use this skill for SDFormat outputs. Do not use it for signed-distance-field mod
 
 ## Show the model
 
-Show the user each file you create or change, and any they ask to see. Snapshots and
-validation don't replace this.
+Show the user each model you create or change, and any model or file they ask to see.
+A file you export is a download: give its path, do not open it.
+Snapshots and validation don't replace this. Never screenshot the viewer to confirm your
+own work; review with `cadgen snapshot`.
 
-- If your tools include `cad_show` (your host may prefix it), use it with the file's
-  absolute path, and follow its description for when to call it again. `cad_view` reads
-  what the user selected; `cad_screenshot` shows you what they see. Neither is a review
-  of your own work.
-- Otherwise run the CAD Viewer, from any folder:
+- If your tools include `cad_show` (your host may prefix it), call it with the model's id
+  or the file's absolute path, and follow its description for when to call it again.
+  The other tools depend on the host. A host that draws CAD cards or tabs (Claude
+  Desktop, the Codex app) also has `cad_view`, which reads what the user selected, and
+  `cad_screenshot`, which shows you what they see, both of a card or tab that is open, for
+  when they ask about it. A text host (Claude Code in a terminal, `codex exec`) draws
+  nothing: its `cad_show` opens the model's page in the user's browser and answers with
+  the URL to give them, and it has no view to read. `cad_inspect`, `cad_snapshot` and
+  `cad_export` are on every host. Call only the tools you have, and never say a card
+  shows a model when your host drew none.
+- Otherwise give the user the page's link once: a model's page is the `view:` line its
+  run prints. For a file, run the CAD Viewer, from any folder:
 
   ```bash
-  cadgen viewer --host 127.0.0.1 --json --detach
+  cadgen viewer --json FILE [FILE ...]
   ```
 
-  `--detach` returns once the viewer answers requests and leaves it running in the
-  background: always pass it, since a foreground viewer never exits (and piping its
-  output through `tail` can hide the URL for good). It starts this machine's one viewer,
-  or reuses it. Read `url` from its one JSON line (never guess the port), and for each
-  file return `url?file=<its URL-encoded absolute path>`. If it fails to launch, say so.
+  The command ensures this installation's engine, registers each file and prints
+  its page, `/<id>`, then exits. Read each file's `url` from `documents` in its one
+  JSON line (never guess the port); the URL carries its token query. A page follows
+  every later run of its model and every rewrite of its file, so share it once.
+  Return that link to the user. If it fails to launch, say so.
 
-Review placement, resources and joints. The viewer does not execute simulator
+An `.sdf` you write is the model, not an export: show it. Review placement,
+resources and joints. The viewer does not execute simulator
 plugins or validate dynamics; keep simulator checks separate.
 
 ## Workflow
@@ -83,13 +98,13 @@ plugins or validate dynamics; keep simulator checks separate.
 
 ## Commands
 
-Run `cadgen` as Setup defines it. `cadgen doctor <skill-dir>` reports the installation in use and checks that it is the one this skill pins — docs drift silently on another. Validation itself needs nothing beyond the Python standard library; only snapshots need the browser. Use `cadgen <verb> --help` for the complete current interface.
+Run `cadgen` as Setup defines it. `cadgen doctor <skill-dir>` reports the installation in use and checks that it is the one this skill pins — docs drift silently on another. Validation itself needs nothing beyond the Python standard library; a snapshot draws with the CAD kernel. Use `cadgen <verb> --help` for the complete current interface.
 
 ```bash
 cadgen sdf validate path/to/model.sdf
 cadgen sdf validate path/to/model.sdf --strict
 cadgen sdf validate path/to/model.sdf --json
-cadgen sdf snapshot path/to/model.sdf review.png
+cadgen snapshot path/to/model.sdf review.png
 ```
 
 The validator checks document shape, name scopes, pose/frame graphs, joints, geometry, mesh URIs, inertials, sensors, and plugins, and prints its findings plus a summary. One run validates ONE file: `--strict` treats warnings as failures and `--json` prints one line of `{"ok", "path", "issues": [{"severity", "code", "message", "element", "hint"}], "summary"}`, where `element` is the XML path. It exits nonzero if the target fails.
@@ -101,7 +116,7 @@ cadgen sdf validate path/to/model.sdf --gz-check required
 cadgen sdf validate path/to/model.sdf --gz-check never
 ```
 
-`gz sdf --check` is target-consumer validation. `--gz-check auto` is the default: it runs when `gz` is on PATH, reporting `gz_check_passed` or the tool's own output as the error `gz_check_failed`, and otherwise notes `info: gz_check_unavailable` and carries on. An absent optional tool says nothing about the file, so it never fails a clean document and `--strict` does not change that. `--gz-check required` makes the tool mandatory — a missing `gz` is then an error — and `--gz-check never` skips it outright.
+`gz sdf --check` is target-consumer validation. `--gz-check auto` is the default: it runs when `gz` is on PATH, reporting `gz_check_passed` or the tool's own output as the error `gz_check_failed`, and otherwise notes `info: gz_check_unavailable` and carries on. An absent optional tool says nothing about the file, so it never fails a clean document and `--strict` does not change that. `--gz-check required` makes the tool mandatory — a missing `gz` is then an error — and `--gz-check never` skips it outright. gz resolves a document's `<include>`/`<uri>` references itself, so it does not run on a document that names a remote one (`http`, `https`, `fuel`): that is `info: gz_check_remote` (an error under `required`), and `--gz-remote` lets gz fetch them.
 
 ## Required report shape
 
@@ -123,45 +138,53 @@ Risks:
 
 ## Snapshot Tool
 
-`cadgen sdf snapshot` renders the robot to a PNG still, using the same shared
-CLI and headless browser runtime every rendering skill uses — so a snapshot matches what
-the CAD Viewer shows.
+`cadgen snapshot` draws the robot to a PNG still, as the CAD Viewer shows it,
+rendered by OCCT:
 
 ```bash
-cadgen sdf snapshot path/to/robot.sdf review.png
+cadgen snapshot path/to/robot.sdf review.png
+cadgen snapshot path/to/robot.sdf review.png --pose '{"arm::elbow": 45}'
 ```
 
-It accepts `.sdf` only (a format door, same `TARGET [OUT]` grammar as the rest). Pose the robot with `--joint-values` — `{joint: degrees}` JSON,
-joints you do not name staying at their defaults, where the CAD Viewer opens the robot (the
-`"jointValues"` job field is the same thing in a packet). The snapshot draws the robot with the
-viewer's own scene, so it shows what the viewer shows, and a link mesh that cannot be loaded
-fails it rather than leaving the link out. Robots are authored in metres and are framed on the
-robot scene scale automatically.
+cadgen resolves the description first: the frame graph (`relative_to`,
+`attached_to`) into every link's rest placement, a model nested in the model
+included, its links and joints named by scope (`arm::elbow`, the name `--pose`
+takes). The robot opens where the CAD Viewer opens it, every joint at zero. `--pose`
+gives joint values over that, in degrees (metres for a prismatic joint), each naming
+a joint a person can drive, within its limits (a `revolute` joint with no `<limit>`
+has none), or the request is refused before anything renders: a fixed joint or a
+mimic follower is refused by name (a follower follows its leader). Each link is
+drawn in one colour of the Parts palette.
 
-A normal snapshot uses Solid mode and Light appearance. The display mode is `solid`
-(the default) or `parts` (each link its own colour), each at its own defaults;
-`--grid` draws the measuring grid under the robot, and `--preview` draws Preview's
-shared photographic scene instead, in perspective. Inline display JSON and JSON files
-are the Viewer's display object: `mode`, `grid`, `appearance` (`light`, the default,
-or `dark`), `camera` (projection and focal length) and `clip`.
-Top-level `--camera` and `--joint-values` remain active in every display mode.
-`display.clip` cuts the robot as the viewer's Clip does
-(`{"clip":{"axis":"x","at":0.05}}`, `at` in metres); `exploded`, and `shaded`, `xray`,
-`hidden-line` and `wireframe`, describe a STEP model's CAD edges and parts, and are
-refused by name here. A Quick Edit job from the viewer replays as it is: its `jointValues`, its
-`selection.hide` (the parts hidden in the Links panel, by their ids), its clip and
-annotation (`cadgen snapshot --job <file>`). Quick Edit supplies inline JSON or a
-`.snapshot.json` path; save inline JSON to a temporary file before using `--job`.
+A visual is a `box`, `cylinder`, `sphere` or `capsule`, which cadgen meshes itself,
+or a mesh `<uri>` naming an STL, 3MF or GLB file beside the description, or a
+`package://NAME/...` file of the ROS package the description is in (the nearest
+folder above it named NAME, or holding a `package.xml` that names it). A `plane`,
+`heightmap`, `polyline` or `ellipsoid`, a mesh in another format, a `model://` or
+remote URI, a package no folder above the description is, a missing file, a pose in a
+rotation format other than `euler_rpy`, and a joint the stills cannot pose (a `ball`
+or `universal` joint) are refused by name. A link mesh that cannot be loaded fails the
+snapshot rather than leaving the link out.
+
+A normal snapshot uses Solid mode and Light appearance. `--display` takes any of the
+viewer's display modes (`parts`, `xray`, `hidden-line`, `wireframe`, ...),
+`exploded=AMOUNT`, or the display object: `appearance` (`light` or `dark`),
+`camera` (projection and focal length) and `clip` (`{"clip": {"axis": "x", "at":
+0.05}}`, `at` in metres, the file's own unit, as the viewer draws it). `--grid` draws
+the measuring grid, `--preview` draws
+Preview's photographic look, and `--camera`, `--size-profile`, `--width` and
+`--height` frame and size it. A Quick Edit packet from the viewer (inline JSON, saved
+to a temporary `.snapshot.json`, or its path) replays with
+`--annotation <packet> --camera authored`, its job's `jointValues` given as `--pose`.
 Inspect supplied annotations before editing. Without annotations, the captured
 view is optional context; render it when useful to the request.
 
 Link meshes are resolved relative to the description, so they must be present: an
-unhydrated Git LFS pointer fails as "No link mesh loaded for robot". Run
+unhydrated Git LFS pointer is not a mesh and fails the snapshot. Run
 `git lfs checkout <mesh dir>` first.
 
-The grammar is `cadgen sdf snapshot TARGET [OUT] [flags]`, the same one every
-format door uses. Use `cadgen sdf snapshot --help` for the complete current
-interface — the flags a robot cannot act on are absent from it, not refused by it.
+OUT is written exactly as given and must be a `.png`; check the exit status before
+reading it. Use `cadgen snapshot --help` for the complete current interface.
 
 ## References
 

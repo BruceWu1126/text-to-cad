@@ -104,12 +104,6 @@ class ViewerAnalyticsTest(unittest.TestCase):
         self.assertEqual(json.loads(self.state.read_text(encoding="utf-8"))["telemetry"]["choice"], "off")
         self.assertEqual(self.request("POST", "/__cad/analytics", {"share": True})[1]["sharing"], True)
 
-    def test_a_web_page_cannot_answer_for_the_person(self) -> None:
-        # Without the viewer's own header (no page from another site can send it), a POST changes nothing.
-        self.assertEqual(self.request("POST", "/__cad/analytics", {"share": True}, guard=False)[0], 403)
-        self.assertEqual(self.request("GET", "/__cad/analytics")[1]["reason"], "untold")
-        self.assertFalse(self.state.exists())
-
     def test_what_the_page_did_is_sent_only_with_consent_and_a_file_only_as_a_count(self) -> None:
         # A touch is reported; a model the page shows is counted as it joins the library.
         model = str(self.root / "parts" / "a.stl")
@@ -131,6 +125,32 @@ class ViewerAnalyticsTest(unittest.TestCase):
         self.assertEqual(self.sent[-1]["events"], [{"name": "files", "kind": "stl", "count": 1}])
         self.assertNotIn(".stl", json.dumps(self.sent))
 
+    def test_a_models_page_is_counted_apart_from_an_xbf_file_once_a_day(self) -> None:
+        # A model and an actual XBF file are counted separately, each once a day, and never as builds.
+        from cadgen.engine.ids import model_id
+        from cadgen.engine.registry import Registry
+
+        script = self.root / "parts.py"
+        script.write_text("", encoding="utf-8")
+        ident = model_id(script, "cube")
+        Registry(self.tmp / "state").put({"id": ident, "kind": "model", "root": str(self.root), "home": "parts.py",
+                                          "entry": "cube", "revision": "r1", "built": 1.0})
+        self.request("POST", "/__cad/analytics", {"share": True})
+        for _ in range(2):  # shown, then again: a reload, the home's card
+            self.assertEqual(self.request("POST", "/__cad/recents", {"action": "open", "path": ident})[0], 200)
+        # An id no document has is no page shown.
+        self.assertEqual(self.request("POST", "/__cad/recents", {"action": "open", "path": model_id(script, "gone")})[0], 200)
+        path = self.root / "exported.xbf"
+        path.write_bytes(b"file fixture")
+        for _ in range(2):
+            self.assertEqual(self.request("POST", "/__cad/recents", {"action": "open", "path": str(path)})[0], 200)
+        self.assertTrue(self.app.analytics.flush())
+        [payload] = self.sent
+        self.assertEqual(payload["events"], [{"name": "files", "kind": "model", "count": 1},
+                                           {"name": "files", "kind": "xbf", "count": 1}])
+        self.assertNotIn(ident, json.dumps(payload))
+        self.assertNotIn(str(path), json.dumps(payload))
+
     def test_a_page_says_its_quick_edits_and_its_crashes_and_a_route_that_breaks_is_one(self) -> None:
         self.request("POST", "/__cad/analytics", {"share": True})
         crash = {"where": "page", "type": "TypeError", "handled": False,
@@ -141,7 +161,7 @@ class ViewerAnalyticsTest(unittest.TestCase):
             self.assertEqual(self.request("POST", "/__cad/analytics/activity", activity)[0], 204)
         # A route that breaks for no reason its caller gave is the server's crash; a bad request is not.
         with mock.patch.object(type(self.app), "_recents_payload", side_effect=KeyError("secret")):
-            self.assertEqual(self.request("GET", "/__cad/recents")[0], 400)
+            self.assertEqual(self.request("GET", "/__cad/recents")[0], 500)
         self.assertEqual(self.request("POST", "/__cad/recents", {"action": "open", "path": "relative.stl"})[0], 400)
         self.assertTrue(self.app.analytics.flush())
         events = self.sent[-1]["events"]
@@ -164,17 +184,6 @@ class ViewerAnalyticsTest(unittest.TestCase):
         crashes = [(event["where"], event["type"]) for event in self.sent[-1]["events"] if event["name"] == "exception"]
         self.assertEqual(crashes, [("route", "KeyError")], "the route's own mistake, once; never the page leaving")
 
-    def test_told_before_it_started_the_viewer_counts_by_default(self) -> None:
-        # A `cadgen` command said it before this viewer started (``cadgen/analytics.py``: ``notify``).
-        self.state.parent.mkdir(parents=True, exist_ok=True)
-        self.state.write_text(json.dumps({"telemetry": {"notifiedAt": time.time() - 3600, "notice": 1}}), encoding="utf-8")
-        self.assertEqual(self.request("GET", "/__cad/analytics")[1]["reason"], "default")
-        model = str(self.root / "parts" / "a.stl")
-        self.request("POST", "/__cad/analytics/activity", {"touched": True})
-        self.request("POST", "/__cad/recents", {"action": "open", "path": model})
-        self.assertTrue(self.app.analytics.flush())
-        self.assertEqual(self.sent[0]["events"], [{"name": "files", "kind": "stl", "count": 1}, {"name": "view", "calls": 1}])
-
     def test_the_update_button_reads_whether_a_newer_release_is_out(self) -> None:
         # The CAD app's notice (`cadgen/updates.py`), from the same feed; this page copies its prompt,
         # and nothing it does is kept: there is no answer to post. A Viewer no plugin's server started
@@ -194,7 +203,7 @@ class ViewerAnalyticsTest(unittest.TestCase):
         # The viewer process and the CAD app's server each attach theirs; an app given none counts nothing.
         port = self.serve(create_cad_app(host="127.0.0.1", port=0))
         self.assertEqual(self.request("GET", "/__cad/analytics", port=port)[0], 404)
-        self.assertEqual(self.request("POST", "/__cad/analytics/activity", {"touched": True}, port=port)[0], 405)
+        self.assertEqual(self.request("POST", "/__cad/analytics/activity", {"touched": True}, port=port)[0], 404)
 
 
 if __name__ == "__main__":

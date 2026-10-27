@@ -6,9 +6,6 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("skills/srdf/scripts")
 
 from cadgen.cli import srdf_validate as cli
 
@@ -107,37 +104,8 @@ class SrdfValidateCliTests(unittest.TestCase):
         self.assertIn("OK", output)
         self.assertNotIn("deprecated", output)
 
-    def test_missing_paired_urdf_fails(self) -> None:
-        srdf_path = self._write("robot.srdf", SAMPLE_SRDF)
-        exit_code, output = self._run(str(srdf_path))
-        self.assertEqual(exit_code, 1)
-        self.assertIn("declares robot name", output)
-
-    def test_robot_name_without_matching_urdf_fails(self) -> None:
-        srdf_path = self._write_pair(SAMPLE_SRDF.replace('name="sample"', 'name="other"', 1))
-        exit_code, output = self._run(str(srdf_path))
-        self.assertEqual(exit_code, 1)
-        self.assertIn("no_paired_urdf", output)
-
-    def test_ambiguous_paired_urdf_fails(self) -> None:
-        srdf_path = self._write_pair()
-        self._write("robot_copy.urdf", SAMPLE_URDF)
-        exit_code, output = self._run(str(srdf_path))
-        self.assertEqual(exit_code, 1)
-        self.assertIn("ambiguous_paired_urdf", output)
-
-    def test_unknown_group_joint_fails(self) -> None:
-        srdf_path = self._write_pair(
-            SAMPLE_SRDF.replace(
-                '<chain base_link="base" tip_link="wrist"/>',
-                '<joint name="not_a_joint"/>',
-            )
-        )
-        exit_code, output = self._run(str(srdf_path))
-        self.assertEqual(exit_code, 1)
-        self.assertIn("not_a_joint", output)
-
-    def test_chain_that_is_not_a_tree_path_fails(self) -> None:
+    # The validator's findings are test_srdf_findings.py's table; the command's part is that one fails it.
+    def test_a_refused_pair_fails_with_its_finding(self) -> None:
         srdf_path = self._write_pair(
             SAMPLE_SRDF.replace(
                 '<chain base_link="base" tip_link="wrist"/>',
@@ -147,25 +115,6 @@ class SrdfValidateCliTests(unittest.TestCase):
         exit_code, output = self._run(str(srdf_path))
         self.assertEqual(exit_code, 1)
         self.assertIn("not a parent-to-child path", output)
-
-    def test_group_state_beyond_urdf_limits_fails(self) -> None:
-        srdf_path = self._write_pair(
-            SAMPLE_SRDF.replace('<joint name="shoulder" value="0"/>', '<joint name="shoulder" value="2.5"/>')
-        )
-        exit_code, output = self._run(str(srdf_path))
-        self.assertEqual(exit_code, 1)
-        self.assertIn("above its URDF upper limit", output)
-
-    def test_disable_collisions_unknown_link_fails(self) -> None:
-        srdf_path = self._write_pair(
-            SAMPLE_SRDF.replace(
-                '<disable_collisions link1="base" link2="shoulder_link" reason="Adjacent"/>',
-                '<disable_collisions link1="base" link2="phantom" reason="Adjacent"/>',
-            )
-        )
-        exit_code, output = self._run(str(srdf_path))
-        self.assertEqual(exit_code, 1)
-        self.assertIn("phantom", output)
 
     def test_non_srdf_suffix_fails(self) -> None:
         path = self._write("robot.xml", SAMPLE_SRDF)

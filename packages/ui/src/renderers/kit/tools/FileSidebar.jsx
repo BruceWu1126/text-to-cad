@@ -10,11 +10,17 @@ import { STRIP_BUTTON_CLASS, TOUCH_STRIP_BUTTON_CLASS } from "./stripTouch.js";
 import { capturePointer, releasePointer } from "../../../lib/pointerCapture.js";
 import ResizeGrip from "./ResizeGrip.jsx";
 import { ToolStackContext } from "./ToolStack.jsx";
+import { useControlUsage } from "../../../usage/controls.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 import { FILE_SIDEBAR_MIN_WIDTH, TOOL_PANEL_WIDTH, fileSidebarSizeId, clampToolPanelHeight, clampToolPanelWidth, normalizeToolStack } from "./toolStackLayout.js";
 
 const KEY_NUDGE_PX = 16;
 // A phone's panel: a joint's name and its slider side by side, within the view's inset.
 const PHONE_PANEL_WIDTH = 288;
+
+// How the sidebar's panel slides in and out from its edge (and Preview's settings from theirs):
+// its translate and opacity, 200ms, easing out; at once where motion is reduced.
+export const SIDEBAR_SLIDE_CLASS = "transition-[translate,opacity] duration-200 ease-out motion-reduce:transition-none";
 
 /**
  * The file's sidebar: what there is to read of the file, its hierarchy, properties and controls,
@@ -22,7 +28,8 @@ const PHONE_PANEL_WIDTH = 288;
  * of its own at the viewer's top-left, one tile per section (`ToolPanel`s drawn as sections,
  * `ToolStackContext`'s `sidebar`): a tree by its name (**Model tree**, **Links**: a tree icon, its
  * filter heading the panel), **Position**
- * for a model's joints, **Animation** for its routines, and any other section by its name. None is open as a file opens; a tile
+ * for a model's joints, **Animation** for its routines (**Motion** for an engine document's
+ * motions), and any other section by its name. None is open as a file opens; a tile
  * opens its section in a panel under the toolbar, a second press on it closes it, and so does the
  * section's own collapse button; another tile opens its section instead. One section at a time.
  * The panel is read for as long as it is open, so it has its own surface (`FILE_SIDEBAR_SURFACE_CLASS`):
@@ -43,7 +50,7 @@ const PHONE_PANEL_WIDTH = 288;
  * opens the panel on the section last open (the first, at first) and closes it; the panel's top is
  * a row of tabs, one per section with its tile's icon, and it runs down the view to its bottom
  * inset (clear of Quick Edit's peek), or as tall as the section if that is less, at a phone's own
- * width — wide enough for a joint's name beside its slider, not a desktop's size — with no grip.
+ * width — wide enough for a joint's name beside its slider, not a wide view's size — with no grip.
  *
  * It is the tools view's alone: Preview hides it (`hidden`), its sections kept mounted.
  *
@@ -55,6 +62,7 @@ const PHONE_PANEL_WIDTH = 288;
  */
 export default function FileSidebar({ layout: stored, onLayoutChange, hidden = false,
   phone = false, style, children }) {
+  const { t } = useI18n();
   const layout = useMemo(() => normalizeToolStack(stored), [stored]);
   const room = useRef(null), bar = useRef(null), scroller = useRef(null), column = useRef(null);
   // The room's height, the most the bar may take, and the viewer's width, which bounds the bar's.
@@ -124,8 +132,7 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     element.style.scrollPaddingBottom = `${docked}px`;
   }, []);
   useLayoutEffect(dock);
-  // Which sections are on screen, in order: the first carries the bar's own button, and one alone
-  // does not fold.
+  // Which sections are on screen, in order: the first carries the bar's own button.
   const [order, setOrder] = useState("");
   useLayoutEffect(() => {
     const ids = [...(column.current?.querySelectorAll(":scope > section:not([hidden])") ?? [])]
@@ -141,20 +148,6 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     if (column.current) observer?.observe(column.current);
     return () => { element.removeEventListener("scroll", dock); observer?.disconnect(); };
   }, [dock]);
-  // A section brought into view, its heading at the top, at once: now, or once the unfolding that
-  // goes with it has been drawn (`unfolding`).
-  const pending = useRef(null);
-  const snap = anchor => {
-    const element = scroller.current;
-    if (!element || !anchor?.isConnected) return;
-    element.scrollTop += anchor.getBoundingClientRect().top - element.getBoundingClientRect().top;
-  };
-  const reveal = useCallback((anchor, { unfolding = false } = {}) => { if (unfolding) pending.current = anchor; else snap(anchor); }, []);
-  useLayoutEffect(() => {
-    if (!pending.current) return;
-    snap(pending.current);
-    pending.current = null;
-  });
   const ids = order ? order.split(" ") : [];
   // The open section: none as a file opens, and none once the one open is gone.
   const [openId, setOpenId] = useState(null);
@@ -199,7 +192,6 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
   const tabbed = phone && ids.length > 1;
   const sections = useMemo(() => ({
     sidebar: true,
-    reveal,
     openSection: shown,
     closeSection,
     // Whether a section's head carries its X: not under a phone's tabs, whose row has the panel's.
@@ -211,18 +203,20 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     collapsed: (id, fallback) => layout.collapsed[id] ?? fallback,
     settle,
     room: () => room.current?.clientHeight || 0,
-  }), [reveal, shown, closeSection, tabbed, register, measured.viewer, layout, settle]);
+  }), [shown, closeSection, tabbed, register, measured.viewer, layout, settle]);
   const tiles = ids.map(id => {
     const section = meta.current.get(id) || {};
-    const tile = section.fit === "tree" ? { label: section.title || "Tree", Icon: ListTree }
-      : id === "position" ? { label: "Position", Icon: PositionIcon }
-        : id === "animation" ? { label: "Animation", Icon: Clapperboard }
+    const tile = section.fit === "tree" ? { label: section.title || t("sidebar.tree"), Icon: ListTree }
+      : id === "position" ? { label: t("sidebar.position"), Icon: PositionIcon }
+        : id === "animation" ? { label: section.title || t("sidebar.animation"), Icon: Clapperboard }
         : { label: section.title || id, Icon: FileText };
     return { id, ...tile, changed: Boolean(section.changed) };
   });
   void metaTick;
   // A press of a tile: its section opens, or closes if it was the open one.
   const toggle = useCallback(id => setOpenId(current => (current === id ? null : id)), []);
+  // A section a person opens, by its id (`usage/controls.js`: `sidebar_tree`).
+  const controls = useControlUsage();
   // A phone's one tile: the panel opens on the section last open, or the first, and closes.
   const togglePanel = () => setOpenId(current => (current && ids.includes(current) ? null : ids.includes(lastOpen.current) ? lastOpen.current : tiles[0]?.id ?? null));
 
@@ -263,8 +257,8 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     settle(sizeId, change);
   };
 
-  const aside = <aside ref={bar} aria-label="File" data-cad-file-sidebar="" data-open={open ? "" : undefined} inert={!open}
-    className={cn("relative flex max-w-full flex-col overflow-hidden text-tiny transition-[translate,opacity] duration-200 ease-out motion-reduce:transition-none",
+  const aside = <aside ref={bar} aria-label={t("sidebar.file")} data-cad-file-sidebar="" data-open={open ? "" : undefined} inert={!open}
+    className={cn("relative flex max-w-full flex-col overflow-hidden text-tiny", SIDEBAR_SLIDE_CLASS,
       "rounded-md", FILE_SIDEBAR_SURFACE_CLASS,
       open ? "pointer-events-auto" : "pointer-events-none -translate-x-[calc(100%+1rem)] opacity-0")}
     // Never wider than the room left of the tool strip (`--cad-file-sidebar-max-width`, the shell's
@@ -273,14 +267,14 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     {/* A phone's panel is headed by its sections' tabs, each with its tile's icon, and the panel's
         one X at the row's right end (its sections' heads then have none). */}
     {tabbed ? <div className="flex shrink-0 items-center gap-1 border-b border-border/60 p-1" data-file-sidebar-tabs="">
-      <ToggleGroup type="single" value={shown ?? ""} onValueChange={id => { if (id) setOpenId(id); }} aria-label="Sidebar sections" className="min-w-0 flex-1">
+      <ToggleGroup type="single" value={shown ?? ""} onValueChange={id => { if (id) { controls.used(`sidebar_${id}`); setOpenId(id); } }} aria-label={t("sidebar.sections")} className="min-w-0 flex-1">
         {tiles.map(({ id, label, Icon, changed }) => <ToggleGroupItem key={id} value={id} aria-label={label} className="h-9" data-file-sidebar-tab={id}>
           {/* The dot at the icon's corner, not the wide tab's. */}
           <span className="relative inline-flex"><Icon className="size-4.5" aria-hidden="true" />
             {changed ? <ChangedDot className="-right-1 -top-0.5" /> : null}</span>
         </ToggleGroupItem>)}
       </ToggleGroup>
-      <button type="button" aria-label="Close sidebar" onClick={closeSection} data-file-sidebar-close=""
+      <button type="button" aria-label={t("sidebar.close")} onClick={closeSection} data-file-sidebar-close=""
         className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45">
         <X className="size-4" aria-hidden="true" />
       </button>
@@ -291,24 +285,24 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
         <ToolStackContext.Provider value={sections}>{children}</ToolStackContext.Provider>
       </div>
     </ScrollArea>
-    {phone ? null : <ResizeGrip corner="bottom-right" role="separator" tabIndex={0} aria-label="Resize file sidebar"
+    {phone ? null : <ResizeGrip corner="bottom-right" role="separator" tabIndex={0} aria-label={t("sidebar.resize")}
       data-file-sidebar-corner="" data-dragging={draft !== null ? "" : undefined}
       onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag} onKeyDown={keyDrag} />}
   </aside>;
   return <>
     <div hidden={hidden} className="pointer-events-none absolute z-20 flex flex-col items-start gap-2" style={style} data-file-sidebar-room="">
       {/* The sidebar's toolbar: the tool strip's surface, padding and tiles, on the strip's line. */}
-      {phone && tiles.length ? <div role="group" aria-label="File sidebar" data-file-sidebar-tools=""
+      {phone && tiles.length ? <div role="group" aria-label={t("sidebar.label")} data-file-sidebar-tools=""
         className={cn("pointer-events-auto inline-flex shrink-0 items-center rounded-md p-1", FLOATING_CHROME_SURFACE_CLASS)}>
-        <ToolbarButton label="Sidebar" tooltipSide="bottom" className={cn(TOUCH_STRIP_BUTTON_CLASS, "relative")} active={Boolean(open)} aria-pressed={Boolean(open)}
+        <ToolbarButton label={t("sidebar.toggle")} tooltipSide="bottom" className={cn(TOUCH_STRIP_BUTTON_CLASS, "relative")} active={Boolean(open)} aria-pressed={Boolean(open)}
           onClick={togglePanel} data-file-sidebar-toggle=""><Menu aria-hidden="true" />
           {/* Any section off its default, the panel's one tile says so too. */}
           {tiles.some(tile => tile.changed) ? <ChangedDot className="right-1.5 top-1.5" /> : null}</ToolbarButton>
       </div> : null}
-      {tiles.length && !phone ? <div role="group" aria-label="File sidebar" data-file-sidebar-tools=""
+      {tiles.length && !phone ? <div role="group" aria-label={t("sidebar.label")} data-file-sidebar-tools=""
         className={cn("pointer-events-auto inline-flex shrink-0 items-center gap-1 rounded-md p-1", FLOATING_CHROME_SURFACE_CLASS)}>
         {tiles.map(({ id, label, Icon, changed }) => <ToolbarButton key={id} label={label} tooltipSide="bottom" className={cn(STRIP_BUTTON_CLASS, changed && "relative")}
-          active={open === id} aria-pressed={open === id} onClick={() => toggle(id)} data-file-sidebar-tool={id} data-changed={changed ? "" : undefined}>
+          active={open === id} aria-pressed={open === id} onClick={() => { if (open !== id) controls.used(`sidebar_${id}`); toggle(id); }} data-file-sidebar-tool={id} data-changed={changed ? "" : undefined}>
           <Icon aria-hidden="true" />
           {changed ? <ChangedDot /> : null}
         </ToolbarButton>)}

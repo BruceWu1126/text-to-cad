@@ -2,6 +2,7 @@ import { createPromptDeliveryLedger, resolvePromptMessage, validatePromptContext
 import type { PromptContext, PromptContextPort, PromptDeliveryResult, PromptDestinationState } from '@text-to-cad/core/prompt';
 import { HostError, type Bridge } from './bridge';
 import type { Presentation } from './presentation';
+import { english } from '@text-to-cad/ui/i18n';
 
 const MAX_ITEMS = 24;
 const METHOD_NOT_FOUND = -32601;
@@ -35,14 +36,20 @@ const baseName = (path: string) => path.split(/[\\/]/).pop() || path;
  * host takes messages, posts the context as the person's message now. The text names each
  * JSON file by its saved path (`part.path`); its bytes never travel in the message.
  */
-export function createChatPromptContext(bridge: Pick<Bridge, 'request' | 'onHostContext' | 'hostContext'>, { reach }: {
+export function createChatPromptContext(bridge: Pick<Bridge, 'request' | 'onHostContext' | 'hostContext'>, { reach, t = english }: {
   reach: ChatReach;
+  /** What the person reads when the chat takes nothing, or is still busy: in the view's language. */
+  t?: (key: string, params?: Record<string, unknown>) => string;
 }): PromptContextPort & { dispose(): void } {
   const state: PromptDestinationState = Object.freeze(reach.queue ? {
     kind: 'composer', available: true,
     capabilities: { attachments: 'none', maxParts: 128, maxAttachmentBytes: 0, mixedTextAndImage: 'unsupported' },
-  } satisfies PromptDestinationState : { kind: 'unavailable', available: false, reason: 'This chat takes no added context.' } satisfies PromptDestinationState);
-  const ledger = createPromptDeliveryLedger({ busyMessage: 'Wait for the last message to reach the chat.' });
+  } satisfies PromptDestinationState : { kind: 'unavailable', available: false, reason: t('cad.prompt.noContext') } satisfies PromptDestinationState);
+  // The ledger's refusal while busy is said in the person's language as it is said, not when the port was made.
+  const BUSY = 'Wait for the last message to reach the chat.';
+  const ledger = createPromptDeliveryLedger({ busyMessage: BUSY });
+  const said = (result: PromptDeliveryResult): PromptDeliveryResult =>
+    (result.status === 'failed' && result.message === BUSY ? { ...result, message: t('cad.prompt.busy') } : result);
   let queued: Block[] = [];
   let queueing: Promise<unknown> = Promise.resolve();
   const stop = bridge.onHostContext(context => { if (context['openai/modelContext'] === null) queued = []; });
@@ -76,7 +83,7 @@ export function createChatPromptContext(bridge: Pick<Bridge, 'request' | 'onHost
     getSnapshot: () => state,
     subscribe: () => () => {},
     deliver(context) {
-      if (!reach.queue) return Promise.resolve({ status: 'failed', message: state.reason });
+      if (!reach.queue) return Promise.resolve({ status: 'failed', message: t('cad.prompt.noContext') });
       const invalid = deliveryFailure(context);
       if (invalid) return invalid;
       return ledger.deliver(context.operationId, async (): Promise<PromptDeliveryResult> => {
@@ -93,12 +100,12 @@ export function createChatPromptContext(bridge: Pick<Bridge, 'request' | 'onHost
           // A tab host is not asked whether it takes context (Codex forwards it undeclared), so one
           // that does not answers "Method not found": say what to do instead of the bare JSON-RPC error.
           if (error instanceof HostError && error.code === METHOD_NOT_FOUND) {
-            return { status: 'failed', message: "This app's chat doesn't take added context yet. Use Copy Prompt and paste it instead." };
+            return { status: 'failed', message: t('cad.prompt.notTaken') };
           }
           throw error;
         }
         return { status: 'added', partIds: context.parts.map(part => part.id) };
-      });
+      }).then(said);
     },
     dispose: stop,
   };
@@ -111,7 +118,7 @@ export function createChatPromptContext(bridge: Pick<Bridge, 'request' | 'onHost
       const text = await textOf(context);
       await bridge.request('ui/message', { role: 'user', content: [{ type: 'text', text }] }, { timeoutMs: 30_000 });
       return { status: 'sent', partIds: context.parts.map(part => part.id) };
-    });
+    }).then(said);
   };
   return port;
 }

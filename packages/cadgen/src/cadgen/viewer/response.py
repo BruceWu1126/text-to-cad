@@ -58,15 +58,17 @@ class Request:
     directly, without binding a port.
     """
 
-    __slots__ = ("method", "raw_method", "path", "query", "headers", "_read_body", "_body")
+    __slots__ = ("method", "raw_method", "path", "query", "headers", "_read_body", "_body", "consent_by")
 
-    def __init__(self, *, raw_method, path, query, headers, read_body):
+    def __init__(self, *, raw_method, path, query, headers, read_body, consent_by=None):
         self.raw_method = raw_method
         # HEAD is handled as GET throughout; only the writers know the difference.
         self.method = "GET" if raw_method == "HEAD" else raw_method
         self.path = path
         self.query = query
         self.headers = headers
+        # Set by the trusted MCP adapter, never from an HTTP header.
+        self.consent_by = consent_by
         self._read_body = read_body
         self._body: bytes | None = None
 
@@ -92,7 +94,7 @@ class Request:
 class Response:
     """Writes one response onto a ``BaseHTTPRequestHandler``."""
 
-    __slots__ = ("_handler", "_head_only", "_range", "_on_parts", "written", "gone")
+    __slots__ = ("_handler", "_head_only", "_range", "_on_parts", "written", "gone", "also")
 
     def __init__(self, handler, head_only: bool = False, byte_range: str | None = None, on_parts=None):
         self._handler = handler
@@ -101,6 +103,7 @@ class Response:
         self._on_parts = on_parts
         self.written = False
         self.gone = False  # the client hung up: nothing more is written
+        self.also: tuple[tuple[str, Any], ...] = ()  # headers whatever is sent carries too (a renewed cookie)
 
     def _span(self, length: int) -> tuple[int, int] | None:
         """The part of a ``length``-byte body the range asks for; None for the whole body."""
@@ -147,7 +150,7 @@ class Response:
             handler.send_response_only(status)
             # Node sends Date on every response and no Server header at all.
             handler.send_header("date", handler.date_time_string())
-            for name, value in headers:
+            for name, value in (*headers, *self.also):
                 handler.send_header(name, str(value))
             handler.end_headers()
         except ConnectionError:

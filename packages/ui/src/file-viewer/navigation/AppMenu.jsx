@@ -15,6 +15,7 @@ import { FLOATING_SURFACE_CLASS } from "../../lib/floatingSurface.js";
 import { useViewerMobile } from "../responsive.js";
 import { DiscordMark, GitHubMark } from "./brandMarks.jsx";
 import { feedbackUrl, MadeBy, useFollow } from "./NavbarLinks.jsx";
+import { useControlUsage } from "../../usage/controls.js";
 
 const NONE = Object.freeze([]);
 // A setting's row: 32px, its name and its control spaced apart, the control's centre on one line.
@@ -35,7 +36,7 @@ const languageOptions = (language, t, className = undefined) => [
 
 /**
  * The app's menu, from the navbar's logo over every file and over the host's home: what is the
- * person's rather than a file's. First, where the host has a home, Back to files (`onHome`). Then the
+ * person's rather than a file's. First, where the host has a home, Back to home (`onHome`). Then the
  * person's settings, a press keeping the menu open: Language (`language`), one row naming the language in
  * force, whose submenu offers Automatic (the language the context infers, named) and each language under
  * its own name; the host's on/off settings (`appSettings`: Telemetry), a checkbox at the right, filled while on, and
@@ -56,6 +57,7 @@ export function AppMenu({ trigger, onHome, links, appSettings = NONE, colorSchem
   // A phone's Language row opens its choices in place; each opening of the menu starts it closed.
   const [languageOpen, setLanguageOpen] = useState(false);
   const follow = useFollow(links);
+  const usage = useControlUsage();
   const feedback = links ? feedbackUrl(links, platform) : "";
   const outward = [
     feedback ? { id: "feedback", label: t("menu.feedback"), href: feedback, icon: MessageCircle } : null,
@@ -63,7 +65,7 @@ export function AppMenu({ trigger, onHome, links, appSettings = NONE, colorSchem
     links?.discord ? { id: "discord", label: "Discord", href: links.discord, icon: DiscordMark } : null,
   ].filter(Boolean);
   const groups = [
-    onHome ? [<DropdownMenuItem key="home" onSelect={onHome} data-menu-home=""><ArrowLeft aria-hidden="true" />{t("menu.backToFiles")}</DropdownMenuItem>] : [],
+    onHome ? [<DropdownMenuItem key="home" onSelect={onHome} data-menu-home=""><ArrowLeft aria-hidden="true" />{t("menu.backToHome")}</DropdownMenuItem>] : [],
     // The person's settings, one group of like rows — Language, the host's on/off settings, Theme: a name
     // on the left in the menu's own text and its control on the right — the language in force, a checkbox
     // filled while on, Theme's segmented System, Light and Dark. A press keeps the menu open.
@@ -79,7 +81,7 @@ export function AppMenu({ trigger, onHome, links, appSettings = NONE, colorSchem
         <span className="shrink-0 text-muted-foreground" lang={language.locale}>{t(`language.${language.locale}`)}</span>
         <ChevronRight className={cn("size-4 shrink-0 text-muted-foreground transition-transform", languageOpen && "rotate-90")} aria-hidden="true" />
       </MenuPrimitive.Item>, ...(languageOpen ? [<DropdownMenuRadioGroup key="language-options" aria-label={t("menu.language")} value={language.choice ?? AUTOMATIC}
-        onValueChange={value => { language.onChoiceChange(value === AUTOMATIC ? null : value); setLanguageOpen(false); }}>
+        onValueChange={value => { usage.used("language"); language.onChoiceChange(value === AUTOMATIC ? null : value); setLanguageOpen(false); }}>
         {languageOptions(language, t, "pl-5")}
       </DropdownMenuRadioGroup>] : [])] : []),
       ...(language && !mobile ? [<DropdownMenuSub key="language">
@@ -90,7 +92,7 @@ export function AppMenu({ trigger, onHome, links, appSettings = NONE, colorSchem
           <span className="shrink-0 text-muted-foreground" lang={language.locale}>{t(`language.${language.locale}`)}</span>
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent className={cn(FLOATING_SURFACE_CLASS, "min-w-40")} aria-label={t("menu.language")}>
-          <DropdownMenuRadioGroup value={language.choice ?? AUTOMATIC} onValueChange={value => language.onChoiceChange(value === AUTOMATIC ? null : value)}>
+          <DropdownMenuRadioGroup value={language.choice ?? AUTOMATIC} onValueChange={value => { usage.used("language"); language.onChoiceChange(value === AUTOMATIC ? null : value); }}>
             {languageOptions(language, t)}
           </DropdownMenuRadioGroup>
         </DropdownMenuSubContent>
@@ -115,7 +117,7 @@ export function AppMenu({ trigger, onHome, links, appSettings = NONE, colorSchem
       </MenuPrimitive.CheckboxItem>),
       ...(colorScheme ? [<div key="theme" className={SETTING_ROW_CLASS} data-menu-theme="">
         <span className="min-w-0">{t("menu.theme")}</span>
-        <MenuPrimitive.RadioGroup value={colorScheme.preference} onValueChange={colorScheme.onPreferenceChange} aria-label={t("menu.theme")}
+        <MenuPrimitive.RadioGroup value={colorScheme.preference} onValueChange={value => { usage.used(`theme_${value}`); colorScheme.onPreferenceChange(value); }} aria-label={t("menu.theme")}
           className="-mr-0.5 flex shrink-0 items-center gap-0.5 rounded-md bg-muted p-0.5">
           {COLOR_SCHEMES.map(([id, Icon]) => <MenuPrimitive.RadioItem key={id} value={id} aria-label={t(`appearance.${id}`)} onSelect={event => event.preventDefault()}
             className="grid size-6 cursor-default place-items-center rounded-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus:bg-accent focus:text-foreground data-[state=checked]:bg-background data-[state=checked]:text-foreground data-[state=checked]:shadow-xs"
@@ -126,14 +128,14 @@ export function AppMenu({ trigger, onHome, links, appSettings = NONE, colorSchem
       </div>] : []),
     ],
     outward.map(({ id, label, href, icon: Icon }) => <DropdownMenuItem key={id} asChild>
-      <a href={href} target="_blank" rel="noreferrer" onClick={follow} data-link={id}><Icon className="size-3.5" aria-hidden="true" />{label}</a>
+      <a href={href} target="_blank" rel="noreferrer" onClick={event => { if (id === "feedback") usage.used("feedback"); follow?.(event); }} data-link={id}><Icon className="size-3.5" aria-hidden="true" />{label}</a>
     </DropdownMenuItem>),
   ].filter(group => group.length);
-  // Only the version shortens to fit the line, never the rest of it.
-  const version = links?.version ? (links.release
+  // Only the version shortens to fit the line, never the rest of it, and says itself whole when it does.
+  const version = links?.version ? <TooltipHint content={`v${links.version}`} overflowOnly>{links.release
     ? <a href={links.release} target="_blank" rel="noreferrer" onClick={follow} className="min-w-0 truncate hover:text-foreground"
-      title={`v${links.version}`} data-menu-version="">v{links.version}</a>
-    : <span className="min-w-0 truncate" title={`v${links.version}`} data-menu-version="">v{links.version}</span>) : null;
+      data-menu-version="">v{links.version}</a>
+    : <span className="min-w-0 truncate" data-menu-version="">v{links.version}</span>}</TooltipHint> : null;
   const madeBy = links?.x ? <MadeBy links={links} /> : null;
   return <DropdownMenu modal={false} onOpenChange={() => setLanguageOpen(false)}>
     <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>

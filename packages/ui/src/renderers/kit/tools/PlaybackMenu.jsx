@@ -10,6 +10,7 @@ import { cn } from "@text-to-cad/ui/utils";
 import { FLOATING_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
 import { PLAYBACK_SPEEDS } from "./playbar/AnimationTimeControl.js";
 import ToolPopover from "./ToolPopover.jsx";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 // The file sidebar's Animation section's Playback settings (`playbar/AnimationSection.jsx`), opening
 // down from its cog (`side`), lit while its menu is open; and Preview's Orbit speeds
@@ -53,12 +54,13 @@ const keepOpen = event => event.preventDefault();
  *   `animation` is the routine runtime; `side` is where the menu opens.
  */
 export default function PlaybackMenu({ animation, autoplay, onAutoplayChange, side = "top", disabled = false }) {
-  return <ToolPopover allowInactive side={side} align="end" label="Playback settings" className="w-40"
-    trigger={<MenuTrigger label="Playback settings" disabled={disabled} className={MENU_TRIGGER_CLASS}><Settings className="size-3.5" strokeWidth={1.5} aria-hidden="true" /></MenuTrigger>}>
-    <SpeedSubmenu label="Speed" name="Animation speed" value={Number(animation.speed) || 1} values={PLAYBACK_SPEEDS} onChange={animation.onSpeedChange} />
+  const { t } = useI18n();
+  return <ToolPopover allowInactive side={side} align="end" label={t("playback.settings")} className="w-40"
+    trigger={<MenuTrigger label={t("playback.settings")} disabled={disabled} className={MENU_TRIGGER_CLASS}><Settings className="size-3.5" strokeWidth={1.5} aria-hidden="true" /></MenuTrigger>}>
+    <SpeedSubmenu label={t("playback.speed")} name={t("playback.animationSpeed")} value={Number(animation.speed) || 1} values={PLAYBACK_SPEEDS} onChange={animation.onSpeedChange} />
     <DropdownMenuCheckboxItem checked={animation.loopEnabled !== false} onSelect={keepOpen}
-      onCheckedChange={checked => animation.onLoopToggle(checked === true)}>Loop</DropdownMenuCheckboxItem>
+      onCheckedChange={checked => animation.onLoopToggle(checked === true)}>{t("playback.loop")}</DropdownMenuCheckboxItem>
     <DropdownMenuCheckboxItem checked={autoplay === true} onSelect={keepOpen}
-      onCheckedChange={checked => onAutoplayChange?.(checked === true)}>Autoplay</DropdownMenuCheckboxItem>
+      onCheckedChange={checked => onAutoplayChange?.(checked === true)}>{t("playback.autoplay")}</DropdownMenuCheckboxItem>
   </ToolPopover>;
 }

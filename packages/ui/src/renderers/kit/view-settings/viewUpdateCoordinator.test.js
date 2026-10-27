@@ -90,12 +90,15 @@ test('only resource boundaries prepare; clip motion, exposure, rotation and colo
   }
 });
 
-test('a paint wait no frame comes to settles on its timer and reaches for no frame API', { timeout: 10_000 }, async () => {
+test('a paint wait no frame comes to settles on its timer and reaches for no frame API', async t => {
   // A hidden tab draws no frame, and a page can be gone, its frame API with it, when the timer
   // fires (the CI flake: a test file torn down first). Node has no cancelAnimationFrame at all.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   globalThis.requestAnimationFrame = () => 1;
   try {
-    await afterViewPaint();
+    const painted = afterViewPaint();
+    t.mock.timers.tick(100);
+    await painted;
   } finally {
     delete globalThis.requestAnimationFrame;
   }

@@ -11,9 +11,6 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("skills/sdf/scripts")
 
 from cadgen.sdf_validation import validate_sdf_xml
 
@@ -314,6 +311,16 @@ class SdfFindingsTests(unittest.TestCase):
             f"{TWO_LINKS}"
             '<joint name="j1" type="fixed"><parent>base</parent><child>arm</child></joint>'
             '<frame name="tcp" attached_to="j1"><pose relative_to="j1">0 0 0.1 0 0 0</pose></frame>'
+        )
+        error_codes, _ = self._codes(sdf_text)
+        self.assertFalse(error_codes)
+
+    def test_a_joint_may_name_a_frame_as_its_parent_or_child(self) -> None:
+        # SDFormat >= 1.7: a joint's endpoints are frames, which a link or an explicit <frame> is.
+        sdf_text = _model(
+            f"{TWO_LINKS}"
+            '<frame name="mount" attached_to="base"><pose>0 0 0.1 0 0 0</pose></frame>'
+            '<joint name="j1" type="fixed"><parent>mount</parent><child>arm</child></joint>'
         )
         error_codes, _ = self._codes(sdf_text)
         self.assertFalse(error_codes)

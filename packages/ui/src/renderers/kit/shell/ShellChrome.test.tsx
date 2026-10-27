@@ -38,6 +38,10 @@ import { ViewerMobileContext } from '../../../../dist/file-viewer/responsive.js'
 import { TOOL_PANEL_WIDTH } from '../../../../dist/renderers/kit/tools/toolStackLayout.js';
 import { FILE_SIDEBAR_SURFACE_CLASS, FLOATING_CHROME_SURFACE_CLASS, FLOATING_SURFACE_CLASS } from '../../../../dist/lib/floatingSurface.js';
 import { SolidModeIcon } from '../../../../dist/renderers/kit/view-settings/DisplayModeOptions.js';
+import { ControlUsageProvider } from '../../../../dist/usage/controls.js';
+import { SIDEBAR_SLIDE_CLASS } from '../../../../dist/renderers/kit/tools/FileSidebar.js';
+import { createAnimationClock } from '../../../../dist/renderers/kit/tools/playbar/animationClock.js';
+import { writeFileView } from '../../../../dist/renderers/kit/shell/fileView.js';
 
 // jsdom lays nothing out, so the few sizes the chrome reads are given: a viewer 1280 × 800 whose
 // stack column (under the strip) and the sidebar panel's room (under its tiles) are each 600px
@@ -76,16 +80,19 @@ function tabSettings(initial: object = {}) {
   return store;
 }
 type Settings = ReturnType<typeof tabSettings>;
-function frame({ name = 'panel.harness', preferences = tabSettings(), state = undefined as unknown, mobile = false, onStateChange = (_: unknown) => {}, appearance = { colorScheme: 'light' } as object, notice = null as React.ReactNode, viewer = false } = {}) {
+function frame({ name = 'panel.harness', preferences = tabSettings(), state = undefined as unknown, mobile = false, onStateChange = (_: unknown) => {}, appearance = { colorScheme: 'light' } as object, notice = null as React.ReactNode, viewer = false, data = {} as object,
+  usage = null as ((counts: { control: string; count: number; seconds: number }[]) => void) | null } = {}) {
   const props = { source: { id: 'one' }, file: { path: `/models/${name}`, name, kind: 'file' }, document: null, notice,
-    onReady() {}, onOpenFile() {}, appearance, state, onStateChange, reload() {}, data: { services: { preferences } } };
+    onReady() {}, onOpenFile() {}, appearance, state, onStateChange, reload() {}, data: { services: { preferences }, ...data } };
   // `viewer`: inside a viewer's element, as FileViewer draws it, where the viewer's keys are its own.
   const element = () => {
     const shell = <ViewerHostContext.Provider value={testHost()}><ViewerMobileContext.Provider value={mobile}>
       <HarnessRenderer {...(props as any)} /></ViewerMobileContext.Provider></ViewerHostContext.Provider>;
-    if (!viewer) return shell;
+    // `usage`: the host's count of the controls a person used (`usage/controls.js`).
+    const counted = usage ? <ControlUsageProvider report={usage}>{shell}</ControlUsageProvider> : shell;
+    if (!viewer) return counted;
     const ref = { current: null as HTMLDivElement | null };
-    return <ViewerElementContext.Provider value={ref}><div ref={node => { ref.current = node; }}>{shell}</div></ViewerElementContext.Provider>;
+    return <ViewerElementContext.Provider value={ref}><div ref={node => { ref.current = node; }}>{counted}</div></ViewerElementContext.Provider>;
   };
   const view = render(element());
   return { ...view, preferences, remount: () => { view.unmount(); return render(element()); } };
@@ -266,8 +273,9 @@ async function openDisplay(user: ReturnType<typeof userEvent.setup>, root?: HTML
 const named = (button: Element) => button.getAttribute('aria-label')!.split(':')[0];
 // The view's controls: the strip's last, after its tools and a rule.
 const barButtons = () => [...document.querySelector('[role=group][aria-label="Interaction tools"] [data-view-controls]')?.querySelectorAll('button') ?? []].map(named);
-// Preview's own, in the view's top-right corner.
-const cornerButtons = () => [...document.querySelector('[data-preview-corner]')?.querySelectorAll('button') ?? []].map(named);
+// Preview's own bar, over the view's top edge: its name, and its controls at its right.
+const previewBar = () => document.querySelector<HTMLElement>('[data-preview-bar]');
+const cornerButtons = () => [...previewBar()?.querySelectorAll('button') ?? []].map(named);
 // The strip's tools, before the view's controls.
 const strip = () => [...screen.getByRole('group', { name: 'Interaction tools' }).querySelectorAll('button')].filter(button => !button.closest('[data-view-controls]')).map(button => button.getAttribute('aria-label'));
 
@@ -390,6 +398,7 @@ it('a host showing the view small gets the model alone: no tools, no view action
   frame({ appearance: { colorScheme: 'light', compact: true } });
   expect(screen.queryByRole('group', { name: 'Interaction tools' })).toBeNull();
   expect(document.querySelector('[data-cad-tool-stack]')).toBeNull();
+  expect(document.querySelector('[data-cad-tools-toggle]')).toBeNull();
   expect(barButtons()).toEqual([]);
   expect(document.querySelector('[data-quick-edit]')).toBeNull();
   expect(viewportProps.current.viewCube).toBe(false);
@@ -450,7 +459,7 @@ async function enterPreview(user: ReturnType<typeof userEvent.setup>) {
 const previewSettings = () => screen.queryByRole('region', { name: 'Preview settings' });
 
 it("three surfaces: the strip, the sidebar's tiles and the stack share the light chrome surface; the sidebar's panel and Preview's settings, read while they are up, are between; Display's dropdown is the most opaque", async () => {
-  const user = userEvent.setup();
+  const user = userEvent.setup({ skipHover: true });
   frame();
   expect(new Set([FLOATING_CHROME_SURFACE_CLASS, FILE_SIDEBAR_SURFACE_CLASS, FLOATING_SURFACE_CLASS]).size).toBe(3);
   const classes = (element: Element) => element.className.split(/\s+/);
@@ -471,8 +480,8 @@ it("three surfaces: the strip, the sidebar's tiles and the stack share the light
   expect(has(previewSettings()!, FILE_SIDEBAR_SURFACE_CLASS)).toBe(true);
 });
 
-it("Preview is in Render: the strip, the view's controls, the stack and the file sidebar step aside; the top-right holds its settings (Orbit and Render's) and the way out, which brings back the tool in hand and the file's own mode", async () => {
-  const user = userEvent.setup();
+it("Preview is in Render: the strip, the view's controls, the stack and the file sidebar step aside; its bar holds the file's name, its settings (Orbit and Render's) and the way out, which brings back the tool in hand and the file's own mode", async () => {
+  const user = userEvent.setup({ skipHover: true });
   frame();
   await user.click(tool('Pose'));
   expect(tileNames()).toEqual(['Harness tree', 'Reference', 'Position']);
@@ -491,10 +500,10 @@ it("Preview is in Render: the strip, the view's controls, the stack and the file
   expect(sections()).toEqual([]);
   expect(panel('Harness position')).not.toBeNull();
   expect(screen.queryByRole('toolbar', { name: 'Animation playback' })).toBeNull();
-  // The top-right: its settings and the way out, an X, 8px in.
-  expect(cornerButtons()).toEqual(['Preview settings', 'Exit preview']);
-  const corner = document.querySelector<HTMLElement>('[data-preview-corner]')!;
-  expect([corner.parentElement!.style.top, corner.parentElement!.style.right]).toEqual(['8px', '8px']);
+  // Its bar, along the view's top edge: the file's name, then its settings and the way out, an X.
+  expect([previewBar()!.querySelector('[data-preview-name]')!.textContent, cornerButtons()]).toEqual(['panel.harness', ['Preview settings', 'Exit preview']]);
+  expect(previewBar()!.className).toMatch(/\bh-9\b/);
+  const corner = previewBar()!;
   expect(within(corner).getByRole('button', { name: 'Exit preview' }).querySelector('svg.lucide-x')).not.toBeNull();
   // Preview draws Render in a view of its own; the editor's viewport is asked for nothing new.
   expect([inPreview(), previewProps.current.renderMode, previewProps.current.projection, viewportProps.current.renderMode]).toEqual([true, true, 'perspective', false]);
@@ -523,9 +532,9 @@ it("Preview is in Render: the strip, the view's controls, the stack and the file
   // What was set in Preview is the file's Render settings: the next visit has it.
   act(() => { fireEvent.click(document.querySelector('[data-harness-ask-preview]')!); });
   expect(inPreview()).toBe(true);
-  await user.click(within(document.querySelector<HTMLElement>('[data-preview-corner]')!).getByRole('button', { name: 'Preview settings' }));
+  await user.click(within(previewBar()!).getByRole('button', { name: 'Preview settings' }));
   expect(floor().getAttribute('aria-checked')).toBe('false');
-  await user.click(within(document.querySelector<HTMLElement>('[data-preview-corner]')!).getByRole('button', { name: 'Exit preview' }));
+  await user.click(within(previewBar()!).getByRole('button', { name: 'Exit preview' }));
   expect([displayMenu(), displayLit()]).toEqual([null, false]);
 });
 
@@ -556,6 +565,123 @@ it("Preview is covered from the press until its picture has converged, then show
   }
 });
 
+it("Preview's bar is its name and its two controls alone; it and the playbar go together after two seconds without the pointer moving, come back as it moves or a tap lands, and stay while its settings are open", async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
+  try {
+    const played: string[] = [];
+    const routine = { clips: [{ id: 'spin' }], clock: createAnimationClock(), onRelease() {}, onPlayToggle: () => played.push('toggle') };
+    frame({ notice: <p>Host notice</p>, data: { previewAnimation: routine } });
+    const wait = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    await wait(100);
+    expect(inPreview()).toBe(true);
+    // The bar and the playbar, hidden or shown: always together.
+    const playbar = () => document.querySelector<HTMLElement>('[data-preview-playbar]')!;
+    const hidden = () => {
+      const both = [previewBar()!.getAttribute('data-state') === 'hidden', playbar().getAttribute('data-state') === 'hidden'];
+      expect(both[0]).toBe(both[1]);
+      return both[0];
+    };
+    // The name as words, and the two controls: nothing else in it, and the host's notice is the tools view's.
+    expect([previewBar()!.querySelector('[data-preview-name]')!.textContent, cornerButtons(), previewBar()!.querySelectorAll('a, input, [role=menu]').length])
+      .toEqual(['panel.harness', ['Preview settings', 'Exit preview'], 0]);
+    expect(screen.getByText('Host notice').closest('[data-preview-chrome]')!.hasAttribute('hidden')).toBe(true);
+    expect(hidden()).toBe(false);
+    // Two seconds counted from the frame that shows it (16 ms frames here), so a long frame is never idle time.
+    await wait(1900);
+    expect(hidden()).toBe(false);
+    await wait(200);
+    expect(hidden()).toBe(true);
+    expect([previewBar()!.className, playbar().className]).toEqual([expect.stringMatching(/\bopacity-0\b/), expect.stringMatching(/\bopacity-0\b/)]);
+    // Hidden, the playbar's routine is as it was: nothing played or stopped it.
+    expect(played).toEqual([]);
+    // The pointer moving anywhere over the view brings it back, and the count starts again.
+    const view = document.querySelector('[data-slot="cad-file-view"]')!;
+    fireEvent.pointerMove(view);
+    expect(hidden()).toBe(false);
+    await wait(2100);
+    expect(hidden()).toBe(true);
+    // A tap on the view, on a touch screen, brings it back too.
+    fireEvent.pointerDown(view, { pointerType: 'touch' });
+    expect(hidden()).toBe(false);
+    // Its settings open, it stays for as long as they are.
+    fireEvent.click(within(previewBar()!).getByRole('button', { name: 'Preview settings' }));
+    expect(previewSettings()).not.toBeNull();
+    await wait(5000);
+    expect(hidden()).toBe(false);
+    fireEvent.click(within(previewBar()!).getByRole('button', { name: 'Preview settings' }));
+    await wait(2100);
+    expect(hidden()).toBe(true);
+    // The focus a press leaves on one of its controls does not hold it (jsdom's focus is no keyboard's) ...
+    act(() => { within(previewBar()!).getByRole('button', { name: 'Exit preview' }).focus(); });
+    await wait(2100);
+    expect(hidden()).toBe(true);
+    act(() => { within(previewBar()!).getByRole('button', { name: 'Exit preview' }).blur(); });
+    // ... the keyboard's does: it brings it back, the playbar's as well as the bar's.
+    const matches = Element.prototype.matches;
+    override(Element.prototype, 'matches', { value(this: Element, selector: string) { return selector === ':focus-visible' ? this === document.activeElement : matches.call(this, selector); } });
+    act(() => { within(previewBar()!).getByRole('button', { name: 'Exit preview' }).focus(); });
+    expect(hidden()).toBe(false);
+    await wait(5000);
+    expect(hidden()).toBe(false);
+    act(() => { within(previewBar()!).getByRole('button', { name: 'Exit preview' }).blur(); });
+    await wait(2100);
+    expect(hidden()).toBe(true);
+    act(() => { within(playbar()).getByRole('button', { name: /^Play / }).focus(); });
+    expect(hidden()).toBe(false);
+    // The pointer resting on the playbar holds both.
+    fireEvent.pointerOver(playbar());
+    await wait(5000);
+    expect(hidden()).toBe(false);
+    fireEvent.click(within(previewBar()!).getByRole('button', { name: 'Exit preview' }));
+    expect([inPreview(), previewBar()]).toEqual([false, null]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("Preview settings is pressed while its panel is open and a second press closes it; the panel slides in and out from the view's right edge as the file sidebar's does", async () => {
+  const user = userEvent.setup({ skipHover: true });
+  frame();
+  await enterPreview(user);
+  const button = () => within(previewBar()!).getByRole('button', { name: 'Preview settings' });
+  const panel = () => document.querySelector<HTMLElement>('[data-preview-panel]')!;
+  // Closed: off the edge, out of reach and out of the accessibility tree; the button not pressed.
+  expect([button().getAttribute('aria-pressed'), previewSettings(), panel().hasAttribute('inert'), panel().className]).toEqual(
+    ['false', null, true, expect.stringContaining('translate-x-[calc(100%+1rem)]')]);
+  // The file sidebar's own slide, on both.
+  expect([panel().className, bar().className]).toEqual([expect.stringContaining(SIDEBAR_SLIDE_CLASS), expect.stringContaining(SIDEBAR_SLIDE_CLASS)]);
+  await user.click(button());
+  expect([button().getAttribute('aria-pressed'), previewSettings() !== null, panel().hasAttribute('data-open')]).toEqual(['true', true, true]);
+  expect(panel().className).not.toContain('translate-x-[calc(100%+1rem)]');
+  await user.click(button());
+  expect([button().getAttribute('aria-pressed'), previewSettings(), panel().hasAttribute('data-open')]).toEqual(['false', null, false]);
+  // Its own X closes it too, and the button is no longer pressed.
+  await user.click(button());
+  await user.click(within(previewSettings()!).getByRole('button', { name: 'Close preview settings' }));
+  expect([button().getAttribute('aria-pressed'), previewSettings()]).toEqual(['false', null]);
+  // Left open, Preview's exit takes it away; back in Preview it is closed.
+  await user.click(button());
+  await user.click(within(previewBar()!).getByRole('button', { name: 'Exit preview' }));
+  await enterPreview(user);
+  expect([button().getAttribute('aria-pressed'), previewSettings()]).toEqual(['false', null]);
+});
+
+it("under a FileViewer the navbar steps aside for Preview's bar, and is back as Preview closes", async () => {
+  const user = userEvent.setup({ skipHover: true });
+  const host = testHost({ links: viewerLinks({ version: '0.7.5' }), environment: { colorScheme: 'light', platform: 'darwin' },
+    files: { id: 'one', stat: async (path: string) => ({ path, name: path.split('/').pop()!, kind: 'file', extension: 'harness', size: 1 }) } });
+  render(<FileViewer file="/models/one.harness" host={host as any} renderers={[createHarnessRenderer({ preferences: tabSettings() })]}
+    state={{}} onStateChange={() => {}} />);
+  await screen.findByRole('button', { name: 'Preview' });
+  const navbar = () => document.querySelector('[data-viewer-navbar]');
+  expect([navbar() !== null, previewBar()]).toEqual([true, null]);
+  await enterPreview(user);
+  expect([navbar(), previewBar()!.querySelector('[data-preview-name]')!.textContent]).toEqual([null, 'one.harness']);
+  await user.click(within(previewBar()!).getByRole('button', { name: 'Exit preview' }));
+  expect([navbar() !== null, previewBar()]).toEqual([true, null]);
+});
+
 // Preview's Orbit, in its settings: off at every entry, its speed a row of Orbit's there while it is on.
 function previewOrbit(user: ReturnType<typeof userEvent.setup>) {
   const orbit = () => within(previewSettings()!).getByRole('checkbox', { name: 'Orbit' });
@@ -571,10 +697,11 @@ function previewOrbit(user: ReturnType<typeof userEvent.setup>) {
   };
 }
 
-it("Preview opens still: Orbit, in its settings, turns the camera, and a speed chosen is kept between visits", async () => {
-  const user = userEvent.setup();
+it("Preview opens still: Orbit, in its settings, turns the camera, and a speed chosen is the file's view's, never Orbit on or off, kept between visits", async () => {
+  const user = userEvent.setup({ skipHover: true });
   const { orbit, enter, speedOnceOn, choose } = previewOrbit(user);
-  frame();
+  const states: any[] = [];
+  const view = frame({ onStateChange: state => states.push(state) });
   await enter();
   expect([orbit().getAttribute('aria-checked'), previewProps.current.orbit, within(previewSettings()!).queryByRole('combobox', { name: 'Orbit speed' })]).toEqual(['false', false, null]);
   await user.click(orbit());
@@ -585,33 +712,22 @@ it("Preview opens still: Orbit, in its settings, turns the camera, and a speed c
   expect(previewProps.current.orbitSpeed).toBe(2);
   // Leaving and coming back: still again, at 2×.
   await user.click(screen.getByRole('button', { name: 'Exit preview' }));
-  await enter();
-  expect([orbit().getAttribute('aria-checked'), previewProps.current.orbit, await speedOnceOn()]).toEqual(['false', false, '2×']);
+  await enterPreview(user);
+  expect([previewProps.current.orbit, previewProps.current.orbitSpeed]).toEqual([false, 2]);
+  // The file's view holds the speed, and no Orbit on or off.
+  view.unmount();
+  expect(states.at(-1).playback).toEqual({ orbitSpeed: 2, autoplay: false });
 });
 
-it("Orbit's speed is the file's: its view holds it and no Orbit on or off, it comes back with the view, and another file is at the default", async () => {
-  const user = userEvent.setup();
-  const { enter, speedOnceOn, choose } = previewOrbit(user);
-  const states: any[] = [];
-  const first = frame({ onStateChange: state => states.push(state) });
-  await enter();
-  await speedOnceOn();
-  await choose('2×');
-  first.unmount();
-  const saved = states.at(-1);
-  expect(saved.playback).toEqual({ orbitSpeed: 2, autoplay: false });
-  // Reopened from that view: 2×. Another file: 1×.
-  const reopened = frame({ state: saved });
-  await enter();
-  expect(await speedOnceOn()).toBe('2×');
-  reopened.unmount();
-  frame({ name: 'other.harness' });
-  await enter();
-  expect(await speedOnceOn()).toBe('1×');
+it("Orbit's speed comes back with the file's view", async () => {
+  const user = userEvent.setup({ skipHover: true });
+  frame({ state: writeFileView({ playback: { orbitSpeed: 2 } }) });
+  await enterPreview(user);
+  expect([previewProps.current.orbit, previewProps.current.orbitSpeed]).toEqual([false, 2]);
 });
 
 it('Escape puts the tool in hand down and takes Select up, what it set kept', async () => {
-  const user = userEvent.setup();
+  const user = userEvent.setup({ skipHover: true });
   frame({ viewer: true });
   await user.click(tool('Pencil'));
   expect(tool('Pencil').getAttribute('aria-pressed')).toBe('true');
@@ -628,4 +744,30 @@ it('Escape closes the Display menu and gives its tile the focus back, the tool i
   await waitFor(() => expect([displayMenu(), displayLit()]).toEqual([null, false]));
   await waitFor(() => expect(document.activeElement).toBe(displayButton()));
   expect(tool('Select').getAttribute('aria-pressed')).toBe('true');
+});
+
+it("what a person uses is counted for the host by name: a tool taken up and how long it was up, Display's Grid, Preview and its seconds, never the tool the file opened in or its return from Preview", async () => {
+  let now = 5_000_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const reports: { control: string; count: number; seconds: number }[][] = [];
+  const user = userEvent.setup({ skipHover: true });
+  const view = frame({ usage: counts => reports.push(counts) });
+  fireEvent.click(tool('Pencil'));
+  now += 5_000;
+  fireEvent.click(tool('Select'));
+  await openDisplay(user);
+  await user.click(within(displayMenu()!).getByRole('menuitemcheckbox', { name: 'Grid' }));
+  await enterPreview(user);
+  // Preview's bar: its settings opened (a use, no seconds), then its way out.
+  await user.click(within(previewBar()!).getByRole('button', { name: 'Preview settings', exact: true }));
+  now += 3_000;
+  await user.click(screen.getByRole('button', { name: 'Exit preview' }));
+  expect(reports).toEqual([]); // said at most every minute, or as the view goes
+  view.unmount();
+  const said = Object.fromEntries(reports.flat().map(({ control, ...counts }) => [control, counts]));
+  expect(said).toEqual({ pencil: { count: 1, seconds: 5 }, display_grid: { count: 1, seconds: 0 }, preview: { count: 1, seconds: 3 },
+    preview_settings: { count: 1, seconds: 0 },
+    // Select is counted once: the person took it up again; the file opened in it, and Preview gave it back.
+    select: { count: 1, seconds: 0 } });
+  vi.restoreAllMocks();
 });

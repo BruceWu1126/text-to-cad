@@ -1,6 +1,6 @@
 # File renderers
 
-The viewer renderers, `cad` (STEP), `dxf`, `glb`, `mesh` (STL, 3MF) and `robot` (URDF, SRDF, SDF), and
+The viewer renderers, `xbf` (an `.xbf`, STEP, STP), `dxf`, `glb`, `mesh` (STL, 3MF) and `robot` (URDF, SRDF, SDF), and
 the kit and shell they are built on are in [CAD renderer](cad-renderer.md). They are
 this package's renderers because every host registers them.
 
@@ -17,8 +17,8 @@ what a host renderer may rely on:
   Every resource a renderer acquires carries a release; it returns that as the
   prepared document's `dispose`, and FileViewer releases it when the request is
   cancelled, the file changes, or the view unmounts.
-- The host ports in `@text-to-cad/ui/host`: `useViewerHost`, and `PromptContextAction`
-  for prompt delivery.
+- The host ports in `@text-to-cad/ui/host`: `useViewerHost`, and `usePromptDestination`
+  for the prompt destination a renderer's prompt actions deliver to.
 - Shared chrome from `@text-to-cad/ui/navigation` (`EmptyState`),
   `@text-to-cad/ui/primitives/*` and `@text-to-cad/ui/utils`, styled by this
   package's `styles.css` and the host's own Tailwind build.

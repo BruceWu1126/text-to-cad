@@ -31,9 +31,9 @@ class Registry(unittest.TestCase):
 
     def test_the_viewer_verbs_are_registered_and_lazy(self):
         # The CAD Viewer's backend is cadgen.viewer, reached through the front
-        # door as one serve verb plus its stop verb. Registered by dotted module
+        # door as a launcher for the shared engine. Registered by dotted module
         # name like everything else, so `cadgen --help` imports none of it.
-        for name in ("viewer", "viewer stop"):
+        for name in ("viewer",):
             self.assertIn(name, cli._COMMANDS)
             module_name, _ = cli._COMMANDS[name]
             self.assertTrue(module_name.startswith("cadgen.cli.viewer"), module_name)
@@ -62,9 +62,31 @@ class Dispatch(unittest.TestCase):
     def test_version_flag_reports_the_distribution_version(self):
         from cadgen import __version__
 
-        code, out, _ = self._run(["--version"])
+        from unittest import mock
+
+        from cadgen._internal import installations
+
+        with mock.patch.dict("os.environ", {installations.NAME_ENV: ""}), \
+                mock.patch.object(installations, "editable", return_value=False):
+            code, out, _ = self._run(["--version"])
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), f"cadgen {__version__}")
+
+    def test_version_flag_names_a_development_installation_by_its_own_version(self):
+        # Two installations are told apart: a dev install says its stamped name, as doctor's header does.
+        from unittest import mock
+
+        from cadgen._internal import installations
+
+        with mock.patch.dict("os.environ", {installations.NAME_ENV: "0.8.0-dev.20261025032350"}):
+            code, out, _ = self._run(["--version"])
+        self.assertEqual((code, out.strip()), (0, "cadgen 0.8.0-dev.20261025032350"))
+
+    def test_status_names_the_engine_s_installation(self):
+        from cadgen.engine.cli import status_text
+
+        text = status_text({"pid": 7, "up": 5, "workers": [], "installation": "0.8.0-dev.20261025032350"})
+        self.assertTrue(text.startswith("engine server 7 (cadgen 0.8.0-dev.20261025032350), up "), text)
 
     def test_unknown_command_exits_two_and_names_it_on_stderr(self):
         code, _, err = self._run(["nope"])
@@ -85,7 +107,7 @@ class Dispatch(unittest.TestCase):
         original = cli.importlib.import_module
         cli.importlib.import_module = lambda name: FakeModule
         self.addCleanup(setattr, cli.importlib, "import_module", original)
-        code, _, _ = self._run(["snapshot", "--port", "3245", "--", "-x"])
+        code, _, _ = self._run(["doctor", "--port", "3245", "--", "-x"])
         self.assertEqual(code, 7)
         self.assertEqual(seen["argv"], ["--port", "3245", "--", "-x"])
 

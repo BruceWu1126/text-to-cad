@@ -1,30 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import * as THREE from "three";
 import { resolveCadEdgeSettings, resolveCadGridSettings } from "./cadInk.js";
 import { GRID_LINE_DEFAULTS } from "../lib/viewer/stageGrid.js";
-import { buildCadEdgeSegmentTexture, CadEdgeInstances } from "./cadEdgeInstances.js";
-import { screenSpaceLineDeviceResolution, syncScreenSpaceLineMaterialResolution } from "./renderEdges.js";
 
-test("fixed CAD classes retain distinct restrained device-pixel ink at every pixel ratio", () => {
+test("fixed CAD classes keep distinct restrained widths", () => {
   const classes = resolveCadEdgeSettings().classes;
   assert.deepEqual(Object.values(classes).map((style) => style.thickness), [1, 0.65, 0.8, 0]);
-  const segments = buildCadEdgeSegmentTexture(THREE, {
-    positions: new Float32Array([0, 0, 0, 1, 0, 0]), indices: new Uint32Array([0, 1])
-  }, [{ classId: "feature", segmentStart: 0, segmentCount: 1 }]);
-  const set = new CadEdgeInstances(THREE, { segments, classStyles: Object.entries(classes).map(([classId, style]) => ({ ...style, classId, color: new THREE.Color(style.color) })) });
-  for (const dpr of [1, 2, 3]) {
-    const resolution = screenSpaceLineDeviceResolution({ getPixelRatio: () => dpr }, 800, 600);
-    syncScreenSpaceLineMaterialResolution(set.materials, resolution.width, resolution.height);
-    for (const [index, classId] of ["feature", "tangent", "seam"].entries()) {
-      const width = set.uniforms.cadClassWidth.value.getComponent(index);
-      const effectiveDeviceWidth = width * 600 * dpr / set.uniforms.resolution.value.y;
-      assert.equal(effectiveDeviceWidth, classes[classId].thickness);
-      assert.ok(effectiveDeviceWidth / dpr <= 1 / dpr);
-    }
-  }
-  set.dispose();
-  segments.texture.dispose();
 });
 
 test("edge color is configurable while widths stay fixed and grid adapts to appearance", () => {

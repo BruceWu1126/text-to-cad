@@ -76,11 +76,11 @@ test("grouped View passes independent surface and edge choices through to the re
   }
 });
 
-// The snapshot CLI dresses a GLB, a mesh or a robot with the look the viewport would put on
+// The parity page dresses a GLB, a mesh or a robot with the look the viewport would put on
 // it (`headlessSceneDress`, from the job's resolved scene settings). The viewport resolves its
 // look from the same settings AFTER normalizing them here, so this pins that the two routes to
 // `resolveSceneSurfaceLook` land on one look for every preset, appearance and surface choice.
-test("the viewport and the snapshot CLI resolve one surface look from one setting", async () => {
+test("the viewport and the parity page resolve one surface look from one setting", async () => {
   const { resolveSceneSurfaceLook, resolveViewSceneSettings } = await import('@text-to-cad/core/common/sceneSettings.js');
   const { headlessSceneDress } = await import('@text-to-cad/core/common/headlessScene.js');
   const { EDGELESS_VIEW_FEATURES } = await import('@text-to-cad/core/common/viewSettings.js');

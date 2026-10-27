@@ -81,7 +81,7 @@ export function clampToolPanelHeight(height, stackHeight) {
 }
 
 /**
- * The cap a resizable panel opens with where a person has set none, on desktop and phone alike:
+ * The cap a resizable panel opens with where a person has set none, on a wide view and a phone alike:
  * the stack's own height. So it is as tall as its content needs, up to all the room under the
  * strip, and scrolls inside past that; with others open beside it, the panels share that room by
  * how each gives way (`ToolPanel.jsx`'s `fit`). None until the stack is measured.
