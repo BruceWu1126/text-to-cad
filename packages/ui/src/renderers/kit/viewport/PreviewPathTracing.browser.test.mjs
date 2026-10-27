@@ -59,7 +59,34 @@ window.previewTest = {
   move: () => { moving=true; repeat.position.x=2; controller.invalidate({sceneChanged:true}); draw(); },
   orbit: () => { camera.position.set(6,-6,5); camera.lookAt(0,0.6,0.4); camera.updateMatrixWorld(); controller.invalidate({sceneChanged:false}); draw(); },
   stop: () => { moving=false; requestRender(); },
-  transparent: () => { scene.background=null; renderer.setClearAlpha(0); floor.material.opacity=0.6; floor.material.transparent=true; runtime.photographicStudio.floorFade={value:0.8}; controller.invalidate({sceneChanged:true}); requestRender(); },
+  transparent: () => { camera.position.set(0,-3,18); camera.lookAt(0,0,0); camera.updateMatrixWorld(); scene.background=null; renderer.setClearAlpha(0); floor.scale.setScalar(0.5); floor.material.opacity=0.6; floor.material.transparent=true; runtime.photographicStudio.floorFade={value:0.8}; controller.invalidate({sceneChanged:true}); requestRender(); },
+  emptyPatch: () => {
+    const ray = new THREE.Raycaster();
+    scene.updateMatrixWorld(true);
+    for (let y=0; y<176; y+=8) for (let x=0; x<240; x+=8) {
+      let empty=true;
+      for (const dy of [0,4,8,12,16]) for (const dx of [0,4,8,12,16]) {
+        ray.setFromCamera(new THREE.Vector2((x+dx)/128-1, 1-(y+dy)/96), camera);
+        if (ray.intersectObject(floor).length || ray.intersectObject(modelGroup,true).length) empty=false;
+      }
+      if (empty) return {x,y,size:16};
+    }
+    return null;
+  },
+  fadedFloorPatch: () => {
+    const ray = new THREE.Raycaster();
+    scene.updateMatrixWorld(true);
+    for (let y=0; y<184; y+=4) for (let x=0; x<248; x+=4) {
+      let empty=true;
+      for (const dy of [0,4,8]) for (const dx of [0,4,8]) {
+        ray.setFromCamera(new THREE.Vector2((x+dx)/128-1, 1-(y+dy)/96), camera);
+        const hit=ray.intersectObject(floor)[0];
+        if (!hit || Math.hypot(hit.uv.x*2-1,hit.uv.y*2-1)<1.08 || ray.intersectObject(modelGroup,true).length) empty=false;
+      }
+      if (empty) return {x,y,size:8};
+    }
+    return null;
+  },
   floorPatch: () => {
     // Find an unobstructed patch inside the floor's constant-opacity region.
     const ray = new THREE.Raycaster();
@@ -293,6 +320,16 @@ test('hardware Preview converges on authored parts, resets for motion and releas
     if (transparentImage.data[i] > 200) covered++;
   }
   assert.ok(clear > 100 && covered > 100, `transparent background and model coverage survive denoising: ${JSON.stringify({clear, covered})}`);
+  const empty = await page.evaluate(() => window.previewTest.emptyPatch());
+  assert.ok(empty, 'fixture provides a clear background patch');
+  for (let y=empty.y; y<empty.y+empty.size; y++) for (let x=empty.x; x<empty.x+empty.size; x++) {
+    assert.equal(transparentImage.data[(y*transparentImage.width+x)*4+3], 0, 'empty background remains exactly transparent after denoising');
+  }
+  const faded = await page.evaluate(() => window.previewTest.fadedFloorPatch());
+  assert.ok(faded, 'fixture provides a fully faded floor patch');
+  for (let y=faded.y; y<faded.y+faded.size; y++) for (let x=faded.x; x<faded.x+faded.size; x++) {
+    assert.equal(transparentImage.data[(y*transparentImage.width+x)*4+3], 0, 'fully faded floor remains exactly transparent');
+  }
   const patch = await page.evaluate(() => window.previewTest.floorPatch());
   assert.ok(patch, 'fixture provides an unobstructed constant-opacity floor patch');
   const alpha = [];

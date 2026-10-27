@@ -1,5 +1,5 @@
 import { OIDNDenoiser } from 'three-gpu-pathtracer/webgpu';
-import { ExternalTexture, NearestFilter, NoToneMapping, RenderTarget, UnsignedByteType } from 'three/webgpu';
+import { Color, ExternalTexture, NearestFilter, NoToneMapping, RenderTarget, UnsignedByteType } from 'three/webgpu';
 import { diffuseColor, mrt, normalView, vec4 } from 'three/tsl';
 import { createPreviewGuideScene } from './previewGuides.js';
 
@@ -104,7 +104,7 @@ export class PreviewDenoiser extends OIDNDenoiser {
           if (id !== this._requestId || !this._running) return;
           try {
             this.timings.alphaMs = performance.now() - passStart;
-            this._copyOutputToTexture(rgb, alpha, width, height);
+            this._copyOutputToTexture(rgb, alpha, aux, width, height);
             this._abort = null;
             this._running = false;
             this._complete = true;
@@ -163,8 +163,10 @@ export class PreviewDenoiser extends OIDNDenoiser {
     target.setSize(width, height);
     const renderer = this.renderer;
     const originalTarget = renderer.getRenderTarget(), originalMRT = renderer.getMRT(), originalToneMapping = renderer.toneMapping;
+    const originalClearColor = renderer.getClearColor(new Color()).clone(), originalClearAlpha = renderer.getClearAlpha();
     try {
       renderer.toneMapping = NoToneMapping;
+      renderer.setClearColor(0x000000, 0);
       renderer.setRenderTarget(target);
       renderer.setMRT(this.guideMRT);
       this.guideScene ||= createPreviewGuideScene(this.scene);
@@ -173,6 +175,7 @@ export class PreviewDenoiser extends OIDNDenoiser {
     } finally {
       renderer.setMRT(originalMRT);
       renderer.setRenderTarget(originalTarget);
+      renderer.setClearColor(originalClearColor, originalClearAlpha);
       renderer.toneMapping = originalToneMapping;
     }
     return target;
@@ -193,19 +196,24 @@ export class PreviewDenoiser extends OIDNDenoiser {
   }
 
   // Combine two independently denoised outputs into a sampleable HDR texture.
-  _copyOutputToTexture(output, alpha, width, height) {
+  _copyOutputToTexture(output, alpha, aux, width, height) {
     const device = this.renderer.backend.device;
     if (!this._resultPipeline) {
       const module = device.createShaderModule({ code: /* wgsl */`
         @group(0) @binding(0) var<storage, read> filtered: array<vec4f>;
         @group(0) @binding(1) var<storage, read> filteredAlpha: array<vec4f>;
         @group(0) @binding(2) var destination: texture_storage_2d<rgba16float, write>;
+        @group(0) @binding(3) var traced: texture_2d<f32>;
+        @group(0) @binding(4) var guide: texture_2d<f32>;
         @compute @workgroup_size(8, 8)
         fn main(@builtin(global_invocation_id) p: vec3u) {
           let size = textureDimensions(destination);
           if (p.x >= size.x || p.y >= size.y) { return; }
           let rgb = filtered[p.y * size.x + p.x].rgb;
-          let coverage = clamp(filteredAlpha[p.y * size.x + p.x].a, 0.0, 1.0);
+          // OIDN can invent a border matte in empty space. Preserve exact empty
+          // coverage only when both the trace and raster guide see no surface.
+          let empty = textureLoad(traced, p.xy, 0).a == 0.0 && textureLoad(guide, p.xy, 0).a == 0.0;
+          let coverage = select(clamp(filteredAlpha[p.y * size.x + p.x].a, 0.0, 1.0), 0.0, empty);
           textureStore(destination, p.xy, vec4f(rgb, coverage));
         }
       ` });
@@ -223,6 +231,8 @@ export class PreviewDenoiser extends OIDNDenoiser {
       { binding: 0, resource: { buffer: output.data } },
       { binding: 1, resource: { buffer: alpha.data } },
       { binding: 2, resource: this._rawTexture.createView() },
+      { binding: 3, resource: this.renderer.backend.get(this.source).texture.createView() },
+      { binding: 4, resource: this.renderer.backend.get(aux.textures[0]).texture.createView() },
     ] });
     const encoder = device.createCommandEncoder();
     const pass = encoder.beginComputePass();
