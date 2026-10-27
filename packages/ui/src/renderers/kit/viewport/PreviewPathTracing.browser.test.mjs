@@ -58,6 +58,7 @@ window.previewTest = {
   move: () => { moving=true; repeat.position.x=2; controller.invalidate({sceneChanged:true}); draw(); },
   orbit: () => { camera.position.set(6,-6,5); camera.lookAt(0,0.6,0.4); camera.updateMatrixWorld(); controller.invalidate({sceneChanged:false}); draw(); },
   stop: () => { moving=false; requestRender(); },
+  transparent: () => { scene.background=null; renderer.setClearAlpha(0); floor.visible=false; controller.invalidate({sceneChanged:true}); requestRender(); },
   dispose: () => { controller.dispose(); },
   source: () => ({ sameGeometry: painted.geometry===repeat.geometry, material: red.color.getHexString(), boundsTree: !!box.boundsTree }),
   canvases: () => host.querySelectorAll('canvas').length,
@@ -77,6 +78,7 @@ before(async () => {
   const { bundle: uiBundle } = await harnessBundle();
   const css = await readFile(`${root}/packages/ui/dist/styles.css`);
   const glb = await readFile(`${root}/packages/core/src/lib/render/fixtures/pair.glb`);
+  const weights = await readFile(`${root}/packages/core/src/lib/preview-tracing/weights/rt_hdr_calb_cnrm.tza`);
   const uiWorkers = new Map();
   for (const relative of ['packages/core/src/lib/render/glbMeshWorker.js', 'packages/core/src/lib/viewer/raycastBvhWorker.js', 'packages/ui/src/renderers/kit/look/studioEnvironment.worker.js']) {
     const output = await build({ entryPoints: [`${root}/${relative}`], bundle: true, write: false, format: 'esm', platform: 'browser' });
@@ -92,6 +94,7 @@ before(async () => {
     else if (name === 'styles.css') { response.setHeader('Content-Type', 'text/css'); response.end(css); }
     else if (name === 'catalog') { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ entries: [{ kind: 'glb', file: '/models/pair.glb', url: '/pair.glb', hash: 'painted-pair', bytes: glb.length }] })); }
     else if (name === 'server') { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ backend: 'cadgen' })); }
+    else if (name === 'rt_hdr_calb_cnrm.tza') { response.setHeader('Content-Type', 'application/octet-stream'); response.end(weights); }
     else if (name === 'pair.glb') { response.setHeader('Content-Type', 'model/gltf-binary'); response.end(glb); }
     else if (url.pathname === '/ui/') { response.setHeader('Content-Type', 'text/html'); response.end('<!doctype html><link rel="stylesheet" href="/styles.css"><style>#root>div{width:1000px!important;height:700px!important}</style><div id="root"></div><script type="module" src="/ui-harness.js"></script>'); }
     else { response.setHeader('Content-Type', 'text/html'); response.end('<!doctype html><style>body{margin:0}#view{position:relative;width:256px;height:192px}</style><div id="view"></div><script type="module" src="/fixture.js"></script>'); }
@@ -141,13 +144,13 @@ test('the real Preview viewport traces, captures and restores the editor on exit
     new PerformanceObserver(list => window.previewTimings.longTasks.push(...list.getEntries().map(e => e.duration))).observe({type:'longtask'});
     const measure = () => {
       const p = window.__cadStage()?.pathTracing;
-      if (p?.sample > 0 && !window.previewTimings.first) window.previewTimings.first = performance.now() - window.previewTimings.start;
-      if (p?.sample >= p?.samples && p?.sample > 0) window.previewTimings.converged = performance.now() - window.previewTimings.start;
+      if (p?.denoisedSamples > 0 && !window.previewTimings.first) window.previewTimings.first = performance.now() - window.previewTimings.start;
+      if (p?.denoisedSamples >= p?.samples && p?.denoisedSamples > 0) window.previewTimings.converged = performance.now() - window.previewTimings.start;
       else requestAnimationFrame(measure);
     }; requestAnimationFrame(measure);
   });
   await pane.getByRole('button', { name: 'Preview', exact: true }).click();
-  await page.waitForFunction(() => { const p = window.__cadStage()?.pathTracing; return p?.state === 'fallback' || (p?.sample > 0 && p.sample >= p.samples); }, null, { timeout: 60000 })
+  await page.waitForFunction(() => { const p = window.__cadStage()?.pathTracing; return p?.state === 'fallback' || (p?.denoisedSamples > 0 && p.denoisedSamples >= p.samples); }, null, { timeout: 120000 })
     .catch(async error => { throw new Error(`${error.message}; stage=${JSON.stringify(await page.evaluate(() => window.__cadStage()))}`); });
   const progress = await page.evaluate(() => window.__cadStage().pathTracing);
   assert.notEqual(progress.state, 'fallback', JSON.stringify(progress));
@@ -182,7 +185,7 @@ test('the real Preview viewport traces, captures and restores the editor on exit
   await page.getByRole('option', {name: 'Final', exact:true}).click();
   t.diagnostic(`Quality applied ${JSON.stringify(await page.evaluate(() => ({stage:window.__cadStage(), record:window.cadHarness.state})))}`);
   await pressInPreview(page, pane, pane.getByRole('button', { name: 'Preview settings', exact: true }));
-  await page.waitForFunction(previousBudget => { const p = window.__cadStage()?.pathTracing; return p?.samples > previousBudget && p.sample >= p.samples; }, progress.samples, {timeout: 90000})
+  await page.waitForFunction(previousBudget => { const p = window.__cadStage()?.pathTracing; return p?.samples > previousBudget && p.denoisedSamples >= p.samples; }, progress.samples, {timeout: 180000})
     .catch(async error => { throw new Error(`${error.message}; ${JSON.stringify(await page.evaluate(() => ({stage:window.__cadStage(),record:window.cadHarness.state, body:document.body.innerText})))}`); });
   t.diagnostic(`Final quality ${JSON.stringify(await page.evaluate(start => ({elapsed:performance.now()-start, progress:window.__cadStage().pathTracing}), finalStart))}`);
   if (artifacts) await page.screenshot({path:join(artifacts, 'preview-ui-final.png')});
@@ -206,7 +209,7 @@ test('hardware Preview converges on authored parts, resets for motion and releas
   if (!adapter || adapter.fallback) return t.skip('A hardware WebGPU adapter is unavailable; the raster fallback is tested separately.');
   t.diagnostic(`WebGPU ${JSON.stringify(adapter)}`);
   await page.evaluate(() => window.previewTest.start());
-  await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.state === 'fallback' || (p.sample > 0 && p.sample >= p.samples); }, null, { timeout: 15000 })
+  await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.state === 'fallback' || (p.denoisedSamples > 0 && p.denoisedSamples >= p.samples); }, null, { timeout: 90000 })
     .catch(async error => { throw new Error(`${error.message}; ${JSON.stringify(await page.evaluate(() => window.previewTest.progress()))}; ${logs.join('\n')}`); });
   const progress = await page.evaluate(() => window.previewTest.progress());
   if (progress.state === 'fallback') t.diagnostic(logs.join('\n'));
@@ -231,17 +234,28 @@ test('hardware Preview converges on authored parts, resets for motion and releas
   assert.deepEqual(await page.evaluate(() => window.previewTest.source()), { sameGeometry: true, material: 'd22822', boundsTree: false }, 'tracing leaves shared source geometry and authored materials untouched');
   await page.evaluate(() => window.previewTest.orbit());
   assert.equal(await page.evaluate(() => window.previewTest.capture()), null, 'a new camera immediately hides the old accumulated picture');
-  await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.sample > 0 && p.sample >= p.samples && window.previewTest.capture() !== null; }, null, { timeout: 60000 });
+  await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.denoisedSamples > 0 && window.previewTest.capture() !== null; }, null, { timeout: 120000 });
   await page.evaluate(() => window.previewTest.move());
   assert.equal(await page.evaluate(() => window.previewTest.capture()), null, 'motion exposes the immediate raster frame');
   await page.evaluate(() => window.previewTest.stop());
-  await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.sample > 0 && p.sample >= p.samples; }, null, { timeout: 60000 });
+  await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.denoisedSamples > 0; }, null, { timeout: 120000 });
+  // A denoised image must keep the tracer's transparent background coverage.
+  await page.evaluate(() => window.previewTest.transparent());
+  await page.waitForFunction(() => window.previewTest.progress().denoisedSamples > 0 && window.previewTest.capture() !== null, null, { timeout: 120000 });
+  const transparentEncoded = await page.evaluate(() => window.previewTest.capture());
+  const transparentImage = PNG.sync.read(Buffer.from(transparentEncoded.split(',')[1], 'base64'));
+  let clear = 0, covered = 0;
+  for (let i = 3; i < transparentImage.data.length; i += 4) {
+    if (transparentImage.data[i] < 5) clear++;
+    if (transparentImage.data[i] > 200) covered++;
+  }
+  assert.ok(clear > 100 && covered > 100, `transparent background and model coverage survive denoising: ${JSON.stringify({clear, covered})}`);
   for (let visit = 0; visit < 2; visit++) {
     await page.evaluate(() => window.previewTest.dispose());
     assert.equal(await page.evaluate(() => window.previewTest.canvases()), 1, 'exit detaches the traced canvas');
     if (visit === 0) {
       await page.evaluate(() => window.previewTest.start());
-      await page.waitForFunction(() => window.previewTest.capture() !== null, null, { timeout: 60000 });
+      await page.waitForFunction(() => window.previewTest.capture() !== null, null, { timeout: 120000 });
     }
   }
   assert.deepEqual(errors, []);

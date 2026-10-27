@@ -115,8 +115,10 @@ draw, as before.
 
 Preview additionally refines a still view with an optional WebGPU path tracer
 (`core/lib/preview-tracing/progressivePreview.js`). The raster studio remains the immediate
-picture and handles all motion. A complete traced sample replaces it, then accumulates to
-32 samples for Preview lighting quality or 64 for Final. Tracing is limited to one million
+picture and handles all motion. A fully denoised image replaces it after 32 traced samples,
+then refines to 128 samples for Preview lighting quality or 256 for Final. Filtering uses
+bundled Open Image Denoise weights and preserves the previous finished image until the
+next one is ready. Tracing is limited to one million
 pixels and bounded scene resources; unsupported geometry/materials or unavailable WebGPU
 retain the raster studio. This introduces no setting and does not change engine snapshots.
 The existing raster convergence timings above do not describe path-tracing convergence.

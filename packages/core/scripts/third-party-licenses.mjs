@@ -13,6 +13,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 export const NOTICE_FILE = 'THIRD_PARTY_LICENSES.txt';
 const LICENSE_FILE = /^(?:licen[cs]e|copying)(?:[.-].*)?$/i;
@@ -46,15 +48,35 @@ function shippedNone(manifest) {
 
 /** Each package the modules come from, once: `{ name, version, license, text }`, sorted by name. */
 export function bundledPackages(moduleIds) {
+  const ids = [...moduleIds];
+  const directories = new Set(ids.map(packageDirOf).filter(Boolean));
+  // oidn-webgpu's Node-compatible dist entry already bundles its float16
+  // dependency, so Rollup cannot report that dependency as a separate module.
+  for (const id of ids) {
+    if (/\/node_modules\/oidn-webgpu\/dist\/oidn\.js(?:\?|$)/.test(String(id).replaceAll('\\', '/'))) {
+      directories.add(packageDirOf(createRequire(String(id).split('?')[0]).resolve('@petamoriken/float16')));
+    }
+  }
   const found = new Map();
-  for (const id of moduleIds) {
-    const dir = packageDirOf(id);
+  for (const dir of directories) {
     if (!dir || found.has(dir)) continue;
     const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
     const file = fs.readdirSync(dir).filter(name => LICENSE_FILE.test(name)).sort()[0];
     found.set(dir, {
       name: manifest.name, version: manifest.version, license: licenseOf(manifest),
       text: file ? fs.readFileSync(path.join(dir, file), 'utf8').trim() : shippedNone(manifest),
+    });
+  }
+  // Vendored inference data is redistributed too. Its loader survives both the
+  // Viewer's asset build and the CAD app's inline-asset build, unlike a .tza
+  // asset entry (which disappears when inlined). Keep its license with either.
+  if (ids.some(id => /\/lib\/preview-tracing\/weights\/index\.js(?:\?|$)/.test(String(id).replaceAll('\\', '/')))) {
+    const license = fileURLToPath(new URL('../src/lib/preview-tracing/weights/LICENSE.txt', import.meta.url));
+    found.set('oidn-weights', {
+      name: 'Intel Open Image Denoise model weights',
+      version: '28883d1769d5930e13cf7f1676dd852bd81ed9e7',
+      license: 'Apache-2.0',
+      text: fs.readFileSync(license, 'utf8').trim(),
     });
   }
   const unique = new Map([...found.values()].map(entry => [`${entry.name}@${entry.version}`, entry]));
@@ -68,7 +90,7 @@ export function bundledPackages(moduleIds) {
 export function noticeText(packages) {
   const rule = '='.repeat(78);
   return [
-    'The JavaScript in this directory is bundled output. It includes these third-party packages,',
+    'The JavaScript and model data in this directory include these third-party packages,',
     'as the build that made it resolved them: each by name, version and licence, then the licence',
     'text it ships.',
     '',

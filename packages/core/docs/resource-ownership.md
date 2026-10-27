@@ -88,8 +88,23 @@ A cache retains complete BVHs across appearance and pose changes, checking attri
 identity, arrays, versions, groups and draw range before reuse and evicting removed sources.
 Material objects and their source textures are borrowed; generated environment, floor
 geometry/material/alpha map, GPU buffers and overlay canvases belong to the tracer.
+Private instance objects are disposed separately from their cached prototype geometry.
+The denoiser's guide scene expands those instances into ordinary meshes over the same
+geometry and material slots, preserving world transforms while sharing shader programs.
+Textured guide materials have private copies with UV-channel/color-space shader keys;
+their textures remain borrowed. Releasing a guide scene disposes its render objects and
+private material copies, never borrowed geometry, source materials or textures.
 
 Cancellation rejects pending worker preparation and terminates its worker. A generation
 token rejects stale async results. Motion hides the trace immediately; scene changes rebuild
 its scene using cached prototypes and the same GPU device. Preview exit disposes the cache,
 worker preparation, tracer and device. Admission or device failure restores the raster view.
+
+The denoiser owns its auxiliary targets, inference weights and intermediate GPU buffers,
+and the current and previous completed output textures. It publishes a result only when
+every tile is complete. Motion, resize, scene changes and disposal cancel in-flight
+inference; a request token rejects late callbacks. A queue fence separates an already
+submitted inference tile from subsequent tracing. Both raw and denoised work stop while
+the document is hidden. The weights are bundled data, never a remote runtime download.
+An unchanged view reuses its guide targets and one MRT identity across refinement passes;
+camera, scene and viewport changes invalidate the guides.

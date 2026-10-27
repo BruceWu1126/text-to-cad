@@ -1,14 +1,96 @@
 import * as THREE from 'three';
 import { SAH } from 'three-mesh-bvh';
 import { GenerateMeshBVHWorker } from 'three-mesh-bvh/worker';
+import { BVHTraversalHelper } from 'three-mesh-bvh/src/core/BVHTraversalHelper.js';
+import { AtlasTexture } from 'three-gpu-pathtracer/src/webgpu/AtlasTexture.js';
 import { createStudioEnvironmentTexture } from '../../common/environmentMap.js';
+import { isSharedGeometry } from '../render/sharedGeometry.js';
 
 // Bound the synchronous top-level build and memory before copying any buffers.
-export const PREVIEW_LIMITS = Object.freeze({ triangles: 750000, vertices: 900000, meshes: 500, groups: 2000, materials: 512, texturePixels: 4194304, textureSide: 2048 });
+export const PREVIEW_LIMITS = Object.freeze({
+  bindingBytes: 256 * 1024 * 1024,
+  sceneBytes: 512 * 1024 * 1024,
+  transforms: 20000,
+  primitives: 100000,
+  texturePixels: 4194304,
+  textureSources: 1024,
+  textureSide: 2048,
+});
+
+const FLOOR_ALPHA_SOURCE_ID = THREE.MathUtils.generateUUID();
+
+const UV_TEXTURES = Object.freeze([
+  'map', 'metalnessMap', 'roughnessMap', 'transmissionMap', 'emissiveMap', 'normalMap',
+  'clearcoatMap', 'clearcoatNormalMap', 'clearcoatRoughnessMap', 'iridescenceMap',
+  'iridescenceThicknessMap', 'specularColorMap', 'specularIntensityMap', 'alphaMap',
+  'sheenColorMap', 'sheenRoughnessMap', 'anisotropyMap',
+]);
+
+function unsupportedSurfaceMapping(material, geometry) {
+  const uv = geometry.getAttribute('uv'), tangent = geometry.getAttribute('tangent');
+  if (material.normalMap && material.normalMapType !== THREE.TangentSpaceNormalMap) return true;
+  if ((material.normalMap || material.clearcoatNormalMap) && (!tangent || !uv)) return true;
+  // The raster derives an oriented tangent from UV derivatives when none was authored;
+  // the tracer cannot reproduce that basis. Untextured CAD's normal-based basis is shared.
+  if (material.anisotropy > 0 && uv && !tangent) return true;
+  return UV_TEXTURES.some(name => {
+    const texture = material[name];
+    if (!texture) return false;
+    const channel = texture.channel;
+    return !Number.isInteger(channel) || channel < 0 || channel > 7
+      || !geometry.getAttribute(channel === 0 ? 'uv' : `uv${channel}`);
+  });
+}
+
+// GLB Preview owns a lightweight wrapper per mesh, while those wrappers share
+// the exact source attributes and index. Canonicalize only such wrappers whose
+// complete topology and attribute identities agree; locally rewritten attributes
+// or groups therefore remain separate private prototypes.
+export function canonicalPreviewGeometries(meshes) {
+  const keys = new Map(), canonical = new Map(), identities = new WeakMap();
+  let next = 1;
+  const id = object => {
+    if (!object) return 0;
+    if (!identities.has(object)) identities.set(object, next++);
+    return identities.get(object);
+  };
+  for (const mesh of meshes) {
+    const geometry = mesh.geometry;
+    if (canonical.has(geometry)) continue;
+    if (!isSharedGeometry(geometry)) { canonical.set(geometry, geometry); continue; }
+    const attributes = Object.entries(geometry.attributes).sort(([a], [b]) => a.localeCompare(b)).map(([name, attr]) => [name, id(attr)]);
+    const morphs = Object.entries(geometry.morphAttributes || {}).sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, list]) => [name, list.map(id)]);
+    const key = JSON.stringify([id(geometry.index), attributes, morphs, geometry.morphTargetsRelative, geometry.groups, geometry.drawRange]);
+    const first = keys.get(key) || geometry;
+    keys.set(key, first);
+    canonical.set(geometry, first);
+  }
+  return canonical;
+}
+
+// The tracer maps BVH root n to material group n. Overlap, unsorted ranges
+// or gaps on a single-material mesh would otherwise change what gets drawn.
+function validMaterialGroups(geometry, material) {
+  const groups = geometry.groups, total = geometry.index?.count ?? geometry.getAttribute('position').count;
+  if (!groups.length) return !Array.isArray(material);
+  let end = 0;
+  for (const group of groups) {
+    if (!Number.isInteger(group.start) || !Number.isInteger(group.count) || group.start < end ||
+        group.start % 3 !== 0 || group.count <= 0 || group.count % 3 !== 0 || group.start + group.count > total) return false;
+    if (Array.isArray(material) && !material[group.materialIndex]) return false;
+    if (!Array.isArray(material) && group.start !== end) return false;
+    end = group.start + group.count;
+  }
+  return Array.isArray(material) || end === total;
+}
 
 export function inspectPreviewScene(root, limits = PREVIEW_LIMITS) {
-  const geometries = new Set(), materials = new Set(), textures = new Set(), meshes = [];
-  let triangles = 0, vertices = 0, groups = 0, texturePixels = 0, reason = null;
+  const geometries = new Set(), materials = new Set(), textures = new Map(), meshes = [];
+  // The studio floor's plane has uv even when the model has none. The tracer
+  // packs the union of channels across the whole scene into every vertex.
+  const uvChannels = new Set(['uv']);
+  let triangles = 0, vertices = 0, groups = 0, texturePixels = 0, cloneBytes = 0, reason = null;
   root.updateMatrixWorld(true);
   root.traverseVisible(object => {
     if (reason) return;
@@ -20,31 +102,140 @@ export function inspectPreviewScene(root, limits = PREVIEW_LIMITS) {
         geometry.drawRange.start !== 0 || Number.isFinite(geometry.drawRange.count)) { reason = 'unsupported geometry'; return; }
     const slots = Array.isArray(object.material) ? object.material : [object.material];
     if (slots.some(material => !material || !(material.isMeshStandardMaterial || material.isMeshPhysicalMaterial) ||
-      material.visible === false || material.clippingPlanes?.length || Object.values(material).some(value => value?.isTexture && (value.isRenderTargetTexture || value.isVideoTexture)) ||
-      (material.normalMap && (!geometry.getAttribute('tangent') || !geometry.getAttribute('uv'))))) { reason = 'unsupported material'; return; }
-    if (slots.length > 1 && (!geometry.groups.length || geometry.groups.some(g => !slots[g.materialIndex]))) { reason = 'invalid material groups'; return; }
+      material.visible === false || material.clippingPlanes?.length || material.displacementMap || material.bumpMap ||
+      Object.values(material).some(value => value?.isTexture && (value.isRenderTargetTexture || value.isVideoTexture)) ||
+      unsupportedSurfaceMapping(material, geometry))) { reason = 'unsupported material'; return; }
+    if (!validMaterialGroups(geometry, object.material)) { reason = 'invalid material groups'; return; }
     slots.forEach(material => {
       materials.add(material);
       for (const texture of Object.values(material)) {
-        if (!texture?.isTexture || textures.has(texture.source)) continue;
-        textures.add(texture.source);
+        if (!texture?.isTexture) continue;
+        const textureKey = `${texture.source?.uuid}:${texture.colorSpace}`;
+        if (textures.has(textureKey)) continue;
         const image = texture.source?.data;
         const width = image?.naturalWidth || image?.width, height = image?.naturalHeight || image?.height;
         if (!(width > 0 && height > 0) || width > (limits.textureSide ?? PREVIEW_LIMITS.textureSide) || height > (limits.textureSide ?? PREVIEW_LIMITS.textureSide)) { reason = 'texture budget'; continue; }
+        textures.set(textureKey, { width, height, source: texture.source });
         texturePixels += width * height;
       }
     });
     meshes.push(object);
-    groups += Array.isArray(object.material) ? geometry.groups.length : 1;
-    if (!geometries.has(geometry)) {
-      geometries.add(geometry);
-      triangles += (geometry.index?.count ?? position.count) / 3;
-      vertices += position.count;
-    }
+    groups += Math.max(geometry.groups.length, 1);
+
   });
   if (!reason && !meshes.length) reason = 'empty scene';
-  if (!reason && (triangles > limits.triangles || vertices > limits.vertices || meshes.length > limits.meshes || groups > (limits.groups ?? PREVIEW_LIMITS.groups) || materials.size > limits.materials || texturePixels > (limits.texturePixels ?? PREVIEW_LIMITS.texturePixels))) reason = 'scene budget';
-  return { meshes, geometries, triangles, vertices, reason };
+  const canonical = canonicalPreviewGeometries(meshes);
+  for (const geometry of canonical.values()) {
+    if (geometries.has(geometry)) continue;
+    geometries.add(geometry);
+    const position = geometry.getAttribute('position');
+    triangles += (geometry.index?.count ?? position.count) / 3;
+    vertices += position.count;
+    for (const [name, attr] of Object.entries(geometry.attributes)) {
+      if (/^uv(?:[1-7])?$/.test(name)) uvChannels.add(name);
+      cloneBytes += attr.array.byteLength;
+    }
+    if (geometry.index) cloneBytes += geometry.index.array.byteLength;
+  }
+  const admission = { meshes, geometries, canonical, materials, textures, triangles, vertices, groups, texturePixels, cloneBytes, uvChannels, reason };
+  if (!reason && ((limits.triangles != null && triangles > limits.triangles) || (limits.vertices != null && vertices > limits.vertices) ||
+      (limits.meshes != null && meshes.length > limits.meshes) || (limits.groups != null && groups > limits.groups) ||
+      (limits.materials != null && materials.size > limits.materials) || textures.size > (limits.textureSources ?? PREVIEW_LIMITS.textureSources) ||
+      texturePixels > (limits.texturePixels ?? PREVIEW_LIMITS.texturePixels))) admission.reason = 'scene budget';
+  if (!admission.reason) admission.reason = previewSceneBudget(admission, limits);
+  return admission;
+}
+
+// The tracer packs each unique prototype once: four vec4 vertex fields plus
+// one vec4 per UV channel, uint32 triangle indices, one 160-byte transform per
+// placement/BVH root and 1104 bytes per material. Account for the private CPU
+// copies and peak CPU+GPU packed buffers, not a flat number of placements.
+// Use the tracer's own skyline allocator for a CPU-only estimate. The floor
+// alpha map uses a stable private source ID, so its atlas ordering is the same
+// here as in the prepared scene. Budget the larger of enabled/disabled floor.
+function estimateAtlas(textures) {
+  const sourceItems = [...textures.values()];
+  const atlas = new AtlasTexture();
+  try {
+    const measure = items => {
+      if (!items.length) return { pages: 1, side: 1, bytes: 4 };
+      items.sort((a, b) => a.source.uuid < b.source.uuid ? -1 : a.source.uuid > b.source.uuid ? 1 : 0);
+      const side = Math.max(...items.map(item => Math.max(item.width, item.height)));
+      const pages = atlas._packTextures(items, side, side).pageCount;
+      return { pages, side, bytes: side * side * pages * 4 };
+    };
+    const without = measure([...sourceItems]);
+    const withFloor = measure([...sourceItems, { width: 128, height: 128, source: { uuid: FLOOR_ALPHA_SOURCE_ID } }]);
+    return { pages: Math.max(without.pages, withFloor.pages), side: Math.max(without.side, withFloor.side), bytes: Math.max(without.bytes, withFloor.bytes) };
+  } finally { atlas.dispose(); }
+}
+
+export function previewSceneBudget(admission, limits = PREVIEW_LIMITS, deviceLimits = null, packedNodes = null) {
+  const binding = Math.min(limits.bindingBytes ?? PREVIEW_LIMITS.bindingBytes,
+    deviceLimits?.maxStorageBufferBindingSize ?? Infinity, deviceLimits?.maxBufferSize ?? Infinity);
+  const vertexBytes = (admission.vertices + 4) * (64 + 16 * admission.uvChannels.size);
+  const indexBytes = (admission.triangles + 2) * 12;
+  const materialBytes = (admission.materials.size + 1) * 1104;
+  const transformBytes = (admission.groups + 1) * 160;
+  const nodeBytes = (packedNodes?.nodeBytes ?? 0) + 256;
+  // Include atlas page waste as well as private CPU copies and packed buffers.
+  const atlas = estimateAtlas(admission.textures);
+  const atlasBytes = atlas.bytes;
+  const packedBytes = vertexBytes + indexBytes + materialBytes + transformBytes + nodeBytes;
+  const peakBytes = admission.cloneBytes + 2 * packedBytes + atlasBytes;
+  // Before worker builds we do not know actual BVH node counts. Bound the
+  // worst-case private CPU build separately, then check actual packed nodes
+  // against the device and combined CPU/GPU budget after the workers finish.
+  const worstPrivateBytes = admission.cloneBytes + admission.triangles * 64;
+  if (worstPrivateBytes > (limits.sceneBytes ?? PREVIEW_LIMITS.sceneBytes) ||
+      atlas.pages > (deviceLimits?.maxTextureArrayLayers ?? Infinity) ||
+      atlas.side > (deviceLimits?.maxTextureDimension2D ?? Infinity) ||
+      admission.groups > (limits.transforms ?? PREVIEW_LIMITS.transforms) ||
+      (packedNodes && packedNodes.primitives > (limits.primitives ?? PREVIEW_LIMITS.primitives)) ||
+      Math.max(vertexBytes, indexBytes, materialBytes, transformBytes, nodeBytes) > binding ||
+      peakBytes > (limits.sceneBytes ?? PREVIEW_LIMITS.sceneBytes)) return 'scene budget';
+  return null;
+}
+
+// Match three-mesh-bvh's ClusteredBVH cut at <64 triangles. This is evaluated
+// once per private prototype after its worker-built BVH exists, before setScene
+// can synchronously allocate the TLAS. Instanced batches need only one primitive
+// per BVH root and placement; a singleton mesh uses its cluster cut points.
+function countClusters(bvh) {
+  let count = 0;
+  for (let root = 0; root < bvh._roots.length; root++) {
+    BVHTraversalHelper.setBVH(bvh, root);
+    try {
+      BVHTraversalHelper.traverseBuffer((_depth, isLeaf, node) => {
+        const size = BVHTraversalHelper.getRangeEnd(node) - BVHTraversalHelper.getRangeStart(node);
+        if (size < 64 || isLeaf) { count++; return true; }
+        return false;
+      });
+    } finally { BVHTraversalHelper.reset(); }
+  }
+  return count;
+}
+
+export function previewPreparedBudget(admission, groups, geometries, deviceLimits) {
+  let blasBytes = 0, primitives = 0;
+  const clusters = new Map();
+  for (const geometry of geometries.values()) {
+    const bvh = geometry.boundsTree;
+    // The tracer packs the root index into seven bits.
+    if (bvh._roots.length > 128) return 'scene budget';
+    blasBytes += bvh._roots.reduce((sum, root) => sum + root.byteLength, 0);
+  }
+  for (const group of groups) {
+    const bvh = geometries.get(group.geometry).boundsTree;
+    if (group.instancingSafe) primitives += group.meshes.length * bvh._roots.length;
+    else {
+      if (!clusters.has(bvh)) clusters.set(bvh, countClusters(bvh));
+      primitives += clusters.get(bvh);
+    }
+  }
+  // A binary TLAS has fewer than 2 nodes per primitive (32 bytes/node).
+  return previewSceneBudget(admission, PREVIEW_LIMITS, deviceLimits,
+    { primitives, nodeBytes: blasBytes + primitives * 64 });
 }
 
 // Cache only complete private BVHs. A look/pose change reuses each prototype, while a
@@ -71,7 +262,80 @@ export function createPreviewGeometryCache() {
   };
 }
 
-export async function preparePreviewScene(runtime, admission, signal, cache) {
+// The raster floor is a display-colored sweep: most of its brightness is emissive,
+// and only a quarter is diffuse. Those weights are presentation shaders, not a physical
+// surface. Transport must see the configured albedo and a non-emitting floor so contact
+// shadows, reflected parts and indirect illumination can form naturally.
+export function createPreviewFloorMaterial(source, configuration = {}) {
+  const material = source.clone();
+  if (configuration.backdrop?.groundColor) material.color.set(configuration.backdrop.groundColor);
+  material.emissive.set(0x000000);
+  material.emissiveIntensity = 0;
+  material.emissiveMap = null;
+  material.envMapIntensity = 1;
+  return material;
+}
+
+// Batch only exact prototype/material-slot identities. The tracer's InstancedMesh
+// acceleration structure references each BLAS root once per placement instead of
+// splitting every repeated mesh into hundreds of top-level clusters. Mirrored
+// matrices stay as ordinary meshes: Three's guide-buffer raster does not support
+// negatively scaled or sheared instances.
+function hasShear(matrix) {
+  const e = matrix.elements;
+  const x = new THREE.Vector3(e[0], e[1], e[2]);
+  const y = new THREE.Vector3(e[4], e[5], e[6]);
+  const z = new THREE.Vector3(e[8], e[9], e[10]);
+  const epsilon = 1e-6;
+  return Math.abs(x.dot(y)) > epsilon * x.length() * y.length()
+    || Math.abs(x.dot(z)) > epsilon * x.length() * z.length()
+    || Math.abs(y.dot(z)) > epsilon * y.length() * z.length();
+}
+
+export function groupPreviewMeshes(meshes, canonical = new Map()) {
+  const groups = new Map(), result = [], identities = new WeakMap();
+  let nextIdentity = 1;
+  const identity = material => {
+    if (!identities.has(material)) identities.set(material, nextIdentity++);
+    return identities.get(material);
+  };
+  for (const mesh of meshes) {
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const geometry = canonical.get(mesh.geometry) || mesh.geometry;
+    const key = `${Array.isArray(mesh.material) ? 'array' : 'single'}:${materials.map(identity).join(',')}`;
+    // Three's WebGPU guide pass transforms instance normals but not the
+    // tangent basis used for tangent-space normal maps. Keep those unbatched.
+    if (materials.some(m => m.normalMap || m.clearcoatNormalMap) || mesh.matrixWorld.determinant() <= 0 || hasShear(mesh.matrixWorld)) { result.push({ geometry, material: mesh.material, meshes: [mesh], instancingSafe: false }); continue; }
+    let byMaterial = groups.get(geometry);
+    if (!byMaterial) { byMaterial = new Map(); groups.set(geometry, byMaterial); }
+    let group = byMaterial.get(key);
+    if (!group) {
+      group = { geometry, material: mesh.material, meshes: [], instancingSafe: true };
+      byMaterial.set(key, group); result.push(group);
+    }
+    group.meshes.push(mesh);
+  }
+  return result;
+}
+
+export function createPreviewObjects(groups, geometries) {
+  return groups.map(group => {
+    const geometry = geometries.get(group.geometry);
+    if (!group.instancingSafe) {
+      const mesh = new THREE.Mesh(geometry, group.material);
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.copy(group.meshes[0].matrixWorld);
+      return mesh;
+    }
+    const mesh = new THREE.InstancedMesh(geometry, group.material, group.meshes.length);
+    mesh.frustumCulled = false;
+    group.meshes.forEach((source, index) => mesh.setMatrixAt(index, source.matrixWorld));
+    mesh.instanceMatrix.needsUpdate = true;
+    return mesh;
+  });
+}
+
+export async function preparePreviewScene(runtime, admission, signal, cache, deviceLimits) {
   const scene = new THREE.Scene(), copied = new Map();
   const worker = new GenerateMeshBVHWorker();
   const build = geometry => new Promise((resolve, reject) => {
@@ -97,15 +361,15 @@ export async function preparePreviewScene(runtime, admission, signal, cache) {
       copied.set(source, geometry);
     }
     if (signal.aborted) throw new Error('cancelled');
-    for (const source of admission.meshes) {
-      const mesh = new THREE.Mesh(copied.get(source.geometry), source.material);
-      mesh.matrixAutoUpdate = false;
-      mesh.matrix.copy(source.matrixWorld);
-      scene.add(mesh);
-    }
+    const groups = groupPreviewMeshes(admission.meshes, admission.canonical);
+    const reason = previewPreparedBudget(admission, groups, copied, deviceLimits);
+    if (reason) throw new Error(reason);
+    const objects = createPreviewObjects(groups, copied);
+    scene.add(...objects);
+    scene.userData.previewObjects = objects;
     const ground = runtime.photographicStudio?.ground;
     if (ground?.visible && ground.material?.isMeshStandardMaterial) {
-      const copy = new THREE.Mesh(ground.geometry.clone(), ground.material.clone());
+      const copy = new THREE.Mesh(ground.geometry.clone(), createPreviewFloorMaterial(ground.material, runtime.previewConfiguration));
       // The WebGPU tracer does not run three's onBeforeCompile floor shader. Bake
       // the same radial fade into its green-channel alpha map for ray transparency.
       const size = 128, pixels = new Uint8Array(size * size * 4);
@@ -118,6 +382,7 @@ export async function preparePreviewScene(runtime, admission, signal, cache) {
         pixels[i] = pixels[i + 1] = pixels[i + 2] = Math.round(alpha * 255); pixels[i + 3] = 255;
       }
       const fade = new THREE.DataTexture(pixels, size, size);
+      fade.source.uuid = FLOOR_ALPHA_SOURCE_ID;
       fade.minFilter = THREE.LinearFilter; fade.magFilter = THREE.LinearFilter;
       fade.needsUpdate = true;
       copy.material.alphaMap = fade;
@@ -129,15 +394,10 @@ export async function preparePreviewScene(runtime, admission, signal, cache) {
       scene.add(copy);
       scene.userData.previewGround = copy;
     }
-    const light = runtime.photographicStudio?.keyLight;
-    if (light?.visible) {
-      const clone = light.clone();
-      light.updateWorldMatrix(true, false);
-      clone.position.setFromMatrixPosition(light.matrixWorld);
-      light.target.updateWorldMatrix(true, false);
-      clone.target.position.setFromMatrixPosition(light.target.matrixWorld);
-      scene.add(clone, clone.target);
-    }
+    // The HDR environment already contains the key softbox, fill and reflection cards.
+    // A cloned raster spotlight would count the key twice and add a point-sized source
+    // whose hard shadows ignore Softbox size. Trace the actual finite sources once;
+    // environment importance sampling supplies their direct light and soft shadows.
     scene.environment = createStudioEnvironmentTexture(runtime.previewConfiguration);
     scene.environmentRotation.copy(runtime.scene.environmentRotation);
     scene.environmentIntensity = runtime.scene.environmentIntensity;
@@ -154,6 +414,7 @@ export async function preparePreviewScene(runtime, admission, signal, cache) {
 
 export function disposePreviewScene(scene) {
   scene?.environment?.dispose();
+  for (const object of scene?.userData.previewObjects || []) if (object.isInstancedMesh) object.dispose();
   scene?.userData.previewGround?.geometry.dispose();
   scene?.userData.previewGround?.material.alphaMap?.dispose();
   scene?.userData.previewGround?.material.dispose();

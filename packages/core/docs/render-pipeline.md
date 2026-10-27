@@ -193,27 +193,46 @@ default backdrop color.
 
 `lib/preview-tracing/progressivePreview.js` adds an optional WebGPU path tracer to the
 interactive viewer's Preview. It leaves the raster studio available during preparation and
-motion, replaces its picture after a complete traced sample, and stops scheduling after
+motion, replaces its picture after a completed denoising pass, and stops scheduling after
 its sample/work budget. Camera, pose, material, lighting and viewport changes invalidate
 accumulation. Failures restore the raster picture; a late preparation cannot attach to a
 closed view. Engine snapshots continue to use OCCT.
 
 `scene.js` adapts the visible PBR meshes, preserving material arrays, face groups, vertex
 colours and world transforms. BVHs are prepared in a worker over private prototype copies;
-occurrences share those copies. Scene admission rejects unsupported geometry or materials
-and bounds geometry, mesh/group counts and texture dimensions before upload. A scene that
+occurrences share those copies. Lightweight Preview geometry wrappers are deduplicated
+only when they share the exact attributes, index and groups. Safe placements use private
+instances so repeated CAD parts reference a prototype's BVH rather than expanding its
+triangles into the top-level acceleration structure. Mirrored, sheared and normal-mapped
+placements retain individual meshes for correct guide buffers.
+
+Scene admission rejects unsupported geometry or materials and checks packed buffer sizes
+against the device before upload. The scene's estimated additional CPU/GPU allocation is
+capped at 512 MiB and each storage binding at the lesser of the device limit and 256 MiB;
+ray pools, denoising and render targets have separate limits. Actual worker-built BVH sizes
+and top-level primitive counts are checked before packing. A scene that
 cannot be represented faithfully stays entirely on the raster path. The tracer uses the
 same procedural studio cards and sweep, sampled into an owned equirectangular HDR texture
-by `common/environmentMap.js`; it needs no downloaded lighting asset. The raster backdrop's
-screen-space gradient is reconstructed by `backdrop.js` behind the transparent trace, and
+by `common/environmentMap.js`; it needs no downloaded lighting asset. The environment
+supplies both direct illumination and reflections, without duplicating the raster shadow
+light. The private floor uses its configured albedo without the raster material's emission.
+The raster backdrop's screen-space gradient is reconstructed by `backdrop.js` behind the transparent trace, and
 the floor's radial fade is represented as an alpha map. Screenshot capture composites both.
 
-The existing Preview/Final lighting quality selects 32/64 traced samples. A one-million-pixel
-cap bounds render targets, a ray budget bounds each update, and only one GPU batch is in
-flight. A finite update budget stops work even if sample readback stalls; hidden documents
-pause tracing until visible again. These are implementation limits, not new UI controls.
-There is no denoiser in this path; low-sample images retain visible grain. Hardware
-convergence is separate from the raster measurements below. See
+The first picture is denoised after 32 samples, then refined to 128 samples for Preview
+lighting quality or 256 for Final, with up to 12 surface bounces. `previewDenoiser.js` runs
+Open Image Denoise on linear HDR color with clean albedo and normal guides. It keeps the
+previous completed picture visible while filtering the next one, preserves traced alpha,
+and lets the tracer's presentation pass apply tone mapping once. The pinned model and its
+license ship with both page bundles; inference needs no external request. A denoising error
+restores the raster studio.
+
+A one-million-pixel cap bounds render targets, a ray budget bounds each update, and only one GPU batch is in
+flight. A finite update budget stops work even if sample readback stalls; on exhaustion,
+the best available image is denoised and diagnostics report `budgetExhausted` rather than
+claiming target convergence. Hidden documents pause tracing until visible again. These are
+implementation limits, not new UI controls.
+Hardware convergence is separate from the raster measurements below. See
 [resource ownership](resource-ownership.md#5-preview-tracing) for lifetime and reuse.
 
 #### The studio's frame
@@ -360,7 +379,9 @@ Materials reaching that scene stay authored. An engine document's parts wear the
 colour the structure gives them (`lib/xbf/xbfLook.js`); a part with none wears the studio's
 surface (`PHOTOGRAPHIC_STUDIO_MATERIAL_SETTINGS`).
 A GLB, a mesh file and a robot reach the studio as the scene their viewer renderer
-builds. A GLB is its native glTF hierarchy, so its textures and PBR channels stay
+builds. The GLB loader converts world-space volume attenuation distances with the same
+metre-to-millimetre root placement as the geometry, once per material; mesh-local
+thickness continues to follow node transforms. A GLB is its native glTF hierarchy, so its textures and PBR channels stay
 attached and Render wears them exactly as authored; an STL, a 3MF and a robot author no
 finish, so they wear the studio's surface over their colours (a 3MF's object colours, a
 robot description's colour, else its link mesh's own).

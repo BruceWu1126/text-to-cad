@@ -600,7 +600,7 @@ test('external glTF buffers use the resource provider and release temporary URLs
 
 // Two triangles at a fold and no NORMAL attribute: glTF asks a client for flat normals, each
 // triangle its own, kept outward under a mirroring placement (a negative determinant).
-function twoTriangleGlb(scale = [1, 1, 1]) {
+function twoTriangleGlb(scale = [1, 1, 1], { material = null, copies = 1 } = {}) {
   const positions = floatBuffer([0, 0, 0, 0.001, 0, 0, 0, 0.001, 0, 0, 0, 0, 0, 0, 0.001, 0.001, 0, 0]);
   const binary = pad4(positions);
   const gltf = {
@@ -610,6 +610,13 @@ function twoTriangleGlb(scale = [1, 1, 1]) {
     bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: positions.length, target: 34962 }],
     accessors: [{ bufferView: 0, componentType: 5126, count: 6, type: "VEC3", min: [0, 0, 0], max: [0.001, 0.001, 0.001] }]
   };
+  if (material) {
+    gltf.materials = [material];
+    gltf.extensionsUsed = Object.keys(material.extensions || {});
+    gltf.meshes[0].primitives[0].material = 0;
+  }
+  if (copies > 1) gltf.nodes = [{ name: "root", scale, children: Array.from({ length: copies }, (_, i) => i + 1) },
+    ...Array.from({ length: copies }, (_, i) => ({ name: `copy${i}`, mesh: 0 }))];
   const json = pad4(Buffer.from(JSON.stringify(gltf)), 0x20);
   const header = Buffer.alloc(12);
   header.writeUInt32LE(0x46546c67, 0);
@@ -631,4 +638,31 @@ test("a GLB primitive without normals is shaded flat, each triangle its own, mir
     }
     assert.deepEqual(normals, expected, `scale ${scale}`);
   }
+});
+
+
+test("GLB volume attenuation follows CAD world placement once while local thickness and exported metres stay native", async () => {
+  const THREE = await import("three");
+  const { buildGlbDocumentFromBuffer } = await import("./glbMeshData.js");
+  const { createGlbScene } = await import("./glbScene.js");
+  const material = { pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], metallicFactor: 0, roughnessFactor: 0.025 }, extensions: {
+    KHR_materials_transmission: { transmissionFactor: 1 }, KHR_materials_ior: { ior: 1.52 },
+    KHR_materials_volume: { thicknessFactor: 62, attenuationDistance: 0.05, attenuationColor: [0.82, 0.93, 0.87] },
+  } };
+  const bytes = twoTriangleGlb([0.001, 0.001, 0.001], { material, copies: 2 });
+  const document = await buildGlbDocumentFromBuffer(bytes);
+  const parsed = []; document.scene.traverse(object => { if (object.isMesh) parsed.push(object.material); });
+  assert.equal(parsed[0], parsed[1], "the parsed placements share one converted finish");
+  const scene = createGlbScene(THREE, document);
+  const sibling = scene.createSibling();
+  const finishes = view => { const found = []; view.object3D.traverse(object => { if (object.isMesh) found.push(object.material); }); return found; };
+  try {
+    const original = finishes(scene), preview = finishes(sibling);
+    assert.deepEqual(original.map(m => [m.attenuationDistance, m.thickness, m.transmission, m.ior]), [[50, 62, 1, 1.52], [50, 62, 1, 1.52]]);
+    assert.ok(preview.every(m => m.attenuationDistance === 50 && m.thickness === 62), "Preview clones do not apply the world conversion a second time");
+    assert.notEqual(preview[0], original[0], "Preview keeps its material ownership");
+    assert.equal(material.extensions.KHR_materials_volume.attenuationDistance, 0.05, "the source GLB remains in glTF world metres");
+    // Three millimetres through this glass must equal three millimetres in its original metre scene.
+    assert.ok(Math.abs(0.82 ** (3 / original[0].attenuationDistance) - 0.82 ** (0.003 / 0.05)) < 1e-12);
+  } finally { sibling.dispose(); scene.dispose(); }
 });
