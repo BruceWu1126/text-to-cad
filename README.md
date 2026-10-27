@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://github.com/earthtojake/text-to-cad/raw/2f793659fb7bab537e2f00836e06448fc4087cb2/apps/docs/public/brand/logo-texttocad-animated.svg" alt="text-to-cad" width="800">
+<img src="https://github.com/earthtojake/text-to-cad/raw/0875a5deda7b769bf695d0e635a0be6ae6eb2dd4/apps/docs/public/brand/logo-texttocad-animated.svg" alt="text-to-cad" width="800">
 
 Give your agent CAD superpowers.
 
@@ -15,8 +15,7 @@ Give your agent CAD superpowers.
 [![cadgen](https://img.shields.io/pypi/v/cadgen?style=for-the-badge&logo=pypi&logoColor=white&label=cadgen)](https://pypi.org/project/cadgen/)
 [![build123d](https://img.shields.io/badge/build123d-0.11-2F6FB0?style=for-the-badge)](https://github.com/gumyr/build123d)
 [![Open CASCADE](https://img.shields.io/badge/Open%20CASCADE-7.9-E2001A?style=for-the-badge)](https://dev.opencascade.org)
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://github.com/earthtojake/text-to-cad/blob/2f793659fb7bab537e2f00836e06448fc4087cb2/packages/cadgen/pyproject.toml)
-[![Node.js](https://img.shields.io/badge/Node.js-20+-5FA04E?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://github.com/earthtojake/text-to-cad/blob/0875a5deda7b769bf695d0e635a0be6ae6eb2dd4/packages/cadgen/pyproject.toml)
 
 </div>
 
@@ -31,6 +30,16 @@ It is supported by all popular agents that support plugins or the
 [skills](https://skills.sh) framework, including Claude Code, Codex, Cursor,
 Gemini and Grok.
 
+### How it works
+
+1. Your agent writes each model as a Python script, with build123d.
+2. Running the script, `python model.py`, builds the model with cadgen's engine
+   into an `.xbf` document (its parts, names, colours, materials and joints) and
+   the STEP, GLB, STL or 3MF files the script declares. The engine keeps each
+   model's work in memory, so an edit rebuilds only what it changed.
+3. The CAD viewer shows the model in your agent app or your browser, and follows
+   every rebuild.
+
 ## 💻 Install
 
 ### Ask your agent (recommended)
@@ -43,7 +52,7 @@ Install text-to-cad from https://github.com/earthtojake/text-to-cad
 
 By default, text-to-cad sends usage stats and crash reports, tagged with a random
 ID and never including your files, paths or prompts; turn them off with
-`uvx cadgen telemetry off`, or ask your agent to. [Telemetry](#telemetry) says
+`uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen telemetry off`, or ask your agent to. [Telemetry](#telemetry) says
 the rest.
 
 Or install it yourself:
@@ -110,7 +119,7 @@ app. If Claude Desktop cannot find `uvx`, give its full path (`which uvx`).
   "mcpServers": {
     "cad": {
       "command": "uvx",
-      "args": ["--no-config", "--managed-python", "--python", "3.13", "--from", "cadgen==0.7.26", "cadgen", "mcp"],
+      "args": ["--no-config", "--managed-python", "--python", "3.13", "--from", "cadgen==0.8.0", "cadgen", "mcp"],
       "env": {"CADGEN_INSTALL_CHANNEL": "claude-desktop"}
     }
   }
@@ -283,27 +292,33 @@ To find out, cadgen fetches `api.texttocad.dev/v1/versions` at most once a day:
 one anonymous request, with no ID, path or anything about you, never in CI and
 never for a copy that something else updates. `CADGEN_UPDATE_CHECK=0` turns it off.
 
+A CAD project written for cadgen 0.7 needs porting to 0.8:
+[the migration guide](https://github.com/earthtojake/text-to-cad/blob/0875a5deda7b769bf695d0e635a0be6ae6eb2dd4/docs/migrations/migrating-0.7-to-0.8.md) takes one across, step by
+step, and an agent with the CAD skill can follow it.
+
 ### Telemetry
 
-The CAD app (the plugin's `cad` server), the browser viewer (`cadgen viewer`) and the build daemon that builds for
-them and for every `cadgen` command send usage stats by default, tagged with a random install ID: versions, where
-you installed it from (as the plugin's CAD app names it, noted in cadgen's state folder for the other two), your OS
-and agent app, and counts -- how often each CAD tool was called and why a call failed
-(one of a fixed set of words, such as "no file at that path" or "no view open", never its message), how often views
-were used, how many files of each format were shown, how many models were built and snapshots rendered, how those ended,
-why one failed (again a fixed word, such as "the model's code raised" or "the geometry kernel refused", never its
-message) and how long they took, which features were used -- added up over a few minutes before they are sent, each
-batch under a random ID of its own and the time it was made, so one sent again is counted once. When cadgen's own
+The CAD app (the plugin's `cad` server) and the browser viewer (`cadgen viewer`) send usage stats by default, with
+what every `cadgen` command and model script counted, tagged with a random install ID: versions, where you installed
+it from (as the plugin's CAD app names it, noted in cadgen's state folder for the rest), your OS and agent app, and
+counts -- how often each CAD tool was called and why a call failed (one of a fixed set of words, such as "no file at
+that path" or "no view open", never its message), how often views were used, how many files of each format were
+shown, how many models were built and exported and snapshots drawn, how those ended, why one failed (again a fixed
+word, such as "the model's code raised" or "the geometry kernel refused", never its message) and how long they took,
+which features were used, and how many of the engine's warm workers started, crashed or were retired -- added up over
+a few minutes before they are sent, each batch under a random ID of its own and the time it was made, so one sent
+again is counted once. When cadgen's own
 code fails, they also send a crash report: the error's type and where in cadgen (or Python, or one of its
 dependencies) it failed, never its message, and with any of your own code a bare placeholder. Our server adds the country each request
 comes from (worked out from its IP address, which it doesn't keep) and stores it all with PostHog. Never file names,
 paths, contents or prompts. The first `cadgen` command says so once, and sending starts then. Turn it off, which
-also deletes what was sent, with `uvx cadgen telemetry off`, **Share usage stats** in either app's menu (the logo at
+also deletes what was sent, with `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen telemetry off`, **Telemetry** in either app's menu (the logo at
 the top left, over any model), or by asking your agent. `DO_NOT_TRACK=1` or `CADGEN_TELEMETRY=0` turns it off for
 one process, and `CADGEN_TELEMETRY=1` on, without changing your setting; nothing is sent by default in CI or from a
-development install. Nothing waits to send: what a command counts without the build daemon, and what any part of
-cadgen counted since its last send when it exits, waits in small files in cadgen's state folder until the next part
-of cadgen sends it in the background; turning telemetry off deletes them.
+development install. Nothing waits to send: a command or a model script sends nothing itself, and what it counted,
+like what any part of cadgen counted since its last send when it exits, waits in small files in cadgen's state folder
+until the CAD app or the viewer sends it in the background -- or, when nothing has for five minutes, a short-lived
+sender the next command starts, which sends it and exits; turning telemetry off deletes them.
 Offline, nothing is sent and everything works. See
 the [privacy policy](https://www.texttocad.dev/privacy-policy).
 
@@ -332,7 +347,7 @@ robot description files, simulation, and local review.
 
 | Skill        | Summary                                                                                                                                            | Source                                              |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| CAD          | Creates and edits CAD models from plain-language or image requests, with STEP as the main output along with options to export to STL, 3MF and GLB. | [skills/cad](skills/cad/SKILL.md)                   |
+| CAD          | Creates and edits CAD models from plain-language or image requests as Python scripts, built into XBF documents with STEP, STL, 3MF and GLB exports. | [skills/cad](skills/cad/SKILL.md)                   |
 | step.parts   | Finds off-the-shelf STEP parts like screws, bearings, motors, and connectors.                                                                      | [skills/step-parts](skills/step-parts/SKILL.md)     |
 | Engineering Drawing | Dimensioned engineering drawings from a part, as a PDF: views, hidden lines, dimensions, hole callouts, title block. | [skills/engineering-drawing](skills/engineering-drawing/SKILL.md) |
 | DXF          | Creates 2D DXF drawings like profiles, templates, gaskets, and cut layouts from Python sources or CAD geometry.                                    | [skills/dxf](skills/dxf/SKILL.md)                   |
@@ -348,4 +363,6 @@ robot description files, simulation, and local review.
 ## 🛠️ Contributing
 
 Branch from `main` and open PRs against `main`. For the local workflow, testing in
-agent apps and validation, see [CONTRIBUTING.md](https://github.com/earthtojake/text-to-cad/blob/2f793659fb7bab537e2f00836e06448fc4087cb2/CONTRIBUTING.md).
+agent apps and validation, see [CONTRIBUTING.md](https://github.com/earthtojake/text-to-cad/blob/0875a5deda7b769bf695d0e635a0be6ae6eb2dd4/CONTRIBUTING.md); an agent working in
+the repository starts at [AGENTS.md](https://github.com/earthtojake/text-to-cad/blob/0875a5deda7b769bf695d0e635a0be6ae6eb2dd4/AGENTS.md). A security problem is reported privately,
+as [SECURITY.md](https://github.com/earthtojake/text-to-cad/blob/0875a5deda7b769bf695d0e635a0be6ae6eb2dd4/SECURITY.md) says.
