@@ -8,6 +8,87 @@ batch, run once every change it measures is in the branch, on a quiet machine:
 numbers taken under other work's load, or by agents benching beside each other,
 do not compare.
 
+## Photographic Preview material review
+
+`preview_render.mjs` drives the production FileViewer and GLB Preview renderer in
+Chromium on a hardware WebGPU adapter. `preview_report.py` makes a contact sheet,
+matched native-resolution centre/contact crops and supporting image differences.
+The standing CAD fixtures are
+[`models/tests/preview_studio`](../../models/tests/preview_studio/README.md).
+They cover machined metal, a coated product with fasteners and a gauge, thick glass
+with liquid and contents, and a mixed-material cavity. The existing
+`models/moonwatch/src/finishing_sampler.py` supplies a fifth fine-detail case.
+
+Build the shared exports, build/export the selected models with the development
+CAD environment, then run on a quiet GPU. No images or model exports are committed:
+
+```sh
+npm run build:packages
+.venv/bin/python models/tests/preview_studio/exports.py --out "$PWD/tmp/preview-corpus/glb"
+node scripts/bench/preview_render.mjs --corpus tmp/preview-corpus/glb --out tmp/preview-corpus/review
+.venv/bin/python scripts/bench/preview_report.py tmp/preview-corpus/review
+```
+
+The render command writes a raster studio baseline, the first fully denoised
+production image, the converged production image and a raw 512-sample reference
+for each GLB, with the same stored appearance, studio settings, camera and size
+(1200×900 by default). The reference uses the controller's bounded constructor
+diagnostic option; it does not rewrite production source or create a UI setting.
+Controller, admission helpers, worker entrypoints and UI all consume the compiled
+package exports. Mixing source and compiled copies can break module-local geometry
+ownership markers and produce false admission failures.
+`renders.json` records the actual camera/configuration, progress, long tasks and
+timings. Retained rows are updated by file/profile when a run is resumed.
+
+`--file name.glb` selects one case (repeatable). `--profiles raster,candidate` omits
+the slower reference pass; `--profiles reference --reference-samples 512` adds it
+later in the same output folder. `--quality preview|final` selects production
+quality. `--transparent` uses a transparent backdrop and the studio's 0.6 floor
+opacity to expose residual alpha grain; the report composites transparent pixels
+over charcoal. Width is bounded 256–2400, height 256–1800, and raw references 1–1024
+samples. Use only ignored `tmp/` or an external temporary output directory.
+
+`--fit-rest` uses an explicit camera fitted to the loaded GLB's current geometry,
+useful for a static beauty of a file whose automatic camera also covers a large
+exploded-animation envelope. The chosen camera is recorded, and this does not
+change production framing policy.
+
+For a native engine/XBF check, first serve an existing document from an isolated
+engine with the current Viewer build; do not rebuild a large source model just to
+open a saved XBF. `cadgen serve /absolute/path/model.xbf` prints its authenticated
+page URL. Then drive that actual page:
+
+```sh
+node scripts/bench/preview_render.mjs --native-url "$URL" \
+  --out tmp/preview-corpus/native --quality preview --exercise-lifecycle
+node scripts/bench/preview_render.mjs --native-url "$URL" \
+  --out tmp/preview-corpus/native-pointer --quality preview --exercise-pointer
+```
+
+Native mode records first/final denoise progress and guide/network timing,
+main-thread long tasks, the actual camera and stage, and screenshots. Lifecycle
+mode plays/pauses a routine only when that saved document exposes one, then measures
+exit and reentry. A missing routine is recorded rather than claimed as tested.
+Pointer mode performs a modest wheel zoom and real orbit drag during refinement,
+records camera response and visible canvas layers, then waits for resumed final
+denoising and writes `native-beauty.png`. The default camera is retained as a
+separate baseline. Fallback, denoising failure and exhausted sample budgets fail
+the run; a large model's raster fallback is not a tracing success.
+
+`preview_report.py FOLDER --scene NAME` selects technical comparison cases;
+`--beauty-scene NAME` independently selects the clean two-column beauty sheet
+(both repeatable). The report never invents a missing candidate image. Native
+captures can be copied into the review folder as `NAME-candidate.png` for a beauty
+sheet while retaining their separate native provenance JSON.
+
+Review the full images and crops for highlight shape, smooth shading versus lost
+detail, recess and contact lighting, glass thickness/refraction, alpha grain,
+silhouettes and tiny features. A completed denoiser or a lower image error is not
+a verdict of photorealism. Raw references retain Monte Carlo noise and are
+convergence comparisons, not ground-truth photographs. This corpus and these
+manual rendering measurements do not run in CI; the renderer's small functional
+fixtures remain in its browser tests.
+
 ## The corpus batch
 
 `corpus_bench.py` builds each model in `corpus.json` with the xbf engine, cold to
