@@ -550,9 +550,10 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
 
 - **Every document has an id**, a UUID: a model's comes from its script's path and its
   function's name, so it is the same every run (`bracket.id` in Python, and the handle's
-  `.id`). `@model(key="bracket")` (or `key=` on a file decorator) gives it an id of the key's
-  instead, the same wherever the script moves; two declarations claiming one key are
-  refused. A file the viewer opens has an id of its path. A document's page is `/<uuid>` on
+  `.id`). `@model(name="bracket")` (or `name=` on a file decorator) gives it an id of its
+  script's folder and that name instead, the same whichever file of the folder declares it;
+  two declarations of one name in a folder are refused, naming both. A file the viewer opens
+  has an id of its path. A document's page is `/<uuid>` on
   the engine's address, and a run prints it as `view:` (the handle's `.url`).
 - **The commands take an id or a file.** `cadgen export`, `cadgen snapshot` and
   `cadgen inspect` read the document as the engine holds it, and never run a script: a

@@ -162,10 +162,16 @@ handed over is its calling script's (or the working folder's) and its name. Iden
 plus name: in 0.8 a model's namespace is its script's folder, with no project detection.
 A model's name is its identity within its namespace, the function's name by default, `name=` gives
 it another. `@model(name="arm")` and `@step("arm.step", name="arm")` use the folder and explicit
-name in the same formula, independent of the declaring file. Two explicit names in one folder
-are refused at declaration, naming both `file:line` locations. Two unnamed functions in different
-files may share a name: their ids still include their script paths. A name holding `::`, the formula's
-separator, is refused at declaration. The canonical path (`ids.canonical`) is `realpath` and, on
+name in the same formula, independent of the declaring file. An explicit name is refused at
+declaration while another declaration holds it -- another function in this process (`model.claim`),
+or another file of the folder whose last run declared it, as the name's record says
+(`identity.claimed`) -- naming both `file:line` locations. A function renamed keeps its name and its
+document; so does a name moved to another file of its folder, once the file it left is gone or has
+run again without it: each run records the explicit names its script declares (`declares`) and gives
+up those it declares no more (`identity.released`), and no script but the run's own is read (law
+23). The same explicit name in two folders is two documents, and there are no global names. Two unnamed functions in different files may share a name:
+their ids still include their script paths. A name holding `::`, the formula's separator, is refused
+at declaration. The canonical path (`ids.canonical`) is `realpath` and, on
 macOS, the name as the file system spells it, so a symlink and a case variant of one file are one
 document; the viewer's document reads (by id) and its Recents key by the same function, so it
 serves one document and keeps one Recents entry for it too, while a page names a file by the path
@@ -364,6 +370,7 @@ only, and a file's id is derived again from its path after a restart.
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
 | `cache.py` | the document cache: each model document's bytes in the cache folder (`documents/<id>/document.xbf`), saved when idle, at its drain and at shutdown, once per revision; the index a restart reads; kept until a person deletes it, with no cap (`Cache`); at the engine's start, a `closure/1` document moved to this closure in place (`migrate`) |
 | `registry.py` | the registry of documents in the user's state folder (`Registry`: `get`, `put`, `list`, `delete`), the user's page token (`token`, `put_token`), each installation's engine record (`engine`, `put_engine`: its rolled port), and the one owner of every write under that folder (`Folder`); where the folder is, the distribution's (`FACTORY`) |
+| `identity.py` | identity beyond the formula, on records and file names alone (no kernel, no XBF read): an explicit name's claim in its folder (`claimed`), a shape refused a declared model's id (`handed`), a moved script's record re-attached (`reattach`, `repoint`, `relocated`), and the startup identity migration (`migrate`) |
 | `cli.py` | the verbs as commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `delete`, `server` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
 
@@ -837,13 +844,16 @@ document is held (in memory, whole, and in the cache), registers its page, and r
 REPL or a notebook), from which every surface words it: a program the engine did not run showed it,
 so no command builds it again. `name=` is required; its id is
 `ids.derived_id` of the calling script (or the working folder, from a REPL) and the name. The handle's `.shape` is the shape passed. Called inside a model's body
-it is refused: a body returns its shape.
+it is refused: a body returns its shape. A shape is refused the id of a model a script still
+declares -- handed over from a REPL in a folder one of whose scripts gives a model `name=` the same,
+or from a script one of whose functions has its name -- naming that declaration (`identity.handed`):
+one id is one document.
 
 **The registry.** One record per document the engine built, and per CAD file a page opened,
 `documents/<id>/document.json` in the user's state folder ([registry.py](registry.py); the
 distribution names the folder, `cadgen.viewer.recents.state_dir`): it points; a document's bytes
 are the cache's, in the cache folder (**The cache**).
-Every record has one shape, `{schema, id, kind, root, home, entry, namespace, name, fingerprint?, module?, line?, relocated?, revision, built, created?, facts?,
+Every record has one shape, `{schema, id, kind, root, home, entry, namespace, name, fingerprint?, module?, line?, declares?, relocated?, revision, built, created?, facts?,
 program?, cache?{revision, bytes}, opened?, pinned?, preview?}`, and holds what a restart needs
 and no more. `kind` says what it is: `model` (`home` and `entry`, its script and function; the
 command that builds it again is always `cadgen run` of its home), `shape` (a shape handed over:
@@ -863,29 +873,46 @@ startup identity migration below, it is read on demand: an id the engine does no
 restart) is answered from its record,
 `held` from its cache file, `unsaved` with its command, or `detached`, and nothing runs. The registry is the ids' reverse map,
 never their authority: ids use the canonical script/function or folder/explicit-name formula
-(`ids`). `namespace` equals `root`, and `name` is the explicit name or the entry function;
-`entry` still names the Python function. A model records SHA-256 of its script bytes on each run
-(`fingerprint`), and its Python module qualifier (`module`). Explicit declarations keep their
-line for collision diagnostics (`line`). Recents exposes `namespace` and `name` without changing
-the UI.
+(`ids`). `namespace` equals `root` (the script's folder, a shape's scope, a file's folder), and
+`name` is the explicit name or the entry function; `entry` still names the Python function. A model
+records SHA-256 of its script's bytes on each run (`fingerprint`; files and shapes have none) and
+its Python module qualifier (`module`); an explicit declaration keeps its first line, its claim of
+the name and a collision's words (`line`, dropped when its script's run gives the name up), and a
+model of the run's script the explicit names that script declared (`declares`). Recents passes
+`namespace` and `name` through (`CadRecent`): a named model's row shows its name.
 
-**Re-attachment.** Before the worker checks its cache, a run with no record for its id asks the
-daemon to find model records with the same name, function and script fingerprint whose original
-script no longer exists (`identity.reattach`). An extant original is a copy and is never adopted.
-One candidate is adopted; several choose the most recently built, with the choice logged. The
-record is re-pointed under the new id with its history, creation time, thumbnail and cache bytes.
-A function renamed without an explicit name is a new document. A named model moved between files
-in the same folder keeps its id and is re-pointed too. `relocated` keeps the cache's original
-script and module: paths and module qualifiers are projected only for the closure comparison,
-never written into its XBF; modules, inputs and code are checked all the same. A fresh build
-clears that projection.
+**Re-attachment.** A run's models with nothing to take up -- no document its worker built or took,
+and no cache file at the model's id (its script moved, or new), or a named model whose record points
+at another file -- are asked of the daemon in one request before the worker reads any cache
+(`build._reattach`, `Models.reattach`, `identity.reattach`), of the engine that runs the worker,
+never of one it would start; a model with a document or a cache file costs a stat. The daemon reads
+the registry once for all of them, parsing only the records whose text holds one of their
+fingerprints, for model records with the same name, function and script fingerprint whose script is
+gone from its path -- or is there as this very script under another spelling, a symlinked folder or
+a case-only rename: a move. A record whose script is there as another file is the original of a
+copy, and is never adopted. One candidate is adopted; of several, the most recently built (the id
+breaks a tie), the choice logged; none, and the model is a new document. A live document not saved
+yet is saved first, so its cache file moves with it. The record is re-pointed under the new id with
+its history, creation time, pins, thumbnail and cache bytes (`identity.repoint`): the cache file
+lands at the new id first, then the new record, and only then is the old one forgotten, so a stop
+at any step leaves the old identity whole, and the next move finishes it. A function renamed
+without an explicit name is a new document. A named model moved between files of its folder keeps
+its id and is re-pointed too. `relocated` keeps the script and module its cache file was built
+from: paths and module qualifiers are projected for the closure comparison alone, never written
+into its XBF; its code, modules, inputs and toolchain are checked all the same, and a fresh build
+clears it. Nothing reads or runs a script outside a run but the migration's one fingerprint fill.
 
-**Identity migration.** At engine start, before the daemon is reachable, `identity.migrate`
-independently fills missing namespace, name and fingerprint fields in the JSON records. It moves
-an earlier `key::` identity and its cache file to the folder/name id. No kernel is imported and
-no XBF is parsed or rewritten. Unreadable records remain untouched and are listed in the pass's
-one log line (`identity migration: filled N, moved N, skipped N`). A second pass writes nothing.
-The storage contract is [STORE.md](../../../STORE.md).
+**Identity migration.** At engine start, before the daemon is reachable, `identity.migrate` makes
+one pass over the records' JSON, independent of any build-closure migration. It fills a missing
+`namespace`, `name` and a model's `fingerprint` (its script's bytes; null where the script is gone,
+until a run supplies one), and moves each record identified by the earlier
+`uuid5(NAMESPACE, "key::" + key)` formula, with its cache file, to its folder/name id (a shape
+once given a key: its calling scope and its name). It reads JSON and, only to fill a fingerprint, a
+script's bytes: it imports no kernel and parses or rewrites no XBF. A second pass writes nothing. A
+record that does not read, or whose new id another record holds, is skipped, never deleted, and
+listed in the pass's one log line (`identity migration: filled N, moved N, skipped N`, then each
+skipped record and why); a pass with nothing to do says nothing, and a pass that fails never keeps
+the engine from starting.
 
 A record's `revision` is its closure's key (the same code, the same revision, after a
 restart too), or a token of the build's own where the closure has none. A served document's

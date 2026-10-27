@@ -293,7 +293,9 @@ name. `@model(name="bracket")` (or `name=` on a file decorator) derives the id f
 script's folder and that name, independent of which file in the folder declares it; two explicit
 names in one folder are refused with both declaration locations. A model's name is its identity
 within its namespace, the function's name by default, `name=` gives it another. In 0.8 the namespace
-is the script's folder, with no project detection. The page is
+is the script's folder, with no project detection. Moving a named model to another file of its folder
+keeps its id: run the file it left (or delete it) first, since until then the engine knows that file
+by its last run, and refuses the new file's declaration naming both. The page is
 `/<id>` on the engine's address; `cadgen export`, `snapshot` and `inspect`, and the
 CAD app's tools, take the id and read the document as the engine holds it. No command
 imports, runs or builds a script: editing the script changes nothing until Python runs
