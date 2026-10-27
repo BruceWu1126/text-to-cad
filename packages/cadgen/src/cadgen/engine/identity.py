@@ -76,8 +76,8 @@ def claimed(held: Registry, source: dict[str, Any], name: str) -> None:
     if not other.is_file() or canonical(other) == script:
         return
     raise ValueError(f"name {name!r} in namespace {namespace} is claimed by {other}:{record['line']} and "
-                     f"{script}:{source.get('line', '?')}; give one declaration another name, or run "
-                     f"{other.name} again once it no longer declares it")
+                     f"{script}:{source.get('line', '?')}; give one declaration another name, or once "
+                     f"{other.name} no longer declares it, run `cadgen run {other.name}` so the engine knows")
 
 
 def released(held: Registry, script: str | os.PathLike, names: Iterable[str]) -> list[str]:

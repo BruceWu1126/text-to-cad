@@ -64,7 +64,7 @@ class ClaimTest(Fixture):
         with self.assertRaises(ValueError) as refused:
             claimed(self.registry, {"script": str(two), "name": "first", "line": 4}, "arm")
         self.assertIn(f"claimed by {one}:5 and {two}:4", str(refused.exception))
-        self.assertIn("or run one.py again once it no longer declares it", str(refused.exception))
+        self.assertIn("or once one.py no longer declares it, run `cadgen run one.py`", str(refused.exception))
         claimed(self.registry, {"script": str(self.folder / "other" / "two.py"), "name": "first", "line": 4},
                 "arm")  # another folder is another namespace
         self.assertEqual(released(self.registry, two, ["arm"]), [], "only its own script gives a name up")
