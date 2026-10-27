@@ -364,7 +364,7 @@ drawn grid's span and the camera's target as pivot).
 ### Display modes, CAD edges and geometry sharing
 
 Internal draw modes are `shaded`, `shaded_edges`, `transparent`,
-`hidden_edges`, `hidden_lines_removed`, `unshaded`, `wireframe` and `render`
+`hidden_edges`, `hidden_lines_removed`, `unshaded` and `wireframe`
 (`common/displaySettings.js`). Public presets resolve to those implementation details plus independent surface and
 edge settings; never feed a public preset into `normalizeDisplayMode()`. Normal CAD
 keeps authored albedo, opacity and finish. Workbench PBR channels are fallbacks;
