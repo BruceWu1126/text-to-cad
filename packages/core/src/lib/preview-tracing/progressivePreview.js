@@ -26,12 +26,12 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
   const rawReference = rawReferenceSamples !== null;
   let state = 'idle', reason = null, generation = 0, cameraEpoch = 0, abort = null, tracer = null;
   let gpu = null, scene = null, camera = null, canvas = null, background = null, capture = null, frames = 0, visible = false;
-  let rasterVisibility = null;
+  let rasterOpacity = null;
   let started = false, disposed = false, cameraDirty = false, measuring = null, sample = 0, frameBudget = FRAME_PATH_BUDGET;
   let inFlight = null, denoiser = null, denoisedSamples = 0, denoisingSamples = 0, budgetExhausted = false;
   const cache = createPreviewGeometryCache();
   let maxSamples = rawReferenceSamples ?? (runtime.previewConfiguration?.quality === 'final' ? FINAL_SAMPLES : PREVIEW_SAMPLES);
-  const hide = () => { visible = false; if (canvas) canvas.style.visibility = 'hidden'; if (background) background.style.visibility = 'hidden'; if (rasterVisibility !== null) { runtime.renderer.domElement.style.visibility = rasterVisibility; rasterVisibility = null; } };
+  const hide = () => { visible = false; if (canvas) canvas.style.visibility = 'hidden'; if (background) background.style.visibility = 'hidden'; if (rasterOpacity !== null) { runtime.renderer.domElement.style.opacity = rasterOpacity; rasterOpacity = null; } };
   const release = () => {
     hide(); inFlight = null;
     tracer?.dispose(); tracer = null; denoiser = null; denoisedSamples = 0; denoisingSamples = 0;
@@ -214,7 +214,7 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, di
       tracer.pause = budgetExhausted;
       try { tracer.renderSample(); } finally { tracer.pause = wasPaused; }
       if (!budgetExhausted) frames++;
-      if (denoiser.texture || (rawReference && sample >= 1)) { if (!visible) { rasterVisibility = rasterCanvas.style.visibility; rasterCanvas.style.visibility = 'hidden'; } visible = true; background.style.visibility = 'visible'; canvas.style.visibility = 'visible'; }
+      if (denoiser.texture || (rawReference && sample >= 1)) { if (!visible) { rasterOpacity = rasterCanvas.style.opacity; rasterCanvas.style.opacity = '0'; } visible = true; background.style.visibility = 'visible'; canvas.style.visibility = 'visible'; }
       // Readback only occasionally: it is asynchronous and only used to stop the loop.
       if (!budgetExhausted && !measuring && frames % 16 === 0) {
         const measurement = {};

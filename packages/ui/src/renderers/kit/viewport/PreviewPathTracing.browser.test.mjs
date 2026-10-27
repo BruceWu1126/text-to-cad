@@ -21,6 +21,7 @@ const host = document.querySelector('#view');
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setSize(256, 192); renderer.setPixelRatio(1);
 host.append(renderer.domElement);
+renderer.domElement.style.opacity = '0.8';
 const scene = new THREE.Scene(); scene.background = new THREE.Color('#e7e7e5');
 const modelGroup = new THREE.Group(); scene.add(modelGroup);
 const red = new THREE.MeshStandardMaterial({ color: '#d22822', roughness: 0.55 });
@@ -62,6 +63,7 @@ window.previewTest = {
   dispose: () => { controller.dispose(); },
   source: () => ({ sameGeometry: painted.geometry===repeat.geometry, material: red.color.getHexString(), boundsTree: !!box.boundsTree }),
   canvases: () => host.querySelectorAll('canvas').length,
+  rasterOpacity: () => renderer.domElement.style.opacity,
   capture: () => controller.captureCanvas?.toDataURL('image/png') || null,
 };
 renderer.render(scene,camera);
@@ -161,14 +163,40 @@ test('the real Preview viewport traces, captures and restores the editor on exit
     // traced layer became visible. Show it briefly for the review comparison.
     await pane.locator('[data-preview-view] canvas').evaluateAll(canvases => canvases.forEach((canvas, i) => {
       canvas.dataset.savedVisibility = canvas.style.visibility;
+      canvas.dataset.savedOpacity = canvas.style.opacity;
       canvas.style.visibility = i === 0 ? 'visible' : 'hidden';
+      if (i === 0) canvas.style.opacity = '1';
     }));
     await page.screenshot({path: join(artifacts, 'preview-ui-raster.png')});
     await pane.locator('[data-preview-view] canvas').evaluateAll(canvases => canvases.forEach(canvas => {
-      canvas.style.visibility = canvas.dataset.savedVisibility; delete canvas.dataset.savedVisibility;
+      canvas.style.visibility = canvas.dataset.savedVisibility; canvas.style.opacity = canvas.dataset.savedOpacity;
+      delete canvas.dataset.savedVisibility; delete canvas.dataset.savedOpacity;
     }));
     t.diagnostic(`Review images: ${artifacts}`);
   }
+  // The raster canvas remains the controls' event target even when the traced
+  // picture covers it. Exercise a real wheel gesture after convergence.
+  const rasterCanvas = pane.locator('[data-preview-view] canvas').first();
+  const rect = await rasterCanvas.boundingBox();
+  assert.ok(rect, 'the viewport canvas is present');
+  const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
+  assert.equal(await rasterCanvas.evaluate((canvas, {x, y}) => document.elementFromPoint(x, y) === canvas, {x, y}), true,
+    'the traced overlay keeps the controls canvas hit-testable');
+  const beforeWheel = await page.evaluate(() => window.__cadCamera());
+  await page.mouse.move(x, y); await page.mouse.wheel(0, -100);
+  await page.waitForFunction(before => {
+    const next = window.__cadCamera();
+    return Math.abs(next.zoom - before.zoom) > 1e-6 || next.position.some((v, i) => Math.abs(v - before.position[i]) > 1e-6);
+  }, beforeWheel, {timeout: 10000});
+  await page.waitForFunction(() => window.__cadStage()?.pathTracing?.denoisedSamples > 0, null, {timeout: 120000});
+  const beforeDrag = await page.evaluate(() => window.__cadCamera());
+  await page.mouse.move(x, y); await page.mouse.down();
+  await page.mouse.move(x + 45, y + 10, {steps: 4}); await page.mouse.up();
+  await page.waitForFunction(before => {
+    const next = window.__cadCamera();
+    return next.position.some((v, i) => Math.abs(v - before.position[i]) > 1e-6);
+  }, beforeDrag, {timeout: 10000});
+  await page.waitForFunction(() => window.__cadStage()?.pathTracing?.denoisedSamples > 0, null, {timeout: 120000});
   const capture = await page.evaluate(async () => {
     const blob = await window.cadHarness.a.controller.capture();
     const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -253,6 +281,7 @@ test('hardware Preview converges on authored parts, resets for motion and releas
   for (let visit = 0; visit < 2; visit++) {
     await page.evaluate(() => window.previewTest.dispose());
     assert.equal(await page.evaluate(() => window.previewTest.canvases()), 1, 'exit detaches the traced canvas');
+    assert.equal(await page.evaluate(() => window.previewTest.rasterOpacity()), '0.8', 'exit restores the exact inline raster opacity');
     if (visit === 0) {
       await page.evaluate(() => window.previewTest.start());
       await page.waitForFunction(() => window.previewTest.capture() !== null, null, { timeout: 120000 });
