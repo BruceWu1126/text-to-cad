@@ -63,9 +63,10 @@ class ViewerExportHttpTest(unittest.TestCase):
         environment = patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(Path(self.tmp.name) / "engine")})
         environment.start()
         self.addCleanup(environment.stop)
-        self.addCleanup(self.stop_engine)
         from tests.python.support import engine_daemon
         engine_daemon.started(dict(os.environ), self.addCleanup)
+        # Await the actual process before started restores its port; Windows holds its cwd until exit.
+        self.addCleanup(self.stop_engine)
 
     def stop_engine(self):
         from cadgen.engine.client import request, wait_gone
