@@ -399,8 +399,6 @@ export default {
   "chip.more": "他 {count} 件",
   "chip.moreReferences": "その他の参照",
   "chip.references": "参照",
-  "prompt.addToPrompt": "プロンプトに追加",
-  "prompt.copyForPrompt": "プロンプト用にコピー",
   "measure.perpendicular": "垂直距離",
   "measure.centreToCentre": "中心間距離",
   "measure.shortest": "最短距離",

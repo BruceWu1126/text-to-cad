@@ -92,13 +92,13 @@ function hostFixture(files, run) {
 const host = name => `${FILE_VIEWER_ROOT}/${name}`;
 
 test('the file viewer builds its own chrome out of the kit', () => hostFixture({
-  [host('EmptyCadStage.tsx')]: "import Viewport from '../renderers/kit/shell/ShellViewport.jsx';\nimport { prepareWorkspaceEntry } from '../renderers/workspace/prepare.js';\nimport { cn } from '@text-to-cad/ui/utils';\n",
+  [host('Stage.tsx')]: "import Viewport from '../renderers/kit/shell/ShellViewport.jsx';\nimport { prepareWorkspaceEntry } from '../renderers/workspace/prepare.js';\nimport { cn } from '@text-to-cad/ui/utils';\n",
 }, result => assert.deepEqual(result.errors, [])));
 
 test('the file viewer never imports a family slice: it mounts one through the registry', () => hostFixture({
-  [host('empty.tsx')]: "const Stage = () => import('../renderers/step/components/EmptyCadStage.js');\n",
+  [host('Mount.tsx')]: "const Stage = () => import('../renderers/step/components/StepStage.js');\n",
   [host('navigation/icons.ts')]: "import { GLB } from '@text-to-cad/ui/renderers/glb';\n",
-  [host('empty.test.tsx')]: "import '../renderers/robot/RobotRenderer.jsx';\n",
+  [host('Mount.test.tsx')]: "import '../renderers/robot/RobotRenderer.jsx';\n",
 }, result => {
   assert.equal(result.errors.length, 2, 'both sources are caught and the test file is not scanned');
   assert.ok(result.errors.some(error => error.includes('imports the "step" renderer')));

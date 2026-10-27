@@ -400,8 +400,6 @@ export default {
   "chip.more": "另有 {count} 个",
   "chip.moreReferences": "更多引用",
   "chip.references": "引用",
-  "prompt.addToPrompt": "添加到提示词",
-  "prompt.copyForPrompt": "复制用于提示词",
   "measure.perpendicular": "垂直距离",
   "measure.centreToCentre": "中心距",
   "measure.shortest": "最短距离",

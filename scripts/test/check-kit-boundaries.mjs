@@ -131,9 +131,7 @@ export function checkRendererSlices(repo, { slices = RENDERER_SLICES } = {}) {
 // resolves which slice a file belongs to and lazy-loads it through the registry. So it must
 // not import one itself — a static edge into a slice defeats the split, pulling that
 // family's code (and three.js with it) into every host that shows any file at all. The kit
-// and the workspace module are shared, so those are fine. The empty CAD backdrop is the case
-// this rule was written for: it drew a stage with NO model in it and reached into the STEP
-// renderer to do it.
+// and the workspace module are shared, so those are fine.
 export const FILE_VIEWER_ROOT = 'packages/ui/src/file-viewer';
 
 export function checkFileViewerBoundary(repo, { shared = SLICE_SHARED } = {}) {

@@ -5,10 +5,8 @@ import {
 import {
   CAD_DISPLAY_MODE,
   CAD_PART_COLOR_MODE,
-  DEFAULT_DISPLAY_SETTINGS,
   normalizePartColorSettings,
-  normalizeDisplaySettings,
-  validateDisplaySettings
+  normalizeDisplaySettings
 } from "./displaySettings.js";
 import { PHOTOGRAPHIC_STUDIO_MATERIAL_SETTINGS } from "./photographicStudioRig.js";
 import {
@@ -23,22 +21,8 @@ const SCENE_APPEARANCE = Object.freeze({
   DARK: "dark"
 });
 
-/** @type {"system" | "light" | "dark"} */
-const DEFAULT_SCENE_APPEARANCE = SCENE_APPEARANCE.SYSTEM;
-
-// The studio, quality, envelope, lighting and backdrop vocabularies are the
-// Render contract the viewer's settings and a snapshot job share. Keep them
-// exported and frozen.
-export const RENDER_STUDIO = Object.freeze({
-  LIGHT: "light",
-  DARK: "dark"
-});
-
-export const RENDER_STUDIO_PRESETS = Object.freeze([
-  Object.freeze({ id: RENDER_STUDIO.LIGHT, label: "Light studio" }),
-  Object.freeze({ id: RENDER_STUDIO.DARK, label: "Dark studio" }),
-]);
-
+// The quality ladder and the lighting and backdrop defaults are the Render contract the viewer's
+// settings and a snapshot job share. Keep them exported and frozen.
 export const RENDER_QUALITY = Object.freeze({
   PREVIEW: "preview",
   FINAL: "final"
@@ -82,31 +66,6 @@ const SCENE_QUALITY_PRESETS = Object.freeze([
   })
 ]);
 
-export const RENDER_PAYLOAD_KEYS = Object.freeze([
-  "studio",
-  "quality",
-  "exposure",
-  "lighting",
-  "backdrop"
-]);
-
-export const RENDER_LIGHTING_KEYS = Object.freeze([
-  "rotation",
-  "size",
-  "fill"
-]);
-
-export const RENDER_BACKDROP_KEYS = Object.freeze([
-  "color",
-  "transparent",
-  "ground",
-  "groundPlacement",
-  "groundColor",
-  "groundOpacity",
-  "groundFinish"
-]);
-
-const RENDER_STUDIO_IDS = new Set(RENDER_STUDIO_PRESETS.map((preset) => preset.id));
 const RENDER_QUALITY_BY_ID = new Map(RENDER_QUALITY_PRESETS.map((preset) => [preset.id, preset]));
 const SCENE_QUALITY_BY_ID = new Map(SCENE_QUALITY_PRESETS.map((preset) => [preset.id, preset]));
 
@@ -127,18 +86,6 @@ export const DEFAULT_RENDER_BACKDROP = Object.freeze({
   groundFinish: "matte"
 });
 
-const STUDIO_BACKDROP_COLORS = Object.freeze({
-  [RENDER_STUDIO.LIGHT]: "#ffffff",
-  [RENDER_STUDIO.DARK]: "#202226"
-});
-
-const STUDIO_GROUND_COLORS = Object.freeze({
-  [RENDER_STUDIO.LIGHT]: "#e7e7e5",
-  [RENDER_STUDIO.DARK]: "#202226"
-});
-
-const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}){1,2}$/;
-
 const DEFAULT_NORMAL_CAMERA = Object.freeze({
   preset: "iso",
   projection: CAMERA_PROJECTION.ORTHOGRAPHIC
@@ -158,59 +105,6 @@ function cloneValue(value) {
   return value;
 }
 
-function validateKeys(source, allowed, fieldName) {
-  const unknown = Object.keys(source).filter((key) => !allowed.includes(key));
-  if (unknown.length) {
-    throw new Error(`Unsupported ${fieldName} fields: ${unknown.join(", ")}`);
-  }
-}
-
-function validateNumber(value, fieldName, min = -Infinity, max = Infinity) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) {
-    throw new Error(`${fieldName} must be a finite number between ${min} and ${max}`);
-  }
-}
-
-function validateBoolean(value, fieldName) {
-  if (typeof value !== "boolean") {
-    throw new Error(`${fieldName} must be a boolean`);
-  }
-}
-
-function validateColor(value, fieldName) {
-  if (typeof value !== "string" || !HEX_COLOR_PATTERN.test(value.trim())) {
-    throw new Error(`${fieldName} must be a hex color`);
-  }
-}
-
-function validateRenderLighting(value) {
-  if (!isPlainObject(value)) {
-    throw new Error("render.lighting must be an object");
-  }
-  validateKeys(value, RENDER_LIGHTING_KEYS, "render.lighting");
-  if (Object.hasOwn(value, "rotation")) validateNumber(value.rotation, "render.lighting.rotation", -180, 180);
-  if (Object.hasOwn(value, "size")) validateNumber(value.size, "render.lighting.size", 0.25, 3);
-  if (Object.hasOwn(value, "fill")) validateNumber(value.fill, "render.lighting.fill", 0, 1);
-}
-
-function validateRenderBackdrop(value) {
-  if (!isPlainObject(value)) {
-    throw new Error("render.backdrop must be an object");
-  }
-  validateKeys(value, RENDER_BACKDROP_KEYS, "render.backdrop");
-  if (Object.hasOwn(value, "color")) validateColor(value.color, "render.backdrop.color");
-  if (Object.hasOwn(value, "groundColor")) validateColor(value.groundColor, "render.backdrop.groundColor");
-  if (Object.hasOwn(value, "groundOpacity")) validateNumber(value.groundOpacity, "render.backdrop.groundOpacity", 0, 1);
-  if (Object.hasOwn(value, "transparent")) validateBoolean(value.transparent, "render.backdrop.transparent");
-  if (Object.hasOwn(value, "ground")) validateBoolean(value.ground, "render.backdrop.ground");
-  if (Object.hasOwn(value, "groundPlacement") && !["origin", "lowest"].includes(value.groundPlacement)) {
-    throw new Error("render.backdrop.groundPlacement must be origin or lowest");
-  }
-  if (Object.hasOwn(value, "groundFinish") && !["matte", "glossy"].includes(value.groundFinish)) {
-    throw new Error("render.backdrop.groundFinish must be matte or glossy");
-  }
-}
-
 function normalizeSceneAppearance(value = SCENE_APPEARANCE.SYSTEM, {
   prefersDark = false
 } = {}) {
@@ -222,13 +116,6 @@ function normalizeSceneAppearance(value = SCENE_APPEARANCE.SYSTEM, {
     return normalized;
   }
   throw new Error("appearance must be 'system', 'light', or 'dark'");
-}
-
-function normalizeRenderStudioId(value) {
-  if (typeof value !== "string" || !RENDER_STUDIO_IDS.has(value)) {
-    throw new Error(`Unknown render studio '${value}'. Expected one of: ${[...RENDER_STUDIO_IDS].join(", ")}`);
-  }
-  return value;
 }
 
 function normalizeRenderQuality(value = RENDER_QUALITY.FINAL) {
@@ -255,71 +142,6 @@ export function resolveSceneQuality(value, options = {}) {
 export function resolveRenderQuality(value = RENDER_QUALITY.FINAL) {
   const renderQuality = RENDER_QUALITY_BY_ID.get(normalizeRenderQuality(value));
   return resolveSceneQuality(renderQuality.sceneQuality);
-}
-
-export function normalizeRenderPayload(render) {
-  if (!isPlainObject(render)) {
-    throw new Error("render must be an object");
-  }
-  validateKeys(render, RENDER_PAYLOAD_KEYS, "render");
-  const result = {};
-  if (Object.prototype.hasOwnProperty.call(render, "studio")) {
-    result.studio = normalizeRenderStudioId(render.studio);
-  }
-  if (Object.hasOwn(render, "quality")) {
-    result.quality = normalizeRenderQuality(render.quality);
-  }
-  if (Object.hasOwn(render, "exposure")) {
-    validateNumber(render.exposure, "render.exposure", -5, 5);
-    result.exposure = render.exposure;
-  }
-  if (Object.hasOwn(render, "lighting")) {
-    validateRenderLighting(render.lighting);
-    result.lighting = cloneValue(render.lighting);
-  }
-  if (Object.hasOwn(render, "backdrop")) {
-    validateRenderBackdrop(render.backdrop);
-    result.backdrop = cloneValue(render.backdrop);
-  }
-  return result;
-}
-
-/**
- * Expand a normalized Render payload into the RENDER RECIPE: the closed set of
- * controls Render exposes, each with its effective value. This is the only
- * input the photographic rig takes. It is not a CAD theme and never grows
- * lights, floors, or background gradients — an unlisted knob has no way in.
- */
-function resolveRenderConfiguration(render = {}, appearance = SCENE_APPEARANCE.LIGHT) {
-  const payload = normalizeRenderPayload(render);
-  const studio = resolvedStudioId(payload.studio, appearance);
-  return {
-    studio,
-    quality: payload.quality ?? RENDER_QUALITY.FINAL,
-    exposure: payload.exposure ?? 0,
-    lighting: {
-      ...DEFAULT_RENDER_LIGHTING,
-      ...(payload.lighting || {})
-    },
-    backdrop: {
-      color: payload.backdrop?.color || STUDIO_BACKDROP_COLORS[studio],
-      transparent: payload.backdrop?.transparent ?? DEFAULT_RENDER_BACKDROP.transparent,
-      ground: payload.backdrop?.ground ?? DEFAULT_RENDER_BACKDROP.ground,
-      groundPlacement: payload.backdrop?.groundPlacement ?? DEFAULT_RENDER_BACKDROP.groundPlacement,
-      groundColor: payload.backdrop?.groundColor || payload.backdrop?.color || STUDIO_GROUND_COLORS[studio],
-      groundOpacity: payload.backdrop?.groundOpacity ?? DEFAULT_RENDER_BACKDROP.groundOpacity,
-      groundFinish: payload.backdrop?.groundFinish ?? DEFAULT_RENDER_BACKDROP.groundFinish
-    }
-  };
-}
-
-function resolvedStudioId(studio, appearance) {
-  if (studio != null) {
-    return studio;
-  }
-  return appearance === SCENE_APPEARANCE.DARK
-    ? RENDER_STUDIO.DARK
-    : RENDER_STUDIO.LIGHT;
 }
 
 /**
@@ -401,17 +223,6 @@ function resolveCamera(base, ...overrides) {
   return result;
 }
 
-function resolveDisplay(base, ...overrides) {
-  let resolved = normalizeDisplaySettings(base, { fallback: base });
-  for (const override of overrides) {
-    if (override != null) {
-      validateDisplaySettings(override);
-      resolved = normalizeDisplaySettings(override, { fallback: resolved });
-    }
-  }
-  return resolved;
-}
-
 export function resolveDisplayMaterialSettings(materialSettings = {}, partColorSettings = null) {
   const partColor = normalizePartColorSettings(partColorSettings);
   if (partColor.mode === CAD_PART_COLOR_MODE.ORIGINAL) {
@@ -476,58 +287,6 @@ function applyPartColor(settings, partColor) {
 }
 
 /**
- * Resolve shared viewer/snapshot scene policy without retaining app state.
- *
- * Camera, display and model state are common. Inspect supplies `theme`, the CAD
- * workbench lighting recipe. Display mode Render instead supplies
- * `render.configuration`, the photographic lighting recipe; it has no theme,
- * so nothing can reach the CAD rig, floor or background gradients through it.
- */
-export function resolveSceneSettings({
-  appearance = DEFAULT_SCENE_APPEARANCE,
-  prefersDark = false,
-  quality = null,
-  camera = null,
-  display = null
-} = {}) {
-  const baseAppearance = normalizeSceneAppearance(appearance, { prefersDark });
-  const resolvedDisplay = resolveDisplay(DEFAULT_DISPLAY_SETTINGS, display);
-  const unifiedRender = resolvedDisplay.mode === CAD_DISPLAY_MODE.RENDER
-    ? (resolvedDisplay.render || {})
-    : null;
-  if (unifiedRender == null) {
-    const theme = applyPartColor(cadSceneSettings(baseAppearance), resolvedDisplay.partColor);
-    return {
-      appearance: baseAppearance,
-      render: { enabled: false, configuration: null, payload: null },
-      theme,
-      // Authored finishes are shared with Render. The workbench recipe supplies
-      // fallback channels and lighting, never overrides the model's material.
-      materialOverrides: null,
-      quality: resolveSceneQuality(quality, { fallback: SCENE_QUALITY.INTERACTIVE }),
-      camera: resolveCamera(DEFAULT_NORMAL_CAMERA, camera),
-      display: resolvedDisplay
-    };
-  }
-
-  const payload = normalizeRenderPayload(unifiedRender);
-  const cameraSettings = resolveCamera(DEFAULT_NORMAL_CAMERA, camera);
-  const configuration = {
-    ...resolveRenderConfiguration(payload, baseAppearance),
-    camera: cameraSettings
-  };
-  return {
-    appearance: baseAppearance,
-    render: { enabled: true, configuration, payload },
-    theme: null,
-    materialOverrides: null,
-    quality: resolveRenderQuality(configuration.quality),
-    camera: cameraSettings,
-    display: resolvedDisplay
-  };
-}
-
-/**
  * Public grouped preset policy; historical display modes are draw details. `preview` asks for
  * Preview's photographic look (Render) over the same display, with Preview's own settings
  * (`previewSettings`): Preview's scene, a snapshot's `--preview`. No file is in Render.
@@ -579,7 +338,7 @@ export function resolveViewSceneSettings({
   return {
     view,
     appearance: view.appearance,
-    render: { enabled, configuration, payload: null },
+    render: { enabled, configuration },
     // A floor or custom background does not opt the model into studio lighting.
     theme: view.lighting.enabled ? null : neutralTheme,
     materialOverrides: null,

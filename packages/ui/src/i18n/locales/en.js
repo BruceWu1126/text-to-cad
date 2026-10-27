@@ -423,8 +423,6 @@ export default {
   "chip.more": "+{count} more",
   "chip.moreReferences": "More references",
   "chip.references": "References",
-  "prompt.addToPrompt": "Add to prompt",
-  "prompt.copyForPrompt": "Copy for prompt",
   "measure.perpendicular": "Perpendicular distance",
   "measure.centreToCentre": "Centre to centre",
   "measure.shortest": "Shortest distance",

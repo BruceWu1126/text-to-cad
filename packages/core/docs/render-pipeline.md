@@ -134,8 +134,7 @@ controls photographic illumination and PMREM allocation. `theme` retains the
 neutral workbench recipe whenever photographic lighting is disabled, including
 when a custom background or floor is present. Consumers build CAD models with
 `surfaceSettings: resolved.view.surfaces` and the resolved edges; they must not
-reapply historical mode-owned edge forcing. `resolveSceneSettings()` remains an
-internal compatibility resolver for older low-level consumers.
+reapply historical mode-owned edge forcing.
 
 Background opacity follows the ordinary alpha convention: 0 is transparent and
 1 is opaque. Fractional alpha is carried by the renderer clear color with
