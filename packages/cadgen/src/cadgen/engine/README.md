@@ -641,17 +641,22 @@ tessellations, is under one memory budget: **Document lifetime**.)
   call and every call since took its models from their keys. Anything else loads the script
   again: another run, an edit, a body that ran.
 
-A build starts the daemon's server and schedules its parts' measurements; it meshes nothing.
-Measurements, picked elements and poses start only the pool processes their jobs need
-(`Mesher.processes`, `warm=False`; a document's measurements take two at most while no page has
-warmed the pool, **Mesh**). Every process starts on the first mesh a page asks for, or on
-`Server.warm`: sent by `cadgen viewer` at launch (`CADGEN_VIEWER_WARM=0` skips it), called when an
-app launches a view and when a build's `view:` link lands. With no page, the daemon holds its
-worker, its standby when enabled, and the few processes its facts needed.
+The meshing pool starts with the first page, view or inspection, never with a build. A build
+serves its document, so the daemon's server starts with the first `python model.py`; its meshing
+pool waits. Every process starts on the first mesh a page asks for, or on `Server.warm`: sent by
+`cadgen viewer` at launch (`CADGEN_VIEWER_WARM=0` skips it), called when an app launches a view and
+when a build's `view:` link lands. An inspection's measurements, picked elements and poses start
+only the processes their jobs need (`Mesher.processes`, `warm=False`; a
+document's measurements take two at most while no page has warmed the pool, **Mesh**). With no page
+and no inspection, the daemon's only children are the worker and the standby. Measured (before the
+standby) on a 24-part model (5 shapes) on a 10-core machine: 1 child and 0.5 GB with no page,
+against 12 and 3.2 GB when the pool started with the server. The pool's start costs a first page
+about 0.8 s, less the time the page takes to load after the warm.
 
 The pool takes its jobs from two queues and is handed one job per process at a time
-(`Mesher.run`): facts (inspection measurements, picked elements, poses and measurements after a
-build), then tessellations. A fact waits for a running job at most, never queued meshes.
+(`Mesher.run`): facts (an inspection's measurements, picked elements, poses, and an inspected
+document's measurement after its next build), then tessellations. A fact waits for a running job
+at most, never queued meshes.
 
 A retired script's next build is a fresh worker's: a restart, which takes each model's document
 whole from the cache when its key is unchanged (**Build closure**, **The cache**), and else builds
@@ -2175,13 +2180,17 @@ queue for facts, which a free process takes before any mesh waiting (**The engin
 workers**). A summary that finds a part's facts missing waits for them: no figure is guessed. Its
 `measure` count is the engine's: the door's read of the facts, asked with `progress`, says each
 part's as it comes in -- the ones held at once, the rest as the pool answers their batches -- ahead
-of its answer. A document a build makes is read at its new version once the build's worker has
+of its answer. Measuring is lazy: a document is measured when an inspection first asks for its
+facts (a summary, a part's or an assembly's ref), and a build of a document no inspection has asked
+of reads nothing, measures nothing and starts no pool process. Once one has asked, the document is
+an inspected one (`Server.inspected`, in memory: an engine started afresh measures it again at its
+next inspection), and each later build of it is read at its new version once the build's worker has
 settled (free for half a second with no request waiting for it, `daemon.MEASURE_IDLE`: a program
 calling its models one after another sends its next build within milliseconds, so those calls do
-not wait on that read), and its new parts are measured then, in the facts queue ahead of meshes
-(`Server.measure_later`), so an inspection after a build can reuse them. The command parses the ref
-and places what it names in its own process with no kernel: the element-name grammar it reads is
-`refs.ELEMENT_NAME`.
+not wait on that read), its parts whose geometry key changed measured then, in the facts queue
+ahead of meshes (`Server.measure_later`), so the inspection after the edit finds them. The command
+parses the ref and places what it names in its own process with no kernel: the element-name grammar
+it reads is `refs.ELEMENT_NAME`.
 
 ## Wire format
 

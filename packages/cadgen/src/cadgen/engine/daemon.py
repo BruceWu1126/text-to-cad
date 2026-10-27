@@ -112,9 +112,10 @@ WINDOWS = os.name == "nt"
 # The retirements ``status`` lists, the latest first.
 RETIRED_KEPT = 12
 # How long a build's worker is free, with no request waiting for it, before the documents the build
-# made are read and measured for the inspection after it (``serve.Server.measure_later``): a program
-# calling its models one after another sends its next build within milliseconds of an answer, so
-# its run never waits on that read. The worker's own collection waits as long (``worker.COLLECT_IDLE``).
+# made that an inspection has measured are read and measured again for the inspection after it
+# (``serve.Server.measure_later``): a program calling its models one after another sends its next
+# build within milliseconds of an answer, so those calls never wait on that read. The worker's own
+# collection waits as long (``worker.COLLECT_IDLE``).
 MEASURE_IDLE = 0.5
 # What a worker's environment must share with a request's for the request to use it: what shapes
 # the import system of the interpreter it started (the interpreter itself is the daemon's). A run
@@ -1768,8 +1769,9 @@ class Daemon:
         if outcomes:
             server.built(outcomes)
         if not verb:
-            # Each document the build made: its parts measured once its
-            # worker has settled, so an inspection after the edit finds them (``serve.Server.measure_later``).
+            # Each document the build made that an inspection has measured: its new parts measured once
+            # its worker has settled, so the inspection after the edit finds them; one never inspected is
+            # left alone (``serve.Server.measure_later``).
             server.measure_later([ident for ident, failed in outcomes.items() if failed is None],
                                  settled=lambda: (self.pool.free_for(worker) or 0.0) >= MEASURE_IDLE)
 

@@ -444,8 +444,9 @@ def kernel_facts(data: bytes) -> dict:
 class InspectionReadTest(unittest.TestCase):
     """What ``cadgen inspect`` reads through the engine's door (``Server.read``): a structure that
     sends no part to the mesher, and each part's facts measured once by its geometry key -- an edit
-    measures only the parts whose key is new -- and, for a document read before, measured after its
-    next build before anyone asks."""
+    measures only the parts whose key is new. Measuring is lazy: a build of a document no inspection
+    measured reads and measures nothing; once one has, each later build's new parts are measured
+    before anyone asks."""
 
     def setUp(self) -> None:
         self.server = Server(port=0, mesh_mode="inline")
@@ -486,11 +487,13 @@ class InspectionReadTest(unittest.TestCase):
         self.server.trim(0)
         self.assertEqual((self.server.facts.size, self.server.facts.get("k1")), (0, None), "and evicted under it")
 
-    def test_a_new_document_is_measured_after_build_and_an_edit_reuses_unchanged_keys(self) -> None:
+    def test_only_an_inspected_document_is_measured_after_its_build_and_only_its_new_keys(self) -> None:
         asked = registered(self.server, {"k1": b"one"})
-        later = self.server.measure_later([PLATE])
-        later.join(60)
-        self.assertEqual((asked, self.kernel.call_count), ([1], 1), "measured before the first inspection")
+        self.read("")  # a structure (``--query structure``) asks for no facts: no inspection of them
+        self.assertIsNone(self.server.measure_later([PLATE]), "no inspection measured it: left alone")
+        self.assertEqual((asked, self.kernel.call_count), ([1], 0), "read once, by the structure; measured never")
+        self.assertEqual(sorted(self.read("/volumes")), ["k1"])  # the first inspection measures what it asks
+        self.assertEqual(self.kernel.call_count, 1)
         asked = registered(self.server, {"k1": b"one", "k2": b"three"}, version=2)
         later = self.server.measure_later([PLATE])
         later.join(60)
@@ -503,7 +506,7 @@ class InspectionReadTest(unittest.TestCase):
         # A program calls its models one after another: what its builds made is read once the worker
         # settles (the daemon's word), never between two of its builds.
         registered(self.server, {"k1": b"one"})
-        self.read("")
+        self.read("/part/k1/volume")  # inspected: its facts asked for
         asked = registered(self.server, {"k1": b"one", "k2": b"three"}, version=2)
         settled = threading.Event()
         later = self.server.measure_later([PLATE], settled=settled.is_set)

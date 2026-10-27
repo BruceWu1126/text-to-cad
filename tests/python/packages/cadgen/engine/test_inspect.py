@@ -1,8 +1,9 @@
 """``cadgen inspect DOC`` without a ref: what the document holds, on one screen, before its build
 closure -- its state, parts, bounds, volume, materials, joints, states, sequences and declared
 files -- read from the document the engine holds, and nothing built; ``--json`` the same as data;
-``--query structure`` the same lists with nothing measured. A build's document is measured once its
-worker settles, before anyone asks, and an edit's build measures only the part it changed."""
+``--query structure`` the same lists with nothing measured. Measuring is lazy: a build no inspection
+has measured reads and measures nothing; the first summary measures, and each later build of the
+inspected document has the part it changed measured once its worker settles, before anyone asks."""
 
 from __future__ import annotations
 
@@ -66,11 +67,17 @@ class SummaryTest(unittest.TestCase):
     def run_(self, *args: str):
         return engine_daemon.run([sys.executable, *args], cwd=self.folder, env=self.env)
 
-    def facts(self) -> int:
-        """The bytes of the parts' facts the engine holds (``status --json``)."""
+    def served(self) -> tuple[int, int]:
+        """The bytes of the parts' facts the engine holds, and how many documents its server has
+        loaded (``status --json``)."""
         status = self.run_("-m", "cadgen.engine", "status", "--json")
         self.assertEqual(status.returncode, 0, status.stderr)
-        return json.loads(status.stdout)["serving"]["memory"]["facts"]
+        serving = json.loads(status.stdout)["serving"]
+        return serving["memory"]["facts"], sum(row["state"] == "held" for row in serving["documents"])
+
+    def facts(self) -> int:
+        """The bytes of the parts' facts the engine holds (``status --json``)."""
+        return self.served()[0]
 
     def test_a_hinge_with_one_joint_and_one_sequence_is_summarised_before_its_closure(self) -> None:
         (self.folder / "hinge.py").write_text(textwrap.dedent(HINGE), encoding="utf-8")
@@ -79,9 +86,9 @@ class SummaryTest(unittest.TestCase):
         ident = next(line.split()[1] for line in built.stdout.splitlines() if line.strip().startswith("id:"))
         (self.folder / "hinge.ran").unlink()
 
-        deadline = time.monotonic() + 120
-        while self.facts() == 0:
-            self.assertLess(time.monotonic(), deadline, "new builds are measured before any inspection")
+        # No inspection has measured it: its build loaded no document and measured nothing (the engine
+        # decides so before the build answers).
+        self.assertEqual(self.served(), (0, 0))
 
         # The structure: the summary's lists, nothing measured for them.
         listed = self.run_("-m", "cadgen.engine", "inspect", ident, "--query", "structure")
@@ -96,6 +103,7 @@ class SummaryTest(unittest.TestCase):
         self.assertFalse({"bounds", "volume", "mass"} & set(structure), structure)
         self.assertEqual(structure["materials"], [{"name": "Aluminum 6061-T6", "density": 2700.0, "parts": ["hinge/base"]}])
         self.assertEqual(structure["states"], [{"name": "open", "values": {"elbow": 90.0}}])
+        self.assertEqual(self.facts(), 0, "a structure measures nothing")
 
         shown = self.run_("-m", "cadgen.engine", "inspect", ident)
         self.assertEqual(shown.returncode, 0, shown.stderr)
@@ -143,8 +151,8 @@ class SummaryTest(unittest.TestCase):
         self.assertIn(frames[-1]["detail"], ("base", "arm"))
         self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
 
-        # Every build's document is measured once its worker settles, before anyone asks:
-        # the longer arm's facts are in before the next inspection.
+        # Inspected now, the hinge's next build has the part it changed measured once its worker
+        # settles, before anyone asks: the longer arm's facts are in before the next inspection.
         measured = self.facts()
         self.assertGreater(measured, 0)
         (self.folder / "hinge.py").write_text(textwrap.dedent(HINGE).replace("bd.Box(120, 20, 10", "bd.Box(130, 20, 10"),

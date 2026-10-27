@@ -206,7 +206,7 @@ class StatusTextTest(unittest.TestCase):
                             "serving": {"url": "http://127.0.0.1:1", "documents": [
                                 {"id": "f", "path": "/a.xbf", "state": "evicted", "bytes": 0}]}})
         lines = text.splitlines()
-        self.assertIn("serving http://127.0.0.1:1: 0 documents loaded by a page, a command or a build", lines)
+        self.assertIn("serving http://127.0.0.1:1: 0 documents opened by a page or a command", lines)
         self.assertEqual(sum(line.startswith("  live") for line in lines), 6, "the documents held, listed apart")
 
     def test_a_shape_handed_over_is_worded_as_one_with_no_script_to_rerun(self) -> None:

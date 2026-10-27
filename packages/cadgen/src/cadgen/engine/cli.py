@@ -808,14 +808,15 @@ def status_text(answer: dict[str, Any]) -> str:
                                               f"{_span(now - row['at'])} ago" for row in retired))
     serving = answer.get("serving")
     if serving:
-        # What the server has loaded because a page or a command opened it, or a build's document read
-        # to measure its parts (``serve.Server.measure_later``) -- not the documents the engine holds,
-        # which the ``documents:`` lines list -- an evicted file's row left out.
+        # What the server has loaded because a page or a command opened it -- an inspected document
+        # read again after its build to measure its new parts among them (``serve.Server.measure_later``)
+        # -- not the documents the engine holds, which the ``documents:`` lines list; an evicted file's
+        # row left out.
         opened = sum(1 for row in serving.get("documents") or [] if row.get("state", "held") == "held")
         renders = len(answer.get("renders") or [])
         memory = serving.get("memory") or {}
         held = (memory.get("documents") or 0) + (memory.get("meshes") or 0) + (memory.get("facts") or 0)
-        lines.append(f"serving {serving['url']}{_port(serving)}: {opened} document{'' if opened == 1 else 's'} loaded by a page, a command or a build"
+        lines.append(f"serving {serving['url']}{_port(serving)}: {opened} document{'' if opened == 1 else 's'} opened by a page or a command"
                      + (f" · {renders} render process{'' if renders == 1 else 'es'}" if renders else "")
                      + (f" · {_gb(held / 2**20)} of {_gb(memory['budget'] / 2**20)} held" if memory.get("budget") else ""))
         # What this engine's start said: the older engines it retired, a move of its port.

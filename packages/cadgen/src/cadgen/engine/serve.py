@@ -65,7 +65,7 @@ the parts' shapes are collected (the reader writes its counts to a file the serv
 waits) -- and nothing once the document is in, or what failed.
 
 Meshing runs off the request's thread (``Mesher``): by default on a pool of processes
-started as facts need them (including measurements after a build), or all at once with the
+started as an inspection's facts need them (never by a build alone), or all at once with the
 first page or mesh (``warm``), and kept warm, each handed one part's shape bytes; or ``inline``
 (``CADGEN_ENGINE_MESH=inline``, or ``?mode=inline``), one part after another on one thread,
 each spread over the kernel's own threads. A document's parts go to the pool largest
@@ -75,8 +75,8 @@ with the kernel's face parallelism inside its pool process. When a page asks for
 document's structure, every part not held is sent to the pool at once, so the page's part
 requests join meshes already running; an inspection's read of it, through the daemon's door
 (``Server.read``), sends nothing. The pool takes its jobs from two queues (``Mesher.run``):
-facts (inspection measurements, picked elements, poses and post-build measurements) before
-every mesh still waiting.
+facts (inspection measurements, picked elements, poses, and an inspected document's measurement
+after its next build) before every mesh still waiting.
 """
 
 from __future__ import annotations
@@ -505,7 +505,7 @@ def _ready() -> bool:
 
 
 MODES = ("inline", "processes")
-# A free process takes a fact before any queued mesh, including measurements scheduled after a build.
+# A free process takes a fact before any queued mesh, an inspected document's measurement after its build too.
 # At most one job per process is handed over, so facts can wait for running meshes only.
 FACT, MESH = 0, 1
 
@@ -897,9 +897,14 @@ class Server:
         # The daemon's server and a worker's snapshot serve from the process's one cache
         # (``MESHES``); a server of its own (a test's) holds its own.
         self.cache = cache if cache is not None else MeshCache()
-        # Each part's facts as a whole, by its key (``measure``): the server's own, under its budget;
-        # and the model documents waiting to be measured after their build (``measure_later``).
+        # Each part's facts as a whole, by its key (``measure``): the server's own, under its budget.
         self.facts = FactCache()
+        # The documents whose facts an inspection has asked for and waited on, by id (``measure``): a
+        # later build of one has its new parts measured before anyone asks (``measure_later``); a
+        # document none asked of is never read or measured after its build. In memory alone: an
+        # engine started afresh measures a document again at its next inspection.
+        self.inspected: set[str] = set()
+        # The model documents waiting to be measured after their build (``measure_later``).
         self.measuring: set[str] = set()
         # The one memory budget (bytes) over the documents and the tessellations held, or None:
         # a server of its own (a worker's snapshot, a test's) keeps the cache's own cap.
@@ -1147,6 +1152,7 @@ class Server:
     def forget_model(self, ident: str) -> None:
         with self.load_lock:
             self.served.pop(ident, None)
+            self.inspected.discard(ident)
             self.model_loaders.pop(ident, None)
             self.model_versions.pop(ident, None)
             self.used.pop(ident, None)
@@ -1628,12 +1634,16 @@ class Server:
         facts queue, ahead of every mesh, or in this process for a server of its
         own -- and each part once, however many ask. ``wait``: answered once every one is in, and
         ``counted(done, total, key)`` told as they come in: the ones held already at once, then each
-        as the pool answers its batch (the summary's ``inspect-measure`` count); else answered with
-        those held now. A part the document does not hold is a ``KeyError``."""
+        as the pool answers its batch (the summary's ``inspect-measure`` count) -- and the document is
+        an inspected one from then on (``inspected``, ``measure_later``); else answered with those held
+        now. A part the document does not hold is a ``KeyError``."""
         wanted = list(dict.fromkeys(doc.shapes if keys is None else keys))
         unknown = [key for key in wanted if key not in doc.shapes]
         if unknown:
             raise KeyError(f"no part {unknown[0]}")
+        if wait:
+            with self.load_lock:
+                self.inspected.add(doc.ident)
         found: dict[str, Any] = {}
         waiting: dict[str, concurrent.futures.Future] = {}
         fresh: list[str] = []
@@ -1723,17 +1733,20 @@ class Server:
         self._grown()
 
     def measure_later(self, idents: list[str], settled: Callable[[], bool] | None = None) -> threading.Thread | None:
-        """Model documents a build just registered (their ids), measured before anyone asks: each one
-        read at its new version off the build's thread (``document``: the read its page's next look
-        makes), and its parts not measured yet sent to the pool's facts queue, ahead of queued meshes
-        (``measure``). It waits first until ``settled`` says so (the daemon's: the
-        build's worker free a moment, no request waiting for it), so the read never delays the next
-        build of a program calling its models one after another. A document already waiting
-        here is measured once, at the version it has then. The thread that reads and measures them,
-        or None when there are none."""
+        """Model documents a build just registered (their ids) that an inspection has measured before
+        (``inspected``), measured again before anyone asks: each one read at its new version off the
+        build's thread (``document``: the read its page's next look makes), and its parts not
+        measured yet -- those whose geometry key the build changed -- sent to the pool's facts queue,
+        ahead of queued meshes (``measure``). A document no inspection measured is left alone:
+        nothing is read or measured and no pool process starts for it; its first inspection measures
+        what it asks for. It waits first until ``settled`` says so (the daemon's: the build's worker
+        free a moment, no request waiting for it), so the read never delays the next build of a
+        program calling its models one after another. A document already waiting here is measured
+        once, at the version it has then. The thread that reads and measures them, or None when there
+        are none."""
         with self.load_lock:
             known = [ident for ident in dict.fromkeys(idents) if ident in self.model_loaders
-                     and ident not in self.measuring]
+                     and ident in self.inspected and ident not in self.measuring]
             self.measuring.update(known)
         if not known or self.stopping.is_set():
             with self.load_lock:
