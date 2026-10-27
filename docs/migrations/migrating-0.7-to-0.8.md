@@ -550,11 +550,17 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
 
 - **Every document has an id**, a UUID: a model's comes from its script's path and its
   function's name, so it is the same every run (`bracket.id` in Python, and the handle's
-  `.id`). `@model(name="bracket")` (or `name=` on a file decorator) gives it an id of its
-  script's folder and that name instead, the same whichever file of the folder declares it;
-  two declarations of one name in a folder are refused, naming both. A file the viewer opens
-  has an id of its path. A document's page is `/<uuid>` on
-  the engine's address, and a run prints it as `view:` (the handle's `.url`).
+  `.id`). A model's identity is its namespace, the folder of its script, and its name, the
+  function's by default. `@model(name="bracket")` (or `name=` on a file decorator) gives it
+  an id of that folder and that name instead, the same whichever file of the folder declares
+  it. The same name in two folders is two models; in one folder a second declaration is
+  refused, naming both `file:line`, until the file that held the name is gone or has run
+  again without it (`cadgen run <that file>`). A script moved or renamed without an edit
+  keeps its document: its next run re-attaches the old record (history, pins, picture and
+  saved build) to the new place. A function renamed keeps its document when it has a
+  `name=`, and is a new document when it has none. A file the viewer opens has an id of its
+  path. A document's page is `/<uuid>` on the engine's address, and a run prints it as
+  `view:` (the handle's `.url`).
 - **The commands take an id or a file.** `cadgen export`, `cadgen snapshot` and
   `cadgen inspect` read the document as the engine holds it, and never run a script: a
   script (`x.py`, `x.py::fn`) is refused as a source.
@@ -638,14 +644,17 @@ over with `model(shape, name=...)`.
 
 **The home and the page.**
 
-- **The home is the library alone.** `/` lists every model built and every file opened, as
-  tiles or a table (Name, Updated, Opened), pinned first, then by last activity, with a type
-  filter (All, Models, Files), a search, and Open (the desktop's file chooser). No model is
-  shown with the script that built it. A card's menu holds Open, a file's Copy path and
-  Reveal, Pin, and Delete, which asks first. 0.7's Recents are not read, and a launch's
-  folder is no longer listed: the home starts empty after the upgrade and fills as you run
-  models and open files. A model page's Files menu lists the folder the explorer was last in,
-  else your home folder, never the script's.
+- **The home is the library alone.** `/` lists, under Recent, every model built and every
+  file opened, as tiles or a table, pinned first, then by last activity, with a type filter
+  (All, Models, Files), a search, and Open (the desktop's file chooser). A tile says its last
+  activity with a verb: "Edited 2m ago" when the document changed after a page last opened
+  it, "Viewed 16m ago" when a page opened it after the change. The table's columns are Name,
+  Updated (when it last changed) and Created (when its record was first made: a model's first
+  run, a file's first open). No model is shown with the script that built it. A card's menu
+  holds Open, a file's Copy path and Reveal, Pin, and Delete, which asks first. 0.7's Recents
+  are not read, and a launch's folder is no longer listed: the home starts empty after the
+  upgrade and fills as you run models and open files. A model page's Files menu lists the
+  folder the explorer was last in, else your home folder, never the script's.
 - **Exports are downloads.** The viewer's Export (the download button at the navbar's
   right) is a browser download: pick a format, a "Preparing..." toast shows while the engine
   writes the file, and the browser saves it where it saves downloads. There is no export
@@ -665,7 +674,8 @@ looks depends on the host:
   both under the same navbar, and *Open with CAD* for a model file, which shows that file
   alone, with no navbar.
 - **Text hosts** (Claude Code in a terminal, `codex exec`) draw nothing: `cad_show` opens the
-  model's page in your browser and answers with its link (or says it is already open there).
+  model's page in your browser, from the agent's own environment, and answers with its link
+  (or says it is already open there, or that no browser can be opened from there).
 
 An agent writes files with `cad_export`, draws with `cad_snapshot` and asks with
 `cad_inspect`, on every host.
@@ -862,9 +872,34 @@ the body `{"share":false}`); only you can opt in.
 
 ## Code written against an 0.8 preview
 
-Projects written against a 0.8 pre-release may use names the release renamed or removed:
+Projects written against a 0.8 pre-release may use names the release renamed or removed,
+and the engine such a project ran holds records and documents made under the pre-release's
+identities and build closures.
 
-`key="x"` is now `name="x"`.
+**`key="x"` is now `name="x"`.** `key=` is an unexpected keyword argument. A name belongs to
+the folder of its script: the same name in two folders is two models, and in one folder a
+second declaration of it is refused, naming both `file:line`, until the file that held it
+is gone or has run again without it (`cadgen run <that file>`). Moving a name to another
+file of its folder keeps its document.
+
+**The first start of 0.8.0 moves what the pre-release saved, and builds nothing.** Two passes
+run as the engine starts, before it can be reached, and have nothing left to do at the next
+start. Neither loads the CAD kernel, and `cadgen status` says what each did:
+
+- Cached documents written under the pre-release's earlier build closure (`closure/1`,
+  `xbf/7`) are moved in place to `closure/2` (`xbf/8`). The new closure names the toolchain:
+  its key covers the system and the architecture, beside the format, build123d and OCP, the
+  code and the inputs (the cadgen release and Python are recorded, not keyed). A moved
+  document is taken as it is (`took ... nothing ran`); one whose build123d or OCP changed
+  since builds once and says what moved (`build123d 0.10.0 became 0.11.1`). A document of an
+  older format builds once.
+- Each record gets its namespace and its name, and a model's record the fingerprint of its
+  script. A record that a `key=` named moves, with its saved document, to the id its folder
+  and name give. A record that cannot be read or moved stays as it is, is never deleted, and
+  is counted by `cadgen status`.
+
+Rename `key=` to `name=` in the scripts. The models keep their ids. The other names the
+release renamed or removed:
 
 | Before | Now |
 | --- | --- |
