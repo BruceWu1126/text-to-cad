@@ -18,7 +18,8 @@ from unittest import mock
 from cadgen.engine import build as engine_build
 from cadgen.engine import document
 from cadgen.engine.kernel import memo
-from cadgen.engine.kernel.trace import ELEMENT_NAME, folded_atoms
+from cadgen.engine.kernel.trace import folded_atoms
+from cadgen.engine.refs import ELEMENT_NAME
 
 # The viewer's ref grammar's shared cases (read, never imported: the engine stands alone).
 PARITY = Path(__file__).resolve().parents[5] / "packages/core/src/lib/cadRefs.parity.json"

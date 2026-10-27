@@ -103,6 +103,24 @@ class OperationsTest(unittest.TestCase):
         self.assertTrue(callable(snapshot.call_args.kwargs['progress']))
         self.assertTrue(callable(inspect.call_args.kwargs['progress']))
 
+    def test_the_structure_is_the_summary_s_lists_with_its_text(self):
+        jobs = Operations()
+        structure = {'name': 'hinge', 'id': 'x', 'state': {'state': 'file', 'path': '/m/a.xbf'},
+                     'parts': {'occurrences': 2, 'distinct': 2, 'root': 'hinge'},
+                     'materials': [{'name': 'Aluminum 6061-T6', 'density': 2700.0, 'parts': ['hinge/base']}],
+                     'unweighed': ['hinge/arm'], 'joints': [], 'couplings': [], 'states': [], 'sequences': [],
+                     'animations': [], 'files': []}
+        with patch('cadgen.engine.api.inspect', return_value={'summary': structure, 'closure': None}) as inspect:
+            done = jobs.call('cad_inspect', {'requestId': 'inspect-structure-0001', 'source': str(Path('/tmp/a.xbf').resolve()),
+                                             'query': 'structure', 'waitMs': 10000})
+        self.assertEqual({key: value for key, value in inspect.call_args.kwargs.items() if key != 'progress'},
+                         {'source': str(Path('/tmp/a.xbf').resolve()), 'query': 'structure'})
+        self.assertTrue(callable(inspect.call_args.kwargs['progress']))
+        text = done['result']['inspection']['text']
+        self.assertIn('  Aluminum 6061-T6: hinge/base', text)
+        self.assertNotIn('volume', text)
+        self.assertNotIn('bounds', text)
+
     def test_closed_inputs_and_explicit_paths(self):
         jobs = Operations()
         invalid = jobs.call('cad_inspect', {'requestId': 'request-0000000001', 'source': 'relative.xbf', 'build': True})

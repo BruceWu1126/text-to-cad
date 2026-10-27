@@ -315,7 +315,14 @@ class CacheTest(unittest.TestCase):
             snapped = self.cli("snapshot", ident, str(self.folder / "cold.png"))
             self.assertEqual(snapped.returncode, 0, snapped.stderr)
             self.assertGreater((self.folder / "cold.png").stat().st_size, 0)
-        status, structure = self.page(ident)
+        # Inspection no longer prefetches meshes. The first page does, and their status
+        # fields appear asynchronously: wait for those before comparing two page reads.
+        def meshed_page():
+            status, structure = self.page(ident)
+            return (status, structure) if status == 200 and all(
+                "unmeshed" in part for part in structure["prototypes"]) else None
+
+        status, structure = await_(meshed_page, "the page's prefetched meshes")
         self.assertEqual(status, 200)
         self.assertEqual(structure["closure"]["source"]["function"], "cube")
         listed = self.ask({"op": "status"})

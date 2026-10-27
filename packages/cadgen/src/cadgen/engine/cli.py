@@ -9,7 +9,7 @@ ordinary Python scripts call decorated models explicitly.
     cadgen serve DOC [--port N] [--three DIR]
     cadgen status [--json] | stop [--json] | server [--port N] [--rotate-token]
     cadgen delete DOC [DOC ...] [--json]             documents deleted: record, cached document, the engine's copy
-    cadgen inspect DOC [REF]                           what a document holds and its build closure, or what a ref names (``refs``)
+    cadgen inspect DOC [REF] [--query Q] [--json]      what a document holds and its build closure, or what a ref names (``refs``)
 
 SRC and DOC are an on-disk CAD file's path or a document's id (``ids``): a model's id is what
 ``python SCRIPT.py`` prints for it. A script is never a source: no verb imports or builds one.
@@ -76,11 +76,15 @@ def _server_arguments(server: argparse.ArgumentParser) -> None:
 
 
 def _inspect_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--query", choices=("summary", "closure", "geometry", "build"),
-                        help="inspect a summary and the closure (the default without REF), the closure alone, "
-                             "geometry (requires REF), or build metadata; never builds a model")
+    parser.add_argument("--query", choices=("summary", "structure", "closure", "geometry", "build"),
+                        help="inspect a summary and the closure (the default without REF); the structure: the summary "
+                             "without its bounds, volume and masses, so nothing is measured, and the closure; the "
+                             "closure alone; geometry (requires REF); or build metadata. Never builds a model or "
+                             "meshes a part; a part's volume and box are measured once by the engine and kept for "
+                             "its geometry")
     parser.add_argument("--json", action="store_true",
-                        help="without REF, the summary and the closure as one JSON object (a REF's answer is JSON)")
+                        help="without REF, the summary (or the structure) and the closure as one JSON object (a "
+                             "REF's answer is JSON)")
     parser.add_argument("document", help="an .xbf, a STEP, or a document id; a GLB says its nodes, meshes and "
                                           "animations")
     parser.add_argument("ref", nargs="?", help="[FILE#][OWNER/]ELEMENT or [FILE#]OWNER (cadgen.engine.refs): OWNER a "
@@ -484,7 +488,7 @@ def _inspect(args: argparse.Namespace, prog: str) -> int:
         rows = [plain(f"{row['name']}  {_number(row['duration'])} s") for row in mesh["animations"]]
         print("animations" + "".join(f"\n  {row}" for row in rows) if rows else "animations  none")
         print("closure     none: a mesh carries none, only an .xbf does")
-    elif query == "summary" and not args.json:
+    elif query in ("summary", "structure") and not args.json:
         print(summary_text(found["summary"]))
         path = Path(str(found["summary"]["state"].get("path") or ""))
         if found["closure"] is None and path.suffix.lower() in (".step", ".stp"):
@@ -528,7 +532,8 @@ def _joint_value(value: Any) -> str:
 
 def summary_text(summary: dict[str, Any]) -> str:
     """``cadgen inspect DOC``'s first screen (``api._summary``): a line per fact the document
-    holds, its lists one item per line under it; a fact it has none of says so."""
+    holds, its lists one item per line under it; a fact it has none of says so. A structure
+    (``--query structure``) has no measured line: no bounds, volume or masses."""
     import time
 
     lines = [f"{summary['name']}  {summary['id']}"]
@@ -546,18 +551,23 @@ def summary_text(summary: dict[str, Any]) -> str:
     parts = summary["parts"]
     lines.append(f"parts       {parts['occurrences']} in {parts['root']}"
                  + (f" ({parts['distinct']} distinct)" if parts["distinct"] != parts["occurrences"] else ""))
-    bounds = summary.get("bounds")
-    if bounds:
-        size = " x ".join(_number(value) for value in bounds["size"])
-        corner = ", ".join(_number(value) for value in bounds["min"])
-        lines.append(f"bounds      {size} mm, from ({corner})")
-    else:
-        lines.append("bounds      none: no geometry")
-    lines.append(f"volume      {_number(summary['volume'])} mm^3")
+    measured = "volume" in summary  # the measured lines: a structure's summary has none
+    if measured:
+        bounds = summary.get("bounds")
+        if bounds:
+            size = " x ".join(_number(value) for value in bounds["size"])
+            corner = ", ".join(_number(value) for value in bounds["min"])
+            lines.append(f"bounds      {size} mm, from ({corner})")
+        else:
+            lines.append("bounds      none: no geometry")
+        lines.append(f"volume      {_number(summary['volume'])} mm^3")
     if summary["materials"]:
         mass = summary.get("mass")
         lines.append("materials" + (f"   {_number(mass)} kg in all" if mass is not None else ""))
         for row in summary["materials"]:
+            if not measured:
+                lines.append(f"  {row['name']}: {', '.join(row['parts'])}")
+                continue
             weight = f"{_number(row['mass'])} kg" if row["mass"] is not None else "no density"
             lines.append(f"  {row['name']}: {weight}, {', '.join(row['parts'])}")
         if summary["unweighed"]:
@@ -798,12 +808,14 @@ def status_text(answer: dict[str, Any]) -> str:
                                               f"{_span(now - row['at'])} ago" for row in retired))
     serving = answer.get("serving")
     if serving:
-        # What the server has loaded because a page or a command opened it -- not the documents the
-        # engine holds, which the ``documents:`` lines list -- an evicted file's row left out.
+        # What the server has loaded because a page or a command opened it -- an inspected document
+        # read again after its build to measure its new parts among them (``serve.Server.measure_later``)
+        # -- not the documents the engine holds, which the ``documents:`` lines list; an evicted file's
+        # row left out.
         opened = sum(1 for row in serving.get("documents") or [] if row.get("state", "held") == "held")
         renders = len(answer.get("renders") or [])
         memory = serving.get("memory") or {}
-        held = (memory.get("documents") or 0) + (memory.get("meshes") or 0)
+        held = (memory.get("documents") or 0) + (memory.get("meshes") or 0) + (memory.get("facts") or 0)
         lines.append(f"serving {serving['url']}{_port(serving)}: {opened} document{'' if opened == 1 else 's'} opened by a page or a command"
                      + (f" · {renders} render process{'' if renders == 1 else 'es'}" if renders else "")
                      + (f" · {_gb(held / 2**20)} of {_gb(memory['budget'] / 2**20)} held" if memory.get("budget") else ""))
@@ -850,8 +862,10 @@ VERBS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[
     "snapshot": ("draw a document or a file the viewer opens as the CAD Viewer does, into a PNG", _snapshot_arguments,
                  _snapshot),
     "serve": ("serve a document over HTTP and print its URL", _serve_arguments, _serve),
-    "inspect": ("a document's build closure (its source, modules, inputs and key), or what one thing a ref names is "
-              "and what made it", _inspect_arguments, _inspect),
+    "inspect": ("what a document holds -- its state, parts, bounds, volume, materials, joints, couplings, states, "
+                "sequences, animations and declared files -- then its build closure (its source, modules, inputs "
+                "and key); or what one thing a ref names is and what made it. Nothing is built or meshed",
+                _inspect_arguments, _inspect),
     "status": ("the engine server's workers, what each is building, and its served documents", _status_arguments,
                _status),
     "stop": ("stop the engine server", _stop_arguments, _stop),

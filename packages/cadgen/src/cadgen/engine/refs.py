@@ -12,7 +12,7 @@ its atom is named now -- never picking one.
     SELECTOR  = OWNER | [OWNER "/"] ELEMENT             no OWNER: the document's root
     OWNER     = SEGMENT ("/" SEGMENT)*                  an occurrence's path from the root, or its last segments
     SEGMENT   = LABEL | LABEL "." N | QUOTED ["." N]    N: the N-th of the siblings so labelled, in order
-    ELEMENT   = NAME | ("face" | "edge" | "vertex") " " N    NAME: f:..., e:..., v:... (``trace.ELEMENT_NAME``)
+    ELEMENT   = NAME | ("face" | "edge" | "vertex") " " N    NAME: f:..., e:..., v:... (``ELEMENT_NAME``)
 
 ``FILE`` is the document, everything before the first ``#`` (JSON-quoted when it holds one, or a
 quote): an on-disk CAD file's absolute path, the last segments of its path, or a document's id
@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-__all__ = ["Hit", "RefError", "Selector", "parse", "path_text", "placed_facts", "resolve_structure"]
+__all__ = ["ELEMENT_NAME", "Hit", "RefError", "Selector", "parse", "path_text", "placed_facts", "resolve_structure"]
 
 _LETTERS = {"f": "face", "e": "edge", "v": "vertex"}
 # The trace lineage's lists.
@@ -53,14 +53,21 @@ _INDEXED = re.compile(r"(.+)\.([1-9][0-9]*)", re.S)
 _NUMBER = re.compile(r"\.([1-9][0-9]*)")
 
 
+# An element name, as the naming spells it (``kernel/trace.py``) and the viewer's ref grammar admits it
+# (``cadRefs`` in the bundled ``@text-to-cad/core`` runtime: ``ELEMENT_NAME_SOURCE``): a kind, then an
+# atom and its steps. Kept here, beside the grammar that reads it and with no kernel: parsing a ref
+# loads none.
+_NAME_SEGMENT = r"[A-Za-z_][A-Za-z0-9_]*"
+_NAME_NUMBER = r"[1-9][0-9]*"
+_FEATURE_NAME = rf"{_NAME_SEGMENT}(?:\.{_NAME_SEGMENT})?"
+_ATOM = rf"{_FEATURE_NAME}(?:\.{_NAME_NUMBER}|~[0-9a-f]{{12}})"
+_STEP = (rf";(?:(?:(?:M|MG[fev]|G[fev]|U)(?:{_NAME_NUMBER})?|L):{_FEATURE_NAME}(?:\+[fev]:{_ATOM})*"
+         rf"|D{_NAME_NUMBER})")
+ELEMENT_NAME = re.compile(rf"[fev]:(?:[0-9a-f]{{12}}|{_ATOM}(?:{_STEP})*)")
+
+
 class RefError(ValueError):
     """A ref that names nothing in the document, or several things where it names one."""
-
-
-def _element_name() -> Any:
-    from cadgen.engine.kernel.trace import ELEMENT_NAME
-
-    return ELEMENT_NAME
 
 
 # --- the grammar ---------------------------------------------------------------------------
@@ -195,7 +202,7 @@ def _selector(segments: list[Segment], ref: str) -> Selector:
         ordinal = _ORDINAL.fullmatch(last.text)
         if ordinal is not None:
             element = (ordinal[1], int(ordinal[2]))
-        elif _element_name().fullmatch(last.text):
+        elif ELEMENT_NAME.fullmatch(last.text):
             element = last.text
     owner = segments[:-1] if element is not None else segments
     return Selector(tuple(owner) if owner else None, element)
@@ -238,7 +245,7 @@ class Node:
 def _plain(label: str) -> bool:
     """Whether a label reads back as itself, unquoted, as a segment that ends an owner."""
     return (bool(label) and label == label.strip() and not any(ch in label for ch in '/,"')
-            and not _ORDINAL.fullmatch(label) and not _element_name().fullmatch(label))
+            and not _ORDINAL.fullmatch(label) and not ELEMENT_NAME.fullmatch(label))
 
 
 def _segments(root: Node) -> None:

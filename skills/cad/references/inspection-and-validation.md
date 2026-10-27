@@ -227,7 +227,9 @@ closure
 
 The state is the engine's: `live` (a worker holds it), `held` (the engine holds it, no
 worker), whether its cache has it on disk, and when it was built. `--json` prints the same as `{"summary", "closure"}`, and `--query closure` the
-closure alone. Nothing is built.
+closure alone. For the names alone, `--query structure` prints the same lists without the
+bounds, volume and masses, and measures nothing. Nothing is built or meshed, and each part is
+measured once: an inspection after an edit measures only the parts it changed.
 
 ## Measurements
 

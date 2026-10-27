@@ -357,10 +357,10 @@ only, and a file's id is derived again from its path after a restart.
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code and the platform, the closure made again before the body runs (`again`), and a `closure/1` document's bytes moved to this closure (`migrated`) |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names; a mesh face refused, `mesh_faces`), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP, and a saved document's main-label strings rewritten in its bytes (`relabel`) |
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a mesh file as data (`read_mesh`, `Mesh`); a read of a file the build writes refused (`refuse_written`) |
-| `refs.py` | references to geometry: the ref grammar, occurrence paths, resolution by name in the latest build, for `inspect` and the viewer (**References**) |
+| `refs.py` | references to geometry: the ref grammar and the element-name pattern it reads (`ELEMENT_NAME`, kernel-free), occurrence paths, resolution by name in the latest build, for `inspect` and the viewer (**References**) |
 | `export/` | `translate` and the kind registry (`__init__`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); a mesh file read as a document of triangles, no kernel (`mesh_file`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a planar document's drawing through build123d's DXF exporter, with the drawing checks (`dxf`); a motion baked into a glTF clip (`motion`); a view made a document again, for a STEP of a document held without its XCAF document and an xbf written from a STEP (`tree`) |
-| `mesh.py`, `mesh_format.py` | per-part tessellation at a quarter per cent tolerance, element facts; the part buffer, its wire format and edge classes (`mesh_format`, kernel-free) |
-| `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a STEP read in a reader process, held by its bytes; a minimal three.js page |
+| `mesh.py`, `mesh_format.py` | per-part tessellation at a quarter per cent tolerance, element facts, a part's facts as a whole (`measured`: volume, solids, box); the part buffer, its wire format and edge classes (`mesh_format`, kernel-free) |
+| `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; each part's facts by geometry key, measured in batches (`FactCache`, `Server.measure`); the meshing pool and its queues (`Mesher`); a STEP read in a reader process, held by its bytes; a minimal three.js page |
 | `snapshot.py` | `cadgen snapshot`: one dispatcher by suffix -- a document, a mesh file, a robot or a DXF drawn by OCCT (`render/`) into a PNG; a script's model drawn from its worker's memory |
 | `formats/` | the files the stills draw that are not documents, each read into a structure and part buffers: STL (numpy), 3MF (zip + XML), GLB (OCCT's glTF reader, textures and all; and numpy's, for a conversion: `gltf`), URDF/SDF/SRDF (XML, the viewer's forward kinematics), DXF (group codes, flattened as the viewer's pane draws it) |
 | `render/` | the stills drawn by OCCT from the engine's meshes: a document held and drawn, and the daemon's render process per served document and per file (`service.py`); the scene (`occt.py`); a DXF drawn in the 2D look (`drawing.py`); the viewer's Explode, ported (`explode.py`); a part's buffer as OCCT shapes (`shapes.py`); the headless OpenGL context per platform (`context.py`) |
@@ -387,11 +387,13 @@ cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera 
 cadgen snapshot --job PACKET [SRC] [the same flags, each over every job]
                                              every picture a Quick Edit packet (or a job file) names
 cadgen serve DOC [--port N] [--three DIR]
-cadgen inspect DOC [REF] [--json]              what the document holds, then its build closure; with REF (**References**): an element's facts and
+cadgen inspect DOC [REF] [--query Q] [--json]  what the document holds, then its build closure; with REF (**References**): an element's facts and
                                              what made it, or a part's or an assembly's volume, mass and
                                              world bounds (a part's placement too); of a GLB, its nodes,
                                              meshes and animations (an STL or a 3MF, and a ref into any
-                                             mesh, is refused, saying what shows it)
+                                             mesh, is refused, saying what shows it); Q summary (the default
+                                             without REF), structure (the summary with nothing measured),
+                                             closure, geometry (the default with REF) or build
 cadgen status [--json] | stop [--json] | server [--port N] [--rotate-token]
 cadgen delete DOC [DOC ...] [--json]        each document deleted: its record, its document in the engine's
                                              cache and what the engine holds of it (**Delete**); never a
@@ -639,14 +641,22 @@ tessellations, is under one memory budget: **Document lifetime**.)
   call and every call since took its models from their keys. Anything else loads the script
   again: another run, an edit, a body that ran.
 
-The meshing pool starts with the first page or view, never with a build. A build serves its
-document, so the daemon's server starts with the first `python model.py`; its meshing pool
-waits. It starts on the first mesh, topology or pose a page asks, or on `Server.warm`: sent
-by `cadgen viewer` at launch (`CADGEN_VIEWER_WARM=0` skips it), called when an app launches a
-view and when a build's `view:` link lands. With no page, the daemon's only children are the
-worker and the standby. Measured (before the standby) on a 24-part model (5 shapes) on a 10-core machine: 1 child and 0.5 GB with
-no page, against 12 and 3.2 GB when the pool started with the server. The pool's start costs
-a first page about 0.8 s, less the time the page takes to load after the warm.
+The meshing pool starts with the first page, view or inspection, never with a build. A build
+serves its document, so the daemon's server starts with the first `python model.py`; its meshing
+pool waits. Every process starts on the first mesh a page asks for, or on `Server.warm`: sent by
+`cadgen viewer` at launch (`CADGEN_VIEWER_WARM=0` skips it), called when an app launches a view and
+when a build's `view:` link lands. An inspection's measurements, picked elements and poses start
+only the processes their jobs need (`Mesher.processes`, `warm=False`; a
+document's measurements take two at most while no page has warmed the pool, **Mesh**). With no page
+and no inspection, the daemon's only children are the worker and the standby. Measured (before the
+standby) on a 24-part model (5 shapes) on a 10-core machine: 1 child and 0.5 GB with no page,
+against 12 and 3.2 GB when the pool started with the server. The pool's start costs a first page
+about 0.8 s, less the time the page takes to load after the warm.
+
+The pool takes its jobs from two queues and is handed one job per process at a time
+(`Mesher.run`): facts (an inspection's measurements, picked elements, poses, and an inspected
+document's measurement after its next build), then tessellations. A fact waits for a running job
+at most, never queued meshes.
 
 A retired script's next build is a fresh worker's: a restart, which takes each model's document
 whole from the cache when its key is unchanged (**Build closure**, **The cache**), and else builds
@@ -765,8 +775,10 @@ temporary folder.
   is never two daemons' lock.
 - **Reads.** What a client used to ask of the loopback port, `inspect`'s document reads, goes
   through the door too (`{"op": "read"}`, `serve.Server.read`, answered in process), so a
-  sandboxed shell needs no socket at all. The HTTP listener serves pages, the CAD app and the
-  stdio MCP peer, which run outside any shell's sandbox.
+  sandboxed shell needs no socket at all. A read of the parts' facts asked with `"progress": true`
+  sends `{"progress": {done, total, key}}` lines as each part's comes in, before its answer. The
+  HTTP listener serves pages, the CAD app and the stdio MCP peer, which run outside any shell's
+  sandbox.
 - **Trust.** The door changes no boundary: the engine's folder is the user's own and closed to
   everyone else (`daemon.folder_refusal`), `clients/` is made `0700`, and every pipe is `0600`, so
   the daemon serves whoever can make files in that folder: its owner, as the socket did. It
@@ -1022,19 +1034,19 @@ drains nothing: its documents the server and the cache lacked are `unsaved`.
 
 **One budget.** Everything the daemon holds is counted against one budget: each served
 document's structure (as JSON), its shape bytes, the bytes made from live shapes and a held
-document's xbf bytes, its records among them (`Served.size`), and every tessellation (`MeshCache`, which has no cap of its
-own in the daemon). Evicting a document drops all of it.
+document's xbf bytes, its records among them (`Served.size`), every tessellation (`MeshCache`, which has no cap of its
+own in the daemon) and every part's facts (`FactCache`, each counted as its JSON). Evicting a document drops all of it.
 Bytes are counted as they are put, never sampled. Workers and render processes are processes of
 their own, held together to the workers' memory cap (**The engine server and its workers**). The budget is `CADGEN_ENGINE_MEMORY_MB`, else a quarter
 of the machine's physical memory (`serve.memory_budget`: macOS `hw.memsize`, Linux
 `sysconf(SC_PHYS_PAGES)` or the cgroup's `memory.max` when that is less, Windows
 `GlobalMemoryStatusEx`). Past it, what is held is evicted from memory down to 80 % of it
 (`Server.trim`): tessellations first, least recently used first (a tessellation is made again from
-its shape); then documents, least recently used first, in one order: every document is read again
+its shape), then the parts' facts (measured again when asked); then documents, least recently used first, in one order: every document is read again
 from where it is kept, under the same id, on its next access, and reading runs no code -- a file
 from its file, a model's document from the cache, which is handed its bytes as it leaves when it
 does not hold them yet (`Server.leaving`, `Models.leaving`). A document a page watches is never
-evicted, nor its tessellations (law 19, connected means warm), nor the document being served as it is put.
+evicted, nor its tessellations or its parts' facts (law 19, connected means warm), nor the document being served as it is put.
 The STEP reads held by their bytes go with the first document evicted.
 
 **Pressure.** The daemon's server asks the operating system's memory-pressure signal every two
@@ -1120,7 +1132,7 @@ what a terminal and `cadgen status` print); a page says each in its own language
 | `snapshot` | `scene` | Making the scene | -- ; a job's pictures of one document say it once |
 | | `draw` | Drawing the picture | pictures drawn, where a job draws several |
 | | `write` | Writing the picture | pictures written, where a job writes several; `detail` the file |
-| `inspect-measure` | `measure` | Measuring parts | parts measured of the document's; `detail` the part |
+| `inspect-measure` | `measure` | Measuring parts | parts measured of the document's, as the engine has each (`Server.measure`); `detail` the last one in |
 
 A stage opens with a frame of its own; the frames a stage says as its count moves (a body done, a part
 collected or measured) come at least 100 ms apart (`progress.INTERVAL`), the latest held one sent when
@@ -1584,7 +1596,8 @@ a declared file follows that file's bytes (**Document lifetime**).
 `status`, `stop`, `delete` and `server` only the CLI calls): one per command, each through the daemon. No function builds source text;
 a shape made elsewhere is handed over, never built (`model(shape, name=...)`, **Shapes handed over**).
 `export(source, *destinations)` a list of `Written`; `snapshot(source, out, ...)` a `Drawn`, and `snapshot(job=PACKET, ...)` (with `source` in place of the packet's input, as `--job PACKET SRC`) a list of them, one verb with two input shapes, anything else refused as Python refuses a call; `inspect(doc)` what
-the document holds and its build closure, `inspect(doc, ref)` an element's facts. Each takes a handle (what a model call
+the document holds and its build closure (`query="summary"`; `"structure"` the same with nothing measured, and with no
+query the closure alone), `inspect(doc, ref)` an element's facts. Each takes a handle (what a model call
 returns), a document id or a file path; `export` and `snapshot` take the decorated function too,
 building it first. A handle exports and draws its document the same way (`.export()`,
 `.snapshot()`); a `Model`'s `.build(verify=, profile=, daemon=)` is the debug seam, a `Report`: it
@@ -2115,7 +2128,9 @@ out.
 
 What the kernel measures of an element is asked for, never extracted ahead:
 `GET /api/doc/<id>/part/<key>/face/<ordinal>` is its area, centroid, surface
-type, exact bounding box and `BRepCheck` verdict (and a round face's radii);
+type, exact bounding box and `BRepCheck` verdict (and a round face's radii), and
+whether the part's tessellation has it (`meshed`: null while the part is not meshed --
+an inspection meshes nothing);
 `.../edge/<ordinal>` its length, curve type, class, faces and endpoints (and a
 circle's radius and sweep); `.../vertex/<ordinal>` its position;
 `.../groups` how a pick of one face or edge grows, as a STEP's selector table
@@ -2135,16 +2150,47 @@ whichever run wrote it.
 an element answers its facts and, of a model's document, `made_by`, with its canonical `ref`, its occurrence's `path`
 (`hand/finger.2`), its part, key, kind, ordinal and name, its points (centroid, position,
 endpoints, box) placed where that occurrence stands; a part or an assembly answers what it
-weighs: each part's volume, measured on its solids (`.../part/<key>/volume`), times its material's
+weighs: each part's volume, measured on its solids (its facts, below), times its material's
 density, summed -- `{ref, parts, volume (mm³), mass (kg, null when no part has a material),
 unweighed (the parts without one, by path)}`, and for one part its path, material and density.
 A ref of several selectors answers a list. A ref that names nothing, or several things where
 it names one, is refused by name (exit 2). Without a REF it serves the document the same way and
 summarises it before its closure (`api._summary`, `query="summary"`): its state (`model_info`'s, with
 `cached` when the engine's cache holds it at its revision; `file` for a file's document), its parts,
-its bounds (each part's box beside its volume, `.../volume`, placed where its occurrences stand), its
+its bounds (each part's box beside its volume placed where its occurrences stand), its
 volume, its materials and their masses, its joints, mechanism states, configuration sequences and
 animations (the structure's `animations`: each name and duration), and a model's declared files.
+`query="structure"` (`--query structure`) is the same without its bounds, volume and masses, and
+measures nothing: the lists alone.
+
+**What an inspection costs.** It meshes nothing: it reads the structure through the engine's door
+(`Server.read`), which sends no part to the mesher, where a page's read sends every part not held
+yet, as it is about to ask for them all. What it measures of a part as a whole -- its volume, its
+solids and its box in its own frame (`mesh.measured`) -- are the part's facts, kept by its geometry
+key beside its tessellation (`serve.FactCache`), under the same memory budget and evicted after the
+tessellations (**Document lifetime**), and written nowhere: a memo of them beside the document or
+in the cache folder would be a derived file (law 2), and the cache holds a document's bytes alone.
+They are measured once, whichever document or version holds the part, so an edit measures only
+the parts whose key it changed. `GET /api/doc/<id>/volumes` (`?keys=K,...` for some) answers every
+part's at once, and `.../part/<key>/volume` one part's: the parts no one measured yet go to the pool
+together, in batches of about a megabyte of shape bytes (`serve.FACT_BYTES`: a light document is one
+job, a heavy one spread over the pool a page warmed, else over two processes at most,
+`serve.FACT_PROCESSES_COLD`, so an inspection with no page open starts no more), each in the pool's
+queue for facts, which a free process takes before any mesh waiting (**The engine server and its
+workers**). A summary that finds a part's facts missing waits for them: no figure is guessed. Its
+`measure` count is the engine's: the door's read of the facts, asked with `progress`, says each
+part's as it comes in -- the ones held at once, the rest as the pool answers their batches -- ahead
+of its answer. Measuring is lazy: a document is measured when an inspection first asks for its
+facts (a summary, a part's or an assembly's ref), and a build of a document no inspection has asked
+of reads nothing, measures nothing and starts no pool process. Once one has asked, the document is
+an inspected one (`Server.inspected`, in memory: an engine started afresh measures it again at its
+next inspection), and each later build of it is read at its new version once the build's worker has
+settled (free for half a second with no request waiting for it, `daemon.MEASURE_IDLE`: a program
+calling its models one after another sends its next build within milliseconds, so those calls do
+not wait on that read), its parts whose geometry key changed measured then, in the facts queue
+ahead of meshes (`Server.measure_later`), so the inspection after the edit finds them. The command
+parses the ref and places what it names in its own process with no kernel: the element-name grammar
+it reads is `refs.ELEMENT_NAME`.
 
 ## Wire format
 
@@ -2210,7 +2256,7 @@ made it out of another (`f:plate.body.3;M:plate.relief`: face 3 of the box, modi
 by the relief cut). A long derivation folds to its last feature and a digest
 (`f:plate.relief~5d1e0c2f9a3b`); the worker that built it spells it out. Every name is a
 reference the CAD Viewer's ref grammar parses (`cadRefs` in the bundled `@text-to-cad/core` runtime, mirrored as
-`kernel/trace.py`'s `ELEMENT_NAME`): a feature name has at most one dot, every segment
+`refs.py`'s `ELEMENT_NAME`, which the naming in `kernel/trace.py` reads and which loads no kernel): a feature name has at most one dot, every segment
 is an identifier, and an atom ends in a number or a digest. A name holds no line or file (law 9): a line is
 what the worker serves, now.
 

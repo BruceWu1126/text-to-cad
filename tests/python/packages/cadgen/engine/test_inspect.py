@@ -1,6 +1,9 @@
 """``cadgen inspect DOC`` without a ref: what the document holds, on one screen, before its build
 closure -- its state, parts, bounds, volume, materials, joints, states, sequences and declared
-files -- read from the document the engine holds, and nothing built; ``--json`` the same as data."""
+files -- read from the document the engine holds, and nothing built; ``--json`` the same as data;
+``--query structure`` the same lists with nothing measured. Measuring is lazy: a build no inspection
+has measured reads and measures nothing; the first summary measures, and each later build of the
+inspected document has the part it changed measured once its worker settles, before anyone asks."""
 
 from __future__ import annotations
 
@@ -10,6 +13,7 @@ import shutil
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 
@@ -63,12 +67,43 @@ class SummaryTest(unittest.TestCase):
     def run_(self, *args: str):
         return engine_daemon.run([sys.executable, *args], cwd=self.folder, env=self.env)
 
+    def served(self) -> tuple[int, int]:
+        """The bytes of the parts' facts the engine holds, and how many documents its server has
+        loaded (``status --json``)."""
+        status = self.run_("-m", "cadgen.engine", "status", "--json")
+        self.assertEqual(status.returncode, 0, status.stderr)
+        serving = json.loads(status.stdout)["serving"]
+        return serving["memory"]["facts"], sum(row["state"] == "held" for row in serving["documents"])
+
+    def facts(self) -> int:
+        """The bytes of the parts' facts the engine holds (``status --json``)."""
+        return self.served()[0]
+
     def test_a_hinge_with_one_joint_and_one_sequence_is_summarised_before_its_closure(self) -> None:
         (self.folder / "hinge.py").write_text(textwrap.dedent(HINGE), encoding="utf-8")
         built = self.run_("hinge.py")
         self.assertEqual(built.returncode, 0, built.stderr)
         ident = next(line.split()[1] for line in built.stdout.splitlines() if line.strip().startswith("id:"))
         (self.folder / "hinge.ran").unlink()
+
+        # No inspection has measured it: its build loaded no document and measured nothing (the engine
+        # decides so before the build answers).
+        self.assertEqual(self.served(), (0, 0))
+
+        # The structure: the summary's lists, nothing measured for them.
+        listed = self.run_("-m", "cadgen.engine", "inspect", ident, "--query", "structure")
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        lines = listed.stdout.splitlines()
+        self.assertEqual(lines[2:7], ["parts       2 in hinge", "materials", "  Aluminum 6061-T6: hinge/base",
+                                      "  no material: hinge/arm", "joints"])
+        self.assertIn("closure", lines)
+        data = self.run_("-m", "cadgen.engine", "inspect", ident, "--query", "structure", "--json")
+        self.assertEqual(data.returncode, 0, data.stderr)
+        structure = json.loads(data.stdout)["summary"]
+        self.assertFalse({"bounds", "volume", "mass"} & set(structure), structure)
+        self.assertEqual(structure["materials"], [{"name": "Aluminum 6061-T6", "density": 2700.0, "parts": ["hinge/base"]}])
+        self.assertEqual(structure["states"], [{"name": "open", "values": {"elbow": 90.0}}])
+        self.assertEqual(self.facts(), 0, "a structure measures nothing")
 
         shown = self.run_("-m", "cadgen.engine", "inspect", ident)
         self.assertEqual(shown.returncode, 0, shown.stderr)
@@ -106,7 +141,29 @@ class SummaryTest(unittest.TestCase):
                          ([{"name": "open", "values": {"elbow": 90.0}}], [{"name": "cycle", "duration": 2.5}]))
         self.assertEqual((summary["parts"], summary["volume"], summary["mass"]),
                          ({"occurrences": 2, "distinct": 2, "root": "hinge"}, 144000.0, 0.324))
+        # How far the measurement is, as the engine tells it through its door: counted to every part.
+        probe = ("import json, sys\nfrom cadgen.engine import api\nframes = []\n"
+                 "api.inspect(sys.argv[1], query='summary', progress=frames.append)\nprint(json.dumps(frames))\n")
+        measuring = self.run_("-c", probe, ident)
+        self.assertEqual(measuring.returncode, 0, measuring.stderr)
+        frames = [frame for frame in json.loads(measuring.stdout) if frame["kind"] == "inspect-measure"]
+        self.assertEqual([(frame["done"], frame["total"]) for frame in (frames[0], frames[-1])], [(0, 2), (2, 2)])
+        self.assertIn(frames[-1]["detail"], ("base", "arm"))
         self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
+
+        # Inspected now, the hinge's next build has the part it changed measured once its worker
+        # settles, before anyone asks: the longer arm's facts are in before the next inspection.
+        measured = self.facts()
+        self.assertGreater(measured, 0)
+        (self.folder / "hinge.py").write_text(textwrap.dedent(HINGE).replace("bd.Box(120, 20, 10", "bd.Box(130, 20, 10"),
+                                              encoding="utf-8")
+        built = self.run_("hinge.py")
+        self.assertEqual(built.returncode, 0, built.stderr)
+        deadline = time.monotonic() + 120
+        while self.facts() <= measured:
+            self.assertLess(time.monotonic(), deadline, "the build's parts were measured with nobody asking")
+        again = json.loads(self.run_("-m", "cadgen.engine", "inspect", ident, "--json").stdout)["summary"]
+        self.assertEqual(again["volume"], 146000.0, "the longer arm")
 
 
 class CouplingsTest(unittest.TestCase):

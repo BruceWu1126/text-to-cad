@@ -180,6 +180,19 @@ class WhereTest(unittest.TestCase):
             self.assertEqual(refused.returncode, 2, refused.stdout)
             self.assertIn(said, refused.stderr)
 
+    def test_the_command_reads_a_ref_without_loading_the_kernel(self) -> None:
+        # The engine measures; the command only parses and places: a ref costs it no kernel load.
+        code = ("import runpy, sys\n"
+                "sys.argv = ['cadgen', 'inspect', 'XBF/hand.xbf', 'hand/finger.2/face 1']\n"
+                "try:\n    runpy.run_module('cadgen.cli', run_name='__main__')\n"
+                "except SystemExit as stop:\n    assert not stop.code, stop.code\n"
+                "print(sorted(name for name in sys.modules if name.startswith('OCP.') or name == 'cadgen.engine.kernel.trace'),"
+                " file=sys.stderr)\n")
+        done = engine_daemon.run([sys.executable, "-c", code], cwd=self.folder, env=self.env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout)["path"], "hand/finger.2")
+        self.assertEqual(done.stderr.strip().splitlines()[-1], "[]", "no kernel module was loaded")
+
 
 def setUpModule() -> None:
     # The registry and cache of every engine this module starts are its own, never the developer's

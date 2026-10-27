@@ -313,8 +313,10 @@ its declared outputs. An unbuilt or unsaved model requires an explicit build: on
 the engine built before names the command (`cadgen run` and the script that defines it). With no reference,
 `cadgen inspect` prints what the document holds -- its state, parts, bounds, volume, materials,
 joints, couplings (name, kind, ratio, joints), states, sequences, animations and declared files -- then its build closure (`--json`:
-both as data; `--query closure`, and `cadgen.inspect()` with no reference, the closure alone);
-with a reference it returns geometry facts.
+both as data; `--query structure`, the same with nothing measured: no bounds, volume or masses;
+`--query closure`, and `cadgen.inspect()` with no reference, the closure alone);
+with a reference it returns geometry facts. No form meshes a part, and a part's volume and box
+are measured once and kept by its geometry, in memory alone.
 `query="build"` (`--query build`) returns saved-file metadata and closure or live
 build metadata. File metadata does not imply a live worker.
 
