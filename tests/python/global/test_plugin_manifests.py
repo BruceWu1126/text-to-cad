@@ -253,6 +253,7 @@ class PluginManifestPolicyTest(unittest.TestCase):
         args = server["args"]
         self.assertNotIn("--offline", args)
         self.assertGreaterEqual(server.get("startup_timeout_sec", 0), 300)
+        self.assertIs(server.get("required"), True, "Codex must initialize CAD before starting a session")
         self.assertIn("--no-config", args)
         self.assertEqual(args[-2:], ["cadgen", "mcp"])
         version = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()

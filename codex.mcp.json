@@ -13,6 +13,7 @@
         "mcp"
       ],
       "startup_timeout_sec": 300,
+      "required": true,
       "env": {
         "CADGEN_INSTALL_CHANNEL": "codex-github"
       }

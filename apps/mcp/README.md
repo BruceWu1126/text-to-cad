@@ -11,6 +11,12 @@ engine, then forwards JSON-RPC to `/mcp` using its installation token. Each shim
 negotiates a separate MCP session. Closing a shim releases that session and leaves
 the engine, its workers and other clients alive.
 
+Codex marks this MCP server as required and allows 300 seconds for cold startup.
+It waits for initialization; a failed download, connection or bootstrap blocks session
+startup or resume, including unrelated work while CAD is enabled. Fix the server or
+disable the CAD MCP server/plugin before continuing without it. Other hosts retain their
+own startup behavior.
+
 Every presentation's initialization instructions explain project authoring as well as viewing:
 install the server's exact cadgen release in the chosen project Python environment, set
 `CADGEN_PORT` to the server's selected port, run a no-argument `@model` with that interpreter,
