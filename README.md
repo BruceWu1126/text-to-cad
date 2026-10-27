@@ -1,21 +1,20 @@
 <div align="center">
 
-<img src="https://github.com/earthtojake/text-to-cad/raw/0875a5deda7b769bf695d0e635a0be6ae6eb2dd4/apps/docs/public/brand/logo-texttocad-animated.svg" alt="text-to-cad" width="800">
+<img src="https://github.com/earthtojake/text-to-cad/raw/4811290bcdf57f5218af9eed904d8673330c3234/apps/docs/public/brand/logo-texttocad-animated.svg" alt="text-to-cad" width="800">
 
-Give your agent CAD superpowers.
+Design physical products with AI.
 
-[Docs](https://www.texttocad.dev)
+[Website](https://www.texttocad.dev)
 
-[![GitHub stars](https://img.shields.io/github/stars/earthtojake/text-to-cad?style=for-the-badge&logo=github&label=Stars)](https://github.com/earthtojake/text-to-cad/stargazers)
-[![skills.sh](https://skills.sh/b/earthtojake/text-to-cad?style=for-the-badge)](https://skills.sh/earthtojake/text-to-cad)
-[![Follow @earthtojake](https://img.shields.io/badge/Follow-%40earthtojake-000000?style=for-the-badge&logo=x)](https://x.com/earthtojake)
-[![Join Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/5FGB9DwJYU)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
-[![Tests](https://img.shields.io/github/actions/workflow/status/earthtojake/text-to-cad/test.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=Tests)](https://github.com/earthtojake/text-to-cad/actions/workflows/test.yml?query=branch%3Amain)
-[![cadgen](https://img.shields.io/pypi/v/cadgen?style=for-the-badge&logo=pypi&logoColor=white&label=cadgen)](https://pypi.org/project/cadgen/)
-[![build123d](https://img.shields.io/badge/build123d-0.11-2F6FB0?style=for-the-badge)](https://github.com/gumyr/build123d)
-[![Open CASCADE](https://img.shields.io/badge/Open%20CASCADE-7.9-E2001A?style=for-the-badge)](https://dev.opencascade.org)
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://github.com/earthtojake/text-to-cad/blob/0875a5deda7b769bf695d0e635a0be6ae6eb2dd4/packages/cadgen/pyproject.toml)
+[![cadgen](https://img.shields.io/pypi/v/cadgen?style=flat&logo=pypi&logoColor=white&label=cadgen)](https://pypi.org/project/cadgen/)
+[![Tests](https://img.shields.io/github/actions/workflow/status/earthtojake/text-to-cad/test.yml?branch=main&style=flat&logo=githubactions&logoColor=white&label=Tests)](https://github.com/earthtojake/text-to-cad/actions/workflows/test.yml?query=branch%3Amain)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat)](LICENSE)
+[![skills.sh](https://skills.sh/b/earthtojake/text-to-cad?style=flat)](https://skills.sh/earthtojake/text-to-cad)
+[![Downloads](https://img.shields.io/pepy/dt/cadgen?style=flat&logo=pypi&logoColor=white&label=downloads)](https://pepy.tech/projects/cadgen)
+
+[![Join Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/5FGB9DwJYU)
+[![Follow @earthtojake](https://img.shields.io/badge/Follow-%40earthtojake-000000?style=flat&logo=x)](https://x.com/earthtojake)
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-EA4AAA?style=flat&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/earthtojake)
 
 </div>
 
@@ -32,7 +31,7 @@ Gemini and Grok.
 
 ### How it works
 
-1. Your agent writes each model as a Python script, with build123d.
+1. Your agent writes each model as a Python script with [build123d](https://github.com/gumyr/build123d), built on [Open CASCADE](https://dev.opencascade.org).
 2. Running the script, `python model.py`, builds the model with cadgen's engine
    into an `.xbf` document (its parts, names, colours, materials and joints) and
    the STEP, GLB, STL or 3MF files the script declares. The engine keeps each
@@ -52,8 +51,10 @@ Install text-to-cad from https://github.com/earthtojake/text-to-cad
 
 By default, text-to-cad sends usage stats and crash reports, tagged with a random
 ID and never including your files, paths or prompts; turn them off with
-`uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen telemetry off`, or ask your agent to. [Telemetry](#telemetry) says
+`uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.1 cadgen telemetry off`, or ask your agent to. [Telemetry](#telemetry) says
 the rest.
+
+The runtime supports Python 3.11+; the launch commands use uv-managed Python 3.13.
 
 Or install it yourself:
 
@@ -119,7 +120,7 @@ app. If Claude Desktop cannot find `uvx`, give its full path (`which uvx`).
   "mcpServers": {
     "cad": {
       "command": "uvx",
-      "args": ["--no-config", "--managed-python", "--python", "3.13", "--from", "cadgen==0.8.0", "cadgen", "mcp"],
+      "args": ["--no-config", "--managed-python", "--python", "3.13", "--from", "cadgen==0.8.1", "cadgen", "mcp"],
       "env": {"CADGEN_INSTALL_CHANNEL": "claude-desktop"}
     }
   }
@@ -293,7 +294,7 @@ one anonymous request, with no ID, path or anything about you, never in CI and
 never for a copy that something else updates. `CADGEN_UPDATE_CHECK=0` turns it off.
 
 A CAD project written for cadgen 0.7 needs porting to 0.8:
-[the migration guide](https://github.com/earthtojake/text-to-cad/blob/0875a5deda7b769bf695d0e635a0be6ae6eb2dd4/docs/migrations/migrating-0.7-to-0.8.md) takes one across, step by
+[the migration guide](https://github.com/earthtojake/text-to-cad/blob/4811290bcdf57f5218af9eed904d8673330c3234/docs/migrations/migrating-0.7-to-0.8.md) takes one across, step by
 step, and an agent with the CAD skill can follow it.
 
 ### Telemetry
@@ -312,7 +313,7 @@ code fails, they also send a crash report: the error's type and where in cadgen 
 dependencies) it failed, never its message, and with any of your own code a bare placeholder. Our server adds the country each request
 comes from (worked out from its IP address, which it doesn't keep) and stores it all with PostHog. Never file names,
 paths, contents or prompts. The first `cadgen` command says so once, and sending starts then. Turn it off, which
-also deletes what was sent, with `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen telemetry off`, **Telemetry** in either app's menu (the logo at
+also deletes what was sent, with `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.1 cadgen telemetry off`, **Telemetry** in either app's menu (the logo at
 the top left, over any model), or by asking your agent. `DO_NOT_TRACK=1` or `CADGEN_TELEMETRY=0` turns it off for
 one process, and `CADGEN_TELEMETRY=1` on, without changing your setting; nothing is sent by default in CI or from a
 development install. Nothing waits to send: a command or a model script sends nothing itself, and what it counted,
@@ -363,6 +364,9 @@ robot description files, simulation, and local review.
 ## 🛠️ Contributing
 
 Branch from `main` and open PRs against `main`. For the local workflow, testing in
-agent apps and validation, see [CONTRIBUTING.md](https://github.com/earthtojake/text-to-cad/blob/0875a5deda7b769bf695d0e635a0be6ae6eb2dd4/CONTRIBUTING.md); an agent working in
-the repository starts at [AGENTS.md](https://github.com/earthtojake/text-to-cad/blob/0875a5deda7b769bf695d0e635a0be6ae6eb2dd4/AGENTS.md). A security problem is reported privately,
-as [SECURITY.md](https://github.com/earthtojake/text-to-cad/blob/0875a5deda7b769bf695d0e635a0be6ae6eb2dd4/SECURITY.md) says.
+agent apps and validation, see [CONTRIBUTING.md](https://github.com/earthtojake/text-to-cad/blob/4811290bcdf57f5218af9eed904d8673330c3234/CONTRIBUTING.md); an agent working in
+the repository starts at [AGENTS.md](https://github.com/earthtojake/text-to-cad/blob/4811290bcdf57f5218af9eed904d8673330c3234/AGENTS.md). A security problem is reported privately,
+as [SECURITY.md](https://github.com/earthtojake/text-to-cad/blob/4811290bcdf57f5218af9eed904d8673330c3234/SECURITY.md) says.
+
+
+<a href="https://trendshift.io/repositories/26559"><img src="https://trendshift.io/api/badge/repositories/26559" alt="earthtojake/text-to-cad | Trendshift" width="250" height="55"></a>

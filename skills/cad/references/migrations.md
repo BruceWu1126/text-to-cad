@@ -31,3 +31,9 @@ Any one of these says the project was written for 0.7:
    millimetres off and nothing said.
 3. Follow the guide's checklist in order, rerunning the root script after each step: each
    error names the next thing 0.8 wants. Tell the person before deleting 0.7 files.
+
+## Open CASCADE 8 and build123d 0.13
+
+cadgen 0.8.1 replaces cadgen materials with native `bd_materials` objects and rebuilds
+earlier XBF documents from source. Models importing OCP directly may also need renamed
+collections, downcasts and bounding-box reads. See [the Open CASCADE 8 migration guide](https://github.com/earthtojake/text-to-cad/blob/main/docs/migrations/migrating-to-opencascade-8.md).
