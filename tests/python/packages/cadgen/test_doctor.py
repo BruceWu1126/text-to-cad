@@ -121,14 +121,14 @@ class DoctorTests(unittest.TestCase):
             (folder, str(venv), ""),
         ):
             with self.subTest(first=first), mock.patch.dict("os.environ", {"PATH": os.pathsep.join([first, second])}):
-                code, out, err = _run(["--no-server", str(self.state)])
+                code, out, err = _run([str(self.state)])
             self.assertEqual((code, err), (0, ""))
             # Windows PATH lookup can use PATHEXT's .EXE spelling for the fixture's .exe file.
             self.assertIn(os.path.normcase(f"command  {command} OK{hint}\n"), os.path.normcase(out))
         if os.name != "nt":
             other.chmod(0o644)  # an earlier non-executable file does not shadow the command
             with mock.patch.dict("os.environ", {"PATH": os.pathsep.join([str(venv), folder])}):
-                self.assertIn(f"command  {command} OK\n", _run(["--no-server", str(self.state)])[1])
+                self.assertIn(f"command  {command} OK\n", _run([str(self.state)])[1])
 
     def test_doctor_through_the_proxy_names_a_development_installation_by_its_version(self) -> None:
         """A development install run through the ``cadgen`` command, with nothing in its environment
