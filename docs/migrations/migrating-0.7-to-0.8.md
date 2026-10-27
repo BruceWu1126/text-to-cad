@@ -588,7 +588,7 @@ is an unexpected keyword argument).
   it, exports it like any other, and returns the same handle (`.shape` is your shape).
   Joints, mechanism states and sequences on the shape go with it; a GLB's animations are
   passed as `animations=[...]`. Its id comes from the notebook's working folder and the
-  name, or from `key=`. Nothing builds it again: run the cell again.
+  name. Nothing builds it again: run the cell again.
 
 **Port 3245 and the day link.**
 
