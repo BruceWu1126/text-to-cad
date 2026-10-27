@@ -558,6 +558,42 @@ class PoolFactsTest(unittest.TestCase):
             self.server.measure(self.server.document(PLATE), wait=False)
         self.assertEqual([len(batch) for _fn, batch, _p, _f in self.batches[serve.FACT_PROCESSES_COLD:]], [1, 1, 1])
 
+    def test_a_waiting_read_is_told_each_part_as_its_batch_comes_in(self) -> None:
+        # The summary's count is the engine's: nothing until the pool answers a batch, then each part
+        # of it; parts held already, at once.
+        registered(self.server, {"big": b"b" * (2 * FACT_BYTES), "mid": b"m" * FACT_BYTES, "small": b"s" * 10})
+        doc = self.server.document(PLATE)
+        self.server.measure(doc, wait=False)  # the batches handed to the pool: [big], [mid, small]
+        told: list[tuple] = []
+        changed = threading.Condition()
+
+        def counted(done: int, total: int, key: str) -> None:
+            with changed:
+                told.append((done, total, key))
+                changed.notify_all()
+
+        def told_by(count: int) -> list[tuple]:
+            with changed:
+                self.assertTrue(changed.wait_for(lambda: len(told) >= count, timeout=30), told)
+                return list(told)
+
+        answers: list = []
+        asking = threading.Thread(target=lambda: answers.append(self.server.measure(doc, counted=counted)))
+        asking.start()
+        (_fn, first, _p, settle_first), (_fn, second, _p, settle_second) = self.batches
+        self.assertEqual(told, [], "nothing is in yet")
+        settle_first.set_result([(key, kernel_facts(data)) for key, data in first])
+        self.assertEqual(told_by(1), [(1, 3, "big")])
+        settle_second.set_result([(key, kernel_facts(data)) for key, data in second])
+        found = told_by(3)
+        asking.join(30)
+        self.assertEqual(([done for done, _total, _key in found], {key for _done, _total, key in found}),
+                         ([1, 2, 3], {"big", "mid", "small"}))
+        self.assertEqual(sorted(answers[0]), ["big", "mid", "small"])
+        told.clear()
+        self.server.measure(doc, counted=counted)
+        self.assertEqual(told, [(3, 3, "small")], "every part held: the whole count at once")
+
     def test_a_document_s_parts_are_dealt_into_batches_of_about_fact_bytes(self) -> None:
         parts = [("a", b"x" * (3 * FACT_BYTES)), ("b", b"x" * FACT_BYTES), ("c", b"x" * FACT_BYTES), ("d", b"x" * 10)]
         self.assertEqual([[key for key, _data in batch] for batch in serve._batches(parts, 8)], [["a"], ["b"], ["c"], ["d"]])

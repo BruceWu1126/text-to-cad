@@ -2236,7 +2236,11 @@ class Daemon:
             if not route.startswith("/api/doc/"):
                 send({"failed": f"not a document read: {route!r}"})
                 return
-            status, body = self.serve(request).read(route)
+            # Asked with ``progress``, a read of the parts' facts says each part's as it comes in, on
+            # this request's channel ahead of its answer (``serve.Server.measure``): the summary's count.
+            counted = ((lambda done, total, key: send({"progress": {"done": done, "total": total, "key": key}}))
+                       if request.get("progress") else None)
+            status, body = self.serve(request).read(route, counted)
             send({"ok": True, "status": status, "body": body.decode("utf-8")})
         elif op == "draw":
             self.draw(request, send)

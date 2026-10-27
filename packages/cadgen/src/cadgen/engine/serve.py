@@ -1618,16 +1618,18 @@ class Server:
 
     # --- the parts' facts --------------------------------------------------------------
 
-    def measure(self, doc: Served, keys: Any = None, *, wait: bool = True) -> dict[str, Any]:
+    def measure(self, doc: Served, keys: Any = None, *, wait: bool = True,
+                counted: Callable[[int, int, str], None] | None = None) -> dict[str, Any]:
         """Each part's facts as a whole (``mesh.measured``: its volume, solids and box in its own
         frame), by its key: of ``keys`` of ``doc``, else of every part it holds. From the memo by
         geometry key (``facts``); a part no one measures yet is measured now, the document's together
         in batches of about ``FACT_BYTES`` of shape bytes (``_batches``; at most ``FACT_PROCESSES_COLD``
         of them while no page has warmed the pool) -- each a job in the pool's
         facts queue, ahead of every mesh, or in this process for a server of its
-        own -- and each part once, however many ask. ``wait``: answered once every one is in;
-        else with those held now. A part the
-        document does not hold is a ``KeyError``."""
+        own -- and each part once, however many ask. ``wait``: answered once every one is in, and
+        ``counted(done, total, key)`` told as they come in: the ones held already at once, then each
+        as the pool answers its batch (the summary's ``inspect-measure`` count); else answered with
+        those held now. A part the document does not hold is a ``KeyError``."""
         wanted = list(dict.fromkeys(doc.shapes if keys is None else keys))
         unknown = [key for key in wanted if key not in doc.shapes]
         if unknown:
@@ -1651,8 +1653,21 @@ class Server:
             self._measure(doc, fresh)
         if not wait:
             return found
-        for key, measuring in waiting.items():
-            found[key] = measuring.result()
+
+        def tell(key: str) -> None:
+            nonlocal counted
+            if counted is not None:
+                try:
+                    counted(len(found), len(wanted), key)
+                except Exception:  # noqa: BLE001 - saying how far it is never fails the measurement
+                    counted = None
+
+        if found:
+            tell(next(reversed(found)))
+        by_future = {measuring: key for key, measuring in waiting.items()}
+        for measuring in concurrent.futures.as_completed(by_future):
+            found[by_future[measuring]] = measuring.result()
+            tell(by_future[measuring])
         return {key: found[key] for key in wanted}
 
     def _measure(self, doc: Served, keys: list[str]) -> None:
@@ -1874,12 +1889,13 @@ class Server:
                 if len(parts) == 4 and parts[3] == "pose" and method == "POST":
                     return self.pose(handler, doc)
                 if len(parts) == 4 and parts[3] == "volumes":
-                    # Each part's facts as a whole, by key: every part's, or the ``keys`` named.
+                    # Each part's facts as a whole, by key: every part's, or the ``keys`` named; a read
+                    # through the door told how far it is as they come in (``read``'s ``counted``).
                     given = (query.get("keys") or [""])[0]
                     keys = [key for key in given.split(",") if key] if given else None
                     if keys is not None and any(key not in doc.shapes for key in keys):
                         return self.error(handler, 404, "no such part")
-                    return self.json(handler, self.measure(doc, keys))
+                    return self.json(handler, self.measure(doc, keys, counted=getattr(handler, "counted", None)))
                 if len(parts) >= 5 and parts[3] == "part":
                     key = parts[4]
                     if key not in doc.shapes:
@@ -1992,11 +2008,12 @@ class Server:
             kind = "text/javascript"
         self.send(handler, 200, path.read_bytes(), kind)
 
-    def read(self, path: str) -> tuple[int, bytes]:
+    def read(self, path: str, counted: Callable[[int, int, str], None] | None = None) -> tuple[int, bytes]:
         """A document read (``GET /api/doc/<id>...``) answered in process, as a page would be
         answered over HTTP: its status and body -- but for the structure's, which meshes nothing
         here. What a client of the daemon asks through its door (``inspect``), so a shell that may
-        not open a loopback socket reads it all the same."""
+        not open a loopback socket reads it all the same. ``counted``: a read of the parts' facts
+        (``.../volumes``) tells it each part's as it comes in (``measure``)."""
         import io
 
         class Reading:
@@ -2008,6 +2025,7 @@ class Server:
 
             def __init__(self) -> None:
                 self.path = path
+                self.counted = counted
                 self.status = 200
                 self.rfile = io.BytesIO()
                 self.wfile = io.BytesIO()

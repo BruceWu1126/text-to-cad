@@ -41,7 +41,8 @@ file written ``write``, the file's name its detail, counted of the model's files
 counted. An export says ``read`` while it reads a file source and ``write`` for each destination,
 counted, the file's name its detail. A snapshot says ``scene`` while the document is served, meshed
 and its scene made, ``draw`` while the frame is drawn, and ``write`` as the picture is written. A
-measurement says ``measure``, a part at a time, counted.
+measurement says ``measure``, counted as the engine has each part's facts: the ones it holds at
+once, the rest as the pool answers their batches (``serve.Server.measure``).
 
 Whoever runs the job takes the frames (``building``): a worker sends them over its pipe and its
 daemon passes them on (``daemon``), the daemon sends a snapshot's as it draws, a server sends an

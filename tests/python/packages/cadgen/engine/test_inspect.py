@@ -96,8 +96,6 @@ class SummaryTest(unittest.TestCase):
         self.assertFalse({"bounds", "volume", "mass"} & set(structure), structure)
         self.assertEqual(structure["materials"], [{"name": "Aluminum 6061-T6", "density": 2700.0, "parts": ["hinge/base"]}])
         self.assertEqual(structure["states"], [{"name": "open", "values": {"elbow": 90.0}}])
-        # Build-time measurement is independent of the structure query.
-
 
         shown = self.run_("-m", "cadgen.engine", "inspect", ident)
         self.assertEqual(shown.returncode, 0, shown.stderr)
@@ -135,6 +133,14 @@ class SummaryTest(unittest.TestCase):
                          ([{"name": "open", "values": {"elbow": 90.0}}], [{"name": "cycle", "duration": 2.5}]))
         self.assertEqual((summary["parts"], summary["volume"], summary["mass"]),
                          ({"occurrences": 2, "distinct": 2, "root": "hinge"}, 144000.0, 0.324))
+        # How far the measurement is, as the engine tells it through its door: counted to every part.
+        probe = ("import json, sys\nfrom cadgen.engine import api\nframes = []\n"
+                 "api.inspect(sys.argv[1], query='summary', progress=frames.append)\nprint(json.dumps(frames))\n")
+        measuring = self.run_("-c", probe, ident)
+        self.assertEqual(measuring.returncode, 0, measuring.stderr)
+        frames = [frame for frame in json.loads(measuring.stdout) if frame["kind"] == "inspect-measure"]
+        self.assertEqual([(frame["done"], frame["total"]) for frame in (frames[0], frames[-1])], [(0, 2), (2, 2)])
+        self.assertIn(frames[-1]["detail"], ("base", "arm"))
         self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
 
         # Inspected once, the hinge is measured again after its next build, before anyone asks:

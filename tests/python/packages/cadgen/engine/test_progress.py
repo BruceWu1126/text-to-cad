@@ -249,9 +249,18 @@ class EventTest(unittest.TestCase):
                      "instances": [], "kinematics": {}}
         frames: list[dict] = []
         self.enterContext(mock.patch.object(progress, "INTERVAL", 0))
-        read = mock.Mock(return_value={key: {"volume": 1.0, "box": None} for key in ("a", "b")})
+        asked: list[str] = []
+
+        def read(route: str, counted=None) -> dict:
+            # The engine's read of the parts' facts: each part told as it comes in, before the answer.
+            asked.append(route)
+            for done, key in enumerate(("a", "b"), 1):
+                self.assertEqual(len(frames), done, "a part is counted when the engine has it, not after")
+                counted(done, 2, key)
+            return {key: {"volume": 1.0, "box": None} for key in ("a", "b")}
+
         api._summary(structure, Path("/x/kit.xbf"), read, "id", frames.append)
-        read.assert_called_once_with("/volumes")
+        self.assertEqual(asked, ["/volumes"], "one read for every part")
         self.assertEqual([(frame["kind"], frame["stage"], frame["job"], frame["detail"], frame["done"], frame["total"])
                           for frame in frames],
                          [("inspect-measure", "measure", "kit", "", 0, 2), ("inspect-measure", "measure", "kit", "box", 1, 2),

@@ -770,8 +770,10 @@ temporary folder.
   is never two daemons' lock.
 - **Reads.** What a client used to ask of the loopback port, `inspect`'s document reads, goes
   through the door too (`{"op": "read"}`, `serve.Server.read`, answered in process), so a
-  sandboxed shell needs no socket at all. The HTTP listener serves pages, the CAD app and the
-  stdio MCP peer, which run outside any shell's sandbox.
+  sandboxed shell needs no socket at all. A read of the parts' facts asked with `"progress": true`
+  sends `{"progress": {done, total, key}}` lines as each part's comes in, before its answer. The
+  HTTP listener serves pages, the CAD app and the stdio MCP peer, which run outside any shell's
+  sandbox.
 - **Trust.** The door changes no boundary: the engine's folder is the user's own and closed to
   everyone else (`daemon.folder_refusal`), `clients/` is made `0700`, and every pipe is `0600`, so
   the daemon serves whoever can make files in that folder: its owner, as the socket did. It
@@ -1125,7 +1127,7 @@ what a terminal and `cadgen status` print); a page says each in its own language
 | `snapshot` | `scene` | Making the scene | -- ; a job's pictures of one document say it once |
 | | `draw` | Drawing the picture | pictures drawn, where a job draws several |
 | | `write` | Writing the picture | pictures written, where a job writes several; `detail` the file |
-| `inspect-measure` | `measure` | Measuring parts | parts measured of the document's; `detail` the part |
+| `inspect-measure` | `measure` | Measuring parts | parts measured of the document's, as the engine has each (`Server.measure`); `detail` the last one in |
 
 A stage opens with a frame of its own; the frames a stage says as its count moves (a body done, a part
 collected or measured) come at least 100 ms apart (`progress.INTERVAL`), the latest held one sent when
@@ -2170,13 +2172,16 @@ together, in batches of about a megabyte of shape bytes (`serve.FACT_BYTES`: a l
 job, a heavy one spread over the pool a page warmed, else over two processes at most,
 `serve.FACT_PROCESSES_COLD`, so an inspection with no page open starts no more), each in the pool's
 queue for facts, which a free process takes before any mesh waiting (**The engine server and its
-workers**). A summary that finds a part's
-facts missing waits for them: no figure is guessed. A document a build makes is read at its new version once
-the build's worker has settled (free for half a second with no request waiting for it,
-`daemon.MEASURE_IDLE`: a program calling its models one after another sends its next build within
-milliseconds, so its run never waits on that read), and its new parts are measured then, in the
-facts queue ahead of meshes (`Server.measure_later`), so an inspection after a build can reuse them. The command parses the ref and places what it names in its own
-process with no kernel: the element-name grammar it reads is `refs.ELEMENT_NAME`.
+workers**). A summary that finds a part's facts missing waits for them: no figure is guessed. Its
+`measure` count is the engine's: the door's read of the facts, asked with `progress`, says each
+part's as it comes in -- the ones held at once, the rest as the pool answers their batches -- ahead
+of its answer. A document a build makes is read at its new version once the build's worker has
+settled (free for half a second with no request waiting for it, `daemon.MEASURE_IDLE`: a program
+calling its models one after another sends its next build within milliseconds, so those calls do
+not wait on that read), and its new parts are measured then, in the facts queue ahead of meshes
+(`Server.measure_later`), so an inspection after a build can reuse them. The command parses the ref
+and places what it names in its own process with no kernel: the element-name grammar it reads is
+`refs.ELEMENT_NAME`.
 
 ## Wire format
 

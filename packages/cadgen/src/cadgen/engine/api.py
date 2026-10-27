@@ -699,10 +699,10 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None, pr
     a GLB, ``{"mesh"}``: its nodes, meshes and animations, from its JSON alone (``_mesh``).
     ``query="structure"`` is the summary without bounds, volume or mass and requests no measurements.
     No form meshes anything. A part's volume and box are cached by geometry key and measured in
-    batches. Summary measurement goes,
-    frame by frame, to ``progress`` (``progress.py``: ``inspect-measure``, ``measure``, counted), as
-    ``export`` takes it -- by default a bar on stderr when it is a terminal and nowhere when it is
-    not, ``False`` nowhere, a callable each frame."""
+    batches. The summary's measurement goes, frame by frame, to ``progress`` (``progress.py``:
+    ``inspect-measure``, ``measure``, counted as the engine tells each part's facts in), as ``export``
+    takes it -- by default a bar on stderr when it is a terminal and nowhere when it is not,
+    ``False`` nowhere, a callable each frame."""
     from cadgen.engine import progress as progressing
 
     frames, bar = progressing.sink(progress)
@@ -762,9 +762,12 @@ def _inspected(source: Any, ref: str | None, query: str | None, progress: Callab
         refs.parse(ref)  # refuse invalid refs before serving
     ident = _ask({"op": "serve", "path": str(path)})["doc"]
 
-    def get(route: str) -> Any:
+    def get(route: str, counted: Callable[[int, int, str], None] | None = None) -> Any:
         # Read through the engine's door, never its loopback port: a sandboxed shell has the one.
-        read = _ask({"op": "read", "route": f"/api/doc/{ident}{route}"})
+        # ``counted``: a read of the parts' facts hears each part's as the engine has it (``Server.measure``).
+        heard = None if counted is None else (lambda said: counted(said["done"], said["total"], said["key"]))
+        read = _ask({"op": "read", "route": f"/api/doc/{ident}{route}", **({"progress": True} if heard else {})},
+                    on_progress=heard)
         if 200 <= read["status"] < 300:
             return json.loads(read["body"])
         try:
@@ -890,7 +893,7 @@ def couplings_of(kinematics: dict[str, Any]) -> list[dict[str, Any]]:
     return found
 
 
-def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], Any], ident: str,
+def _summary(structure: dict[str, Any], path: Path | str, get: Callable[..., Any], ident: str,
              progress: Callable[[dict], None] | None = None, *, measured: bool = True) -> dict[str, Any]:
     """What a served document holds, at a glance (``cadgen inspect DOC``): its name and id; its
     state -- a model's (``live``, ``held``, ...: ``ModelDocuments.state``), where the engine holds
@@ -919,11 +922,15 @@ def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], A
     if measured:
         from cadgen.engine.progress import Progress
 
+        # Each distinct part counted as the engine has its facts -- held already, or as the pool
+        # answers -- told by the read itself (``.../volumes``, ``counted``): never a count of its own.
+        names: dict[str, str] = {}
+        for prototype in prototypes:
+            names.setdefault(prototype["key"], str(prototype.get("name") or ""))
         said = Progress(progress or (lambda _frame: None), kind="inspect-measure", job=str(structure.get("name") or ident))
-        said.stage("measure", count=[0, len(prototypes)])
-        each = get("/volumes") if prototypes else {}
-        for index, prototype in enumerate(prototypes, 1):
-            said.counted(index, len(prototypes), detail=str(prototype.get("name") or ""))
+        said.stage("measure", count=[0, len(names)])
+        heard = None if progress is None else (lambda done, total, key: said.counted(done, total, detail=names.get(key, "")))
+        each = get("/volumes", heard) if prototypes else {}
         said.close()
     low, high, volume = [math.inf] * 3, [-math.inf] * 3, 0.0
     materials: dict[str, dict[str, Any]] = {}
