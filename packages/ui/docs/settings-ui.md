@@ -661,7 +661,12 @@ Projection is a menu of its own, shared, orthographic by default; Preview's Rend
 to perspective while preserving the shared choice.
 
 Preview's settings panel (`PreviewSettings.jsx`, its body `PreviewRenderSettings.jsx`) is
-the one settings form: Orbit, then Render's Part colours, Lighting, Background and Floor.
+the one settings form: Orbit, then Quality, Part colours, Lighting, Background and Floor.
+Quality has an **Auto** checkbox, on by default, and a 0–100 slider with a committed
+number, from **Faster** to **Sharper**. Auto disables the slider while retaining its manual
+value. Turning Auto off requests that value; device and scene safety limits still apply.
+This Preview-only preference changes rendering resolution, refinement and denoising
+scheduling. It never changes lighting, materials or the tools view's renderer.
 It shows all groups under static section headings and dividers, with no collapsible
 sections or cascading settings menus. A heading is 24px of regular `text-tiny` in the
 foreground colour, a rule above every one but the first. A feature that switches on and off
@@ -967,7 +972,9 @@ which lifts once Preview has presented its first traced image and its published 
 (`kit/shell/previewCover.js`). The traced image refines while visible. Orbiting or playing a
 routine uses bounded, low-resolution traced and denoised frames with the same material transport; at rest,
 the picture refines and is denoised. Missing WebGPU, unsupported materials or geometry, and
-scenes beyond the resource budget show an error with Retry and Exit preview. Exit is available
+scenes beyond the resource budget show an error with Retry and Exit preview. The existing cover
+shows broad progress as **Preparing preview…**, **Rendering preview…**, then **Refining preview…**
+until the first traced image is ready; it adds no technical stage or metrics panel. Exit is available
 while preparation is in progress. The navbar is gone too, in every host
 (the renderer says Preview is up, `onPreviewChange`, and FileViewer hides it until it closes), as are
 the tool strip, its sub-toolbar, the tool stack and their resize grips, Quick

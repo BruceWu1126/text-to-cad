@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { SAH } from 'three-mesh-bvh';
 import { GenerateMeshBVHWorker } from 'three-mesh-bvh/worker';
 import { BVHTraversalHelper } from 'three-mesh-bvh/src/core/BVHTraversalHelper.js';
-import { AtlasTexture } from 'three-gpu-pathtracer/src/webgpu/AtlasTexture.js';
 import { createStudioEnvironmentTexture } from '../../common/environmentMap.js';
+import { planPreviewTextures } from './resourcePolicy.js';
 import { isSharedGeometry } from '../render/sharedGeometry.js';
 
 // Bound the synchronous top-level build and memory before copying any buffers.
@@ -17,7 +17,7 @@ export const PREVIEW_LIMITS = Object.freeze({
   textureSide: 2048,
 });
 
-const FLOOR_ALPHA_SOURCE_ID = THREE.MathUtils.generateUUID();
+const FLOOR_ALPHA_SOURCE_ID = 'preview-floor-alpha';
 
 const UV_TEXTURES = Object.freeze([
   'map', 'metalnessMap', 'roughnessMap', 'transmissionMap', 'emissiveMap', 'normalMap',
@@ -121,8 +121,10 @@ export function inspectPreviewScene(root, limits = PREVIEW_LIMITS) {
         if (textures.has(textureKey)) continue;
         const image = texture.source?.data;
         const width = image?.naturalWidth || image?.width, height = image?.naturalHeight || image?.height;
-        if (!(width > 0 && height > 0) || width > (limits.textureSide ?? PREVIEW_LIMITS.textureSide) || height > (limits.textureSide ?? PREVIEW_LIMITS.textureSide)) { reason = 'texture budget'; continue; }
-        textures.set(textureKey, { width, height, source: texture.source });
+        if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) { reason = 'texture budget'; continue; }
+        const bytesPerPixel = image.data?.byteLength ? image.data.byteLength / (width * height) : 4;
+        if (!Number.isFinite(bytesPerPixel) || bytesPerPixel <= 0 || texture.isCompressedTexture) { reason = 'unsupported texture'; continue; }
+        textures.set(textureKey, { width, height, bytesPerPixel, source: texture.source });
         texturePixels += width * height;
       }
     });
@@ -147,8 +149,7 @@ export function inspectPreviewScene(root, limits = PREVIEW_LIMITS) {
   const admission = { meshes, geometries, canonical, materials, textures, triangles, vertices, groups, texturePixels, cloneBytes, uvChannels, reason };
   if (!reason && ((limits.triangles != null && triangles > limits.triangles) || (limits.vertices != null && vertices > limits.vertices) ||
       (limits.meshes != null && meshes.length > limits.meshes) || (limits.groups != null && groups > limits.groups) ||
-      (limits.materials != null && materials.size > limits.materials) || textures.size > (limits.textureSources ?? PREVIEW_LIMITS.textureSources) ||
-      texturePixels > (limits.texturePixels ?? PREVIEW_LIMITS.texturePixels))) admission.reason = 'scene budget';
+      (limits.materials != null && materials.size > limits.materials) || textures.size > (limits.textureSources ?? PREVIEW_LIMITS.textureSources))) admission.reason = 'scene budget';
   if (!admission.reason) admission.reason = previewSceneBudget(admission, limits);
   return admission;
 }
@@ -160,22 +161,6 @@ export function inspectPreviewScene(root, limits = PREVIEW_LIMITS) {
 // Use the tracer's own skyline allocator for a CPU-only estimate. The floor
 // alpha map uses a stable private source ID, so its atlas ordering is the same
 // here as in the prepared scene. Budget the larger of enabled/disabled floor.
-function estimateAtlas(textures) {
-  const sourceItems = [...textures.values()];
-  const atlas = new AtlasTexture();
-  try {
-    const measure = items => {
-      if (!items.length) return { pages: 1, side: 1, bytes: 4 };
-      items.sort((a, b) => a.source.uuid < b.source.uuid ? -1 : a.source.uuid > b.source.uuid ? 1 : 0);
-      const side = Math.max(...items.map(item => Math.max(item.width, item.height)));
-      const pages = atlas._packTextures(items, side, side).pageCount;
-      return { pages, side, bytes: side * side * pages * 4 };
-    };
-    const without = measure([...sourceItems]);
-    const withFloor = measure([...sourceItems, { width: 128, height: 128, source: { uuid: FLOOR_ALPHA_SOURCE_ID } }]);
-    return { pages: Math.max(without.pages, withFloor.pages), side: Math.max(without.side, withFloor.side), bytes: Math.max(without.bytes, withFloor.bytes) };
-  } finally { atlas.dispose(); }
-}
 
 export function previewSceneBudget(admission, limits = PREVIEW_LIMITS, deviceLimits = null, packedNodes = null) {
   const binding = Math.min(limits.bindingBytes ?? PREVIEW_LIMITS.bindingBytes,
@@ -186,7 +171,10 @@ export function previewSceneBudget(admission, limits = PREVIEW_LIMITS, deviceLim
   const transformBytes = (admission.groups + 1) * 160;
   const nodeBytes = (packedNodes?.nodeBytes ?? 0) + 256;
   // Include atlas page waste as well as private CPU copies and packed buffers.
-  const atlas = estimateAtlas(admission.textures);
+  const texturePlan = planPreviewTextures(admission, { maxSide: limits.textureSide ?? PREVIEW_LIMITS.textureSide,
+    maxAtlasBytes: limits.sceneBytes ?? PREVIEW_LIMITS.sceneBytes, deviceLimits: deviceLimits || {} });
+  if (!texturePlan.ok) return 'scene budget';
+  const atlas = texturePlan.atlas;
   const atlasBytes = atlas.bytes;
   const packedBytes = vertexBytes + indexBytes + materialBytes + transformBytes + nodeBytes;
   const peakBytes = admission.cloneBytes + 2 * packedBytes + atlasBytes;
@@ -223,13 +211,13 @@ function countClusters(bvh) {
   return count;
 }
 
-export function previewPreparedBudget(admission, groups, geometries, deviceLimits) {
+export function previewPreparedAllocation(groups, geometries) {
   let blasBytes = 0, primitives = 0;
   const clusters = new Map();
   for (const geometry of geometries.values()) {
     const bvh = geometry.boundsTree;
     // The tracer packs the root index into seven bits.
-    if (bvh._roots.length > 128) return 'scene budget';
+    if (bvh._roots.length > 128) return { reason: 'scene budget' };
     blasBytes += bvh._roots.reduce((sum, root) => sum + root.byteLength, 0);
   }
   for (const group of groups) {
@@ -241,8 +229,13 @@ export function previewPreparedBudget(admission, groups, geometries, deviceLimit
     }
   }
   // A binary TLAS has fewer than 2 nodes per primitive (32 bytes/node).
-  return previewSceneBudget(admission, PREVIEW_LIMITS, deviceLimits,
-    { primitives, nodeBytes: blasBytes + primitives * 64 });
+  return { primitives, transforms: groups.reduce((sum, group) => sum + group.meshes.length * geometries.get(group.geometry).boundsTree._roots.length, 0),
+    nodeBytes: blasBytes + primitives * 64 };
+}
+
+export function previewPreparedBudget(admission, groups, geometries, deviceLimits) {
+  const allocation = previewPreparedAllocation(groups, geometries);
+  return allocation.reason || previewSceneBudget(admission, PREVIEW_LIMITS, deviceLimits, allocation);
 }
 
 // Cache only complete private BVHs. A look/pose change reuses each prototype, while a
@@ -261,11 +254,11 @@ export function createPreviewGeometryCache() {
       const entry = entries.get(source);
       if (!entry) return null;
       if (entry.signature === signature(source)) return entry.geometry;
-      entry.geometry.dispose(); entries.delete(source); return null;
+      if (entry.owned) entry.geometry.dispose(); entries.delete(source); return null;
     },
-    set(source, geometry) { entries.set(source, { geometry, signature: signature(source) }); },
-    retain(sources) { for (const [source, entry] of entries) if (!sources.has(source)) { entry.geometry.dispose(); entries.delete(source); } },
-    dispose() { for (const entry of entries.values()) entry.geometry.dispose(); entries.clear(); },
+    set(source, geometry, { owned = true } = {}) { entries.set(source, { geometry, owned, signature: signature(source) }); },
+    retain(sources) { for (const [source, entry] of entries) if (!sources.has(source)) { if (entry.owned) entry.geometry.dispose(); entries.delete(source); } },
+    dispose() { for (const entry of entries.values()) if (entry.owned) entry.geometry.dispose(); entries.clear(); },
   };
 }
 
@@ -377,10 +370,14 @@ export function syncPreviewSceneTransforms(scene, sourceRoot, sourceGround = nul
   return true;
 }
 
-export async function preparePreviewScene(runtime, admission, signal, cache, deviceLimits) {
+export async function preparePreviewScene(runtime, admission, signal, cache, deviceLimits,
+  { buildBVH = null, onProgress = () => {}, adoptOwnedGeometry = false } = {}) {
   const scene = new THREE.Scene(), copied = new Map();
-  const worker = new GenerateMeshBVHWorker();
-  const build = geometry => new Promise((resolve, reject) => {
+  const worker = buildBVH ? null : new GenerateMeshBVHWorker();
+  const build = geometry => buildBVH ? Promise.resolve().then(() => {
+    if (signal.aborted) throw new Error('cancelled');
+    return buildBVH(geometry, { strategy: SAH, targetLeafSize: 5 }, signal);
+  }) : new Promise((resolve, reject) => {
     if (signal.aborted) { reject(new Error('cancelled')); return; }
     const abort = () => reject(new Error('cancelled'));
     signal.addEventListener('abort', abort, { once: true });
@@ -389,18 +386,26 @@ export async function preparePreviewScene(runtime, admission, signal, cache, dev
     worker.runTask(worker.worker, geometry, { strategy: SAH, targetLeafSize: 5 }).then(resolve, reject)
       .finally(() => signal.removeEventListener('abort', abort));
   });
+  const ground = runtime.photographicStudio?.ground;
+  const total = admission.geometries.size + Number(Boolean(ground?.visible && ground.material?.isMeshStandardMaterial));
+  let completed = 0;
   try {
+    onProgress({ phase: 'geometry', completed, total });
     cache.retain(admission.geometries);
     for (const source of admission.geometries) {
       if (signal.aborted) throw new Error('cancelled');
       let geometry = cache.get(source);
       if (!geometry) {
-        geometry = source.clone();
-        try { geometry.boundsTree = await build(geometry); } catch (error) { geometry.dispose(); throw error; }
-        if (signal.aborted) { geometry.dispose(); throw new Error('cancelled'); }
-        cache.set(source, geometry);
+        // Only the dedicated worker may lend already-transferred private arrays.
+        // Reconstruction remains their single disposal owner; normal callers clone.
+        geometry = adoptOwnedGeometry ? source : source.clone();
+        try { geometry.boundsTree = await build(geometry); } catch (error) { if (!adoptOwnedGeometry) geometry.dispose(); throw error; }
+        if (signal.aborted) { if (!adoptOwnedGeometry) geometry.dispose(); throw new Error('cancelled'); }
+        cache.set(source, geometry, { owned: !adoptOwnedGeometry });
       }
       copied.set(source, geometry);
+      onProgress({ phase: 'geometry', completed: ++completed, total });
+      if (buildBVH) await new Promise(resolve => setTimeout(resolve, 0));
     }
     if (signal.aborted) throw new Error('cancelled');
     const groups = groupPreviewMeshes(admission.meshes, admission.canonical);
@@ -410,7 +415,8 @@ export async function preparePreviewScene(runtime, admission, signal, cache, dev
     scene.add(...objects);
     scene.userData.previewObjects = objects;
     scene.userData.previewGroups = groups;
-    const ground = runtime.photographicStudio?.ground;
+    const allocation = previewPreparedAllocation(groups, copied);
+    scene.userData.previewAllocation = allocation;
     if (ground?.visible && ground.material?.isMeshStandardMaterial) {
       const copy = new THREE.Mesh(ground.geometry.clone(), createPreviewFloorMaterial(ground.material, runtime.previewConfiguration));
       // The WebGPU tracer does not run three's onBeforeCompile floor shader. Bake
@@ -434,13 +440,21 @@ export async function preparePreviewScene(runtime, admission, signal, cache, dev
       ground.updateWorldMatrix(true, false);
       copy.matrix.copy(ground.matrixWorld);
       try { copy.geometry.boundsTree = await build(copy.geometry); } catch (error) { copy.geometry.dispose(); copy.material.alphaMap?.dispose(); copy.material.dispose(); throw error; }
+      // The post-build admission includes the actual floor BLAS and its TLAS
+      // cluster cut, rather than only the model prototypes.
+      const floorPrimitives = countClusters(copy.geometry.boundsTree);
+      allocation.primitives += floorPrimitives;
+      allocation.transforms += copy.geometry.boundsTree._roots.length;
+      allocation.nodeBytes += copy.geometry.boundsTree._roots.reduce((sum, root) => sum + root.byteLength, 0) + floorPrimitives * 64;
       scene.add(copy);
       scene.userData.previewGround = copy;
+      onProgress({ phase: 'geometry', completed: ++completed, total });
     }
     // The HDR environment already contains the key softbox, fill and reflection cards.
     // A cloned raster spotlight would count the key twice and add a point-sized source
     // whose hard shadows ignore Softbox size. Trace the actual finite sources once;
     // environment importance sampling supplies their direct light and soft shadows.
+    if (signal.aborted) throw new Error('cancelled');
     scene.environment = createStudioEnvironmentTexture(runtime.previewConfiguration);
     scene.environmentRotation.copy(runtime.scene.environmentRotation);
     scene.environmentIntensity = runtime.scene.environmentIntensity;
@@ -451,7 +465,7 @@ export async function preparePreviewScene(runtime, admission, signal, cache, dev
     disposePreviewScene(scene);
     throw error;
   } finally {
-    worker.dispose();
+    worker?.dispose();
   }
 }
 

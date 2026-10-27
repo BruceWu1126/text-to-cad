@@ -1,13 +1,16 @@
 // Preview has one renderer: preparation is covered until a traced picture is
 // ready, and a device or scene failure is reported rather than shown as raster.
-export function createPreviewRefinement(runtime, { requestRender, onStatus = () => {}, load = () => import("@text-to-cad/core/lib/preview-tracing/progressivePreview.js") }) {
-  let controller = null, loading = false, disposed = false, failed = null, lastStatus = "";
-  const report = (state, reason = "") => {
-    const key = `${state}:${reason}`;
-    if (key !== lastStatus) { lastStatus = key; onStatus({ state, reason }); }
+export function createPreviewRefinement(runtime, { requestRender, onStatus = () => {}, load = () => import("@text-to-cad/core/lib/preview-tracing/progressivePreview.js"),
+  loadTimeoutMs = 45000, setTimer = globalThis.setTimeout, clearTimer = globalThis.clearTimeout }) {
+  let controller = null, loading = false, disposed = false, failed = null, lastStatus = "", loadTimer = null;
+  const clearLoadTimer = () => { if (loadTimer !== null) clearTimer(loadTimer); loadTimer = null; };
+  const report = (state, reason = "", phase = "preparing") => {
+    const key = `${state}:${reason}:${phase}`;
+    if (key !== lastStatus) { lastStatus = key; onStatus({ state, reason, phase }); }
   };
   const notifyFailure = error => {
-    if (failed) return;
+    if (failed || disposed) return;
+    clearLoadTimer(); loading = false;
     failed = String(error?.message || error || "Preview tracing unavailable");
     report("failed", failed);
     requestRender();
@@ -30,8 +33,10 @@ export function createPreviewRefinement(runtime, { requestRender, onStatus = () 
       if (!controller) {
         if (!loading && runtime.hasVisibleModel && runtime.environmentReady) {
           loading = true; report("loading");
+          loadTimer = setTimer(() => fail(new Error("Preview renderer did not load")), loadTimeoutMs);
           Promise.resolve().then(load).then(module => {
             if (disposed || failed) return;
+            clearLoadTimer();
             controller = module.createProgressivePreview(runtime, { onFailure: notifyFailure, requestRender: () => {
               if (!disposed && !failed) requestRender();
             } });
@@ -46,6 +51,7 @@ export function createPreviewRefinement(runtime, { requestRender, onStatus = () 
         const progress = controller.progress;
         if (progress?.state === "fallback") fail(progress.fallbackReason || "Preview tracing unavailable");
         else if (result.visible) report("ready");
+        else report("loading", "", progress?.stage?.startsWith("denoise") ? "refining" : progress?.stage === "trace" || progress?.stage === "tracing" ? "rendering" : "preparing");
         return result;
       } catch (error) {
         fail(error);
@@ -55,7 +61,7 @@ export function createPreviewRefinement(runtime, { requestRender, onStatus = () 
     invalidate(options = {}) { controller?.invalidate(options); },
     dispose() {
       if (disposed) return;
-      disposed = true;
+      disposed = true; clearLoadTimer();
       controller?.dispose(); controller = null;
     }
   };

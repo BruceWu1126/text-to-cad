@@ -10,6 +10,7 @@ import {
 import { mergeBoundsList } from "@text-to-cad/core/lib/viewer/autoZoom.js";
 import { applyRuntimeModelBounds, resolveRuntimeModelFloorZ, sceneRadiusForBounds } from "@text-to-cad/core/lib/viewer/modelRuntime.js";
 import { defaultSceneGridRadius, getSceneScaleSettings, normalizeSceneScaleMode, VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
+import { previewStudioConfiguration } from "../viewport/previewConfiguration.js";
 import { capturePreview } from "../viewport/capturePreview.js";
 import { buildCompositeScreenshotBlob, resolveElementBackgroundColor } from "@text-to-cad/core/lib/viewer/screenshotCapture.js";
 import {
@@ -102,7 +103,7 @@ const ShellViewport = forwardRef(function ShellViewport({
   appearance = "light",
   receiveShadows = false,
   renderMode = false,
-  renderConfiguration = null,
+  renderConfiguration: requestedRenderConfiguration = null,
   quality = null,
   // Preview's viewport (`PreviewView.jsx`): opened on the model at rest, framed afresh,
   // keeping no camera, no cube, no Annotate; its Orbit turns the camera at `orbitSpeed`.
@@ -154,6 +155,14 @@ const ShellViewport = forwardRef(function ShellViewport({
   if (scene && !isKitScene(scene)) {
     throw new Error("ShellViewport needs a kit scene: { object3D, bounds, dispose() } (kit/scene.js).");
   }
+  // Quality preference changes are worker commands, not new studio/scene settings.
+  const studioConfigurationRef = useRef(null);
+  const renderConfiguration = useMemo(() => (studioConfigurationRef.current = previewStudioConfiguration(
+    requestedRenderConfiguration, studioConfigurationRef.current
+  )), [requestedRenderConfiguration]);
+  const previewPerformance = preview ? requestedRenderConfiguration?.performance : undefined;
+  const previewPerformanceRef = useRef(previewPerformance);
+  previewPerformanceRef.current = previewPerformance;
   const normalizedSceneScaleMode = normalizeSceneScaleMode(sceneScaleMode);
   const normalizedProjection = normalizeCameraProjection(projection);
   const defaultGridRadius = defaultSceneGridRadius(normalizedSceneScaleMode);
@@ -288,7 +297,8 @@ const ShellViewport = forwardRef(function ShellViewport({
   const applyActivePhotographicStudio = useCallback((runtime, bounds = runtime?.modelBounds) => {
     const configuration = renderConfigurationRef.current;
     if (runtime) {
-      runtime.previewConfiguration = configuration;
+      runtime.previewConfiguration = configuration && { ...configuration,
+        ...(previewPerformanceRef.current ? { performance: previewPerformanceRef.current } : {}) };
     }
     const studio = studioScene();
     if (!renderMode || !configuration || !runtime?.THREE || !studio) return;
@@ -308,6 +318,13 @@ const ShellViewport = forwardRef(function ShellViewport({
   useEffect(() => {
     applyActivePhotographicStudio(runtimeRef.current);
   }, [applyActivePhotographicStudio, renderConfiguration, viewerReadyTick]);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!preview || !runtime || !renderConfiguration) return;
+    runtime.previewConfiguration = { ...renderConfiguration, performance: previewPerformance };
+    runtime.requestPreviewPerformance?.();
+  }, [preview, previewPerformance, renderConfiguration, viewerReadyTick]);
 
   const updateActiveGridHelper = useCallback((runtime, activeViewerTheme, radius, floorZ = 0,
     scaleMode = VIEWER_SCENE_SCALE.CAD, floorMode = THEME_FLOOR_MODES.STAGE) => updateGridHelper(

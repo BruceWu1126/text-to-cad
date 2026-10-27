@@ -1020,6 +1020,7 @@ export function useViewerRuntime({
         resizeObserver,
         rafId,
         ...createPreviewSceneRequests(() => runtimeRef.current, interactionState, requestRender),
+        requestPreviewPerformance: requestRender,
         drawCurrentFrame: renderNow,
         progressivePreview: null,
         beginInteraction,

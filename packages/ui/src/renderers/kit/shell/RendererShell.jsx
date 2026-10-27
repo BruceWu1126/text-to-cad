@@ -190,8 +190,11 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   const previewViewRef = frame.previewViewRef;
   const [previewPresented, setPreviewPresented] = useState(false);
   const [previewFailure, setPreviewFailure] = useState("");
+  const [previewPhase, setPreviewPhase] = useState("preparing");
   const [previewAttempt, setPreviewAttempt] = useState(0);
   const handlePreviewStatus = useCallback(status => {
+    if (["preparing", "rendering", "refining"].includes(status.phase)) setPreviewPhase(status.phase);
+    else if (status.state === "loading") setPreviewPhase("preparing");
     if (status.state === "failed") setPreviewFailure(status.reason || "Preview tracing unavailable");
     else if (status.state === "ready") setPreviewFailure("");
   }, []);
@@ -210,6 +213,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     setPreviewSettled(false);
     setPreviewPresented(false);
     setPreviewFailure("");
+    setPreviewPhase("preparing");
     if (previewing) { setCoverRequested(false); setPreviewPanelOpen(false); }
   }
   const previewCovered = coverRequested || (previewing && (!previewSettled || Boolean(previewFailure)));
@@ -639,11 +643,11 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                 {previewCovered ? previewFailure ? <div role="alert" className="flex max-w-md flex-col items-center gap-3 p-4 text-center text-tiny text-muted-foreground">
                   <span>{t("alert.lighting.summary")}: {previewFailure}</span>
                   <div className="flex gap-3">
-                    <button type="button" onClick={() => { setPreviewFailure(""); setPreviewPresented(false); setPreviewSettled(false); setPreviewAttempt(value => value + 1); }}>{t("alert.retry")}</button>
+                    <button type="button" onClick={() => { setPreviewFailure(""); setPreviewPhase("preparing"); setPreviewPresented(false); setPreviewSettled(false); setPreviewAttempt(value => value + 1); }}>{t("alert.retry")}</button>
                     <button type="button" onClick={leavePreview}>{t("preview.exit")}</button>
                   </div>
                 </div> : <div className="flex flex-col items-center gap-3 text-tiny text-muted-foreground">
-                  <span role="status" className="flex items-center gap-2"><LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />{t("preview.preparing")}</span>
+                  <span role="status" className="flex items-center gap-2"><LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />{t(previewPhase === "rendering" ? "preview.rendering" : previewPhase === "refining" ? "preview.refining" : "preview.preparing")}</span>
                   <button type="button" onClick={leavePreview}>{t("preview.exit")}</button>
                 </div> : null}
               </div>

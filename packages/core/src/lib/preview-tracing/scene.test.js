@@ -46,11 +46,15 @@ test('prototype cache retains only unchanged private geometry and never disposes
   cache.dispose();
 });
 
-test('texture admission rejects oversized images before GPU allocation', () => {
+test('oversized source images are inspected without mutating them for later bounded resizing', () => {
   const root = new THREE.Group();
   const texture = new THREE.Texture({ width: 4096, height: 4096 });
   root.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial({ map: texture })));
-  assert.equal(inspectPreviewScene(root).reason, 'texture budget');
+  const admission = inspectPreviewScene(root);
+  assert.equal(admission.reason, null);
+  assert.equal([...admission.textures.values()][0].width, 4096);
+  assert.equal(texture.image.width, 4096);
+  root.children[0].geometry.dispose(); root.children[0].material.dispose(); texture.dispose();
 });
 
 
@@ -311,4 +315,76 @@ test('fully collapsed STEP hide poses are omitted and show transitions rebuild t
   hidden.scale.set(1, 1, 0);
   assert.equal(inspectPreviewScene(root).reason, 'singular transform', 'a flattened visible surface is never silently omitted');
   objects[0].dispose(); copy.dispose(); geometry.dispose(); material.dispose();
+});
+
+
+test('a dedicated Preview worker can inject BVH construction and receive cancellable prototype progress', async () => {
+  const { MeshBVH } = await import('three-mesh-bvh');
+  const { preparePreviewScene, createPreviewGeometryCache, disposePreviewScene } = await import('./scene.js');
+  const root = new THREE.Group(), material = new THREE.MeshStandardMaterial();
+  const sources = [new THREE.BoxGeometry(), new THREE.BoxGeometry(2, 1, 1)];
+  root.add(...sources.map(geometry => new THREE.Mesh(geometry, material)));
+  const admission = inspectPreviewScene(root), cache = createPreviewGeometryCache();
+  const abort = new AbortController(), progress = [], built = [];
+  const runtime = { THREE, modelGroup: root, scene: new THREE.Scene(), previewConfiguration: {} };
+  try {
+    await assert.rejects(preparePreviewScene(runtime, admission, abort.signal, cache, {}, {
+      buildBVH(geometry, options) { built.push(geometry); return new MeshBVH(geometry, options); },
+      onProgress(value) { progress.push(value.completed); if (value.completed === 1) abort.abort(); },
+    }), /cancelled/);
+    assert.deepEqual(progress, [0, 1]);
+    assert.equal(built.length, 1);
+    assert.notEqual(built[0], sources[0]);
+    assert.ok(sources.every(geometry => geometry.boundsTree === undefined));
+    const ready = [];
+    const scene = await preparePreviewScene(runtime, admission, new AbortController().signal, cache, {}, {
+      buildBVH: (geometry, options) => new MeshBVH(geometry, options), onProgress: value => ready.push(value.completed),
+    });
+    assert.deepEqual(ready, [0, 1, 2]);
+    assert.ok(scene.userData.previewAllocation.nodeBytes > 0);
+    disposePreviewScene(scene);
+  } finally { cache.dispose(); sources.forEach(geometry => geometry.dispose()); material.dispose(); }
+});
+
+
+test('post-build allocation includes the studio floor BVH and placement without mutating its source', async () => {
+  const { MeshBVH } = await import('three-mesh-bvh');
+  const { preparePreviewScene, createPreviewGeometryCache, disposePreviewScene, previewPreparedAllocation } = await import('./scene.js');
+  const geometry = new THREE.BoxGeometry(), material = new THREE.MeshStandardMaterial();
+  const root = new THREE.Group(); root.add(new THREE.Mesh(geometry, material));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), material);
+  const cache = createPreviewGeometryCache(), admission = inspectPreviewScene(root);
+  let scene;
+  try {
+    scene = await preparePreviewScene({ THREE, modelGroup: root, scene: new THREE.Scene(), previewConfiguration: {}, photographicStudio: { ground } },
+      admission, new AbortController().signal, cache, {}, { buildBVH: (g, options) => new MeshBVH(g, options) });
+    const base = previewPreparedAllocation(scene.userData.previewGroups, new Map([[geometry, cache.get(geometry)]]));
+    const floor = scene.userData.previewGround;
+    assert.equal(scene.userData.previewAllocation.transforms, base.transforms + 1);
+    assert.equal(scene.userData.previewAllocation.primitives, base.primitives + 1);
+    assert.equal(scene.userData.previewAllocation.nodeBytes, base.nodeBytes + floor.geometry.boundsTree._roots[0].byteLength + 64);
+    assert.equal(floor.material.alphaMap.source.uuid, 'preview-floor-alpha');
+    assert.equal(ground.geometry.boundsTree, undefined);
+  } finally { disposePreviewScene(scene); cache.dispose(); geometry.dispose(); ground.geometry.dispose(); material.dispose(); }
+});
+
+
+test('worker-only adoption builds transferred private arrays in place with one disposal owner', async () => {
+  const { MeshBVH } = await import('three-mesh-bvh');
+  const { preparePreviewScene, createPreviewGeometryCache, disposePreviewScene } = await import('./scene.js');
+  const editor = new THREE.BoxGeometry(), before = editor.index.array.slice(), transferred = editor.clone();
+  const root = new THREE.Group(), material = new THREE.MeshStandardMaterial(); root.add(new THREE.Mesh(transferred, material));
+  const cache = createPreviewGeometryCache(); let scene, disposed = 0;
+  transferred.addEventListener('dispose', () => disposed++);
+  try {
+    scene = await preparePreviewScene({ THREE, modelGroup: root, scene: new THREE.Scene(), previewConfiguration: {} },
+      inspectPreviewScene(root), new AbortController().signal, cache, {}, { adoptOwnedGeometry: true,
+        buildBVH(geometry, options) { assert.equal(geometry, transferred); return new MeshBVH(geometry, options); } });
+    assert.equal(cache.get(transferred), transferred);
+    assert.equal(scene.userData.previewGeometries[0], transferred);
+    assert.equal(editor.boundsTree, undefined); assert.deepEqual(editor.index.array, before);
+    disposePreviewScene(scene); scene = null; cache.dispose();
+    assert.equal(disposed, 0, 'reconstruction retains ownership of borrowed arrays');
+    transferred.dispose(); assert.equal(disposed, 1);
+  } finally { disposePreviewScene(scene); cache.dispose(); editor.dispose(); material.dispose(); }
 });

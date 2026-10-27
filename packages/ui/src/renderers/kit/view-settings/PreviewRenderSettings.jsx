@@ -1,5 +1,7 @@
+import { useId } from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import { previewSettingsChanged, resolvePreviewSettings } from "@text-to-cad/core/common/viewSettings.js";
+import { Checkbox } from "@text-to-cad/ui/primitives/checkbox";
 import { Button } from "@text-to-cad/ui/primitives/button";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@text-to-cad/ui/primitives/select";
@@ -29,7 +31,7 @@ function Choice({ label, name = label, value, options, onChange, disabled = fals
   </FileSheetSettingRow>;
 }
 function Range({ label, name = label, value, onChange, min = 0, max = 1, step = 0.01, disabled = false,
-  scale = 100, format = v => `${Math.round(v * 100)}%` }) {
+  scale = 100, format = v => `${Math.round(v * 100)}%`, descriptionId }) {
   const { t } = useI18n();
   const commit = draft => {
     // FileSheetValueInput also commits an untouched blur. Its formatted readout may be
@@ -44,7 +46,7 @@ function Range({ label, name = label, value, onChange, min = 0, max = 1, step = 
   };
   return <FileSheetSettingRow label={label} disabled={disabled}>
     <Slider className={cn(SUB_TOOLBAR_SLIDER_CLASS, "px-1")} value={[value]} min={min} max={max} step={step} disabled={disabled}
-      thumbProps={{ "aria-label": name }} onValueChange={([next]) => onChange(next)} />
+      thumbProps={{ "aria-label": name, "aria-describedby": descriptionId }} onValueChange={([next]) => onChange(next)} />
     <FileSheetValueInput ariaLabel={t("render.valueOf", { name })} value={format(value)} onValueCommit={commit} disabled={disabled}
       className="h-6 w-13 px-1.5" />
   </FileSheetSettingRow>;
@@ -80,6 +82,7 @@ function Palette({ colors, onChange }) {
  */
 export function PreviewRenderSettings({ settings = {}, display = {}, appearance = "light", lightingQuality = "preview", onPatch, onReset }) {
   const { t } = useI18n();
+  const qualityDescription = useId();
   const options = { appearance: display?.appearance ?? (appearance === "dark" ? "dark" : "light"), lightingQuality };
   const look = resolvePreviewSettings(settings, options);
   const patch = (name, value) => onPatch({ [name]: value });
@@ -88,6 +91,17 @@ export function PreviewRenderSettings({ settings = {}, display = {}, appearance 
   return <div className="flex min-h-0 flex-1 flex-col">
     <ScrollArea className="min-h-0 flex-1">
       <div className="p-1">
+        <FileSheetSettingsSection title={t("render.quality")}>
+          <FileSheetSettingRow label={t("render.quality.auto")}>
+            <Checkbox className="ml-auto" aria-label={t("render.quality.automatic")} checked={look.quality.mode === "auto"}
+              onCheckedChange={checked => patch("quality", { mode: checked === true ? "auto" : "manual" })} />
+          </FileSheetSettingRow>
+          <Range label={t("render.quality")} value={look.quality.value} disabled={look.quality.mode === "auto"}
+            descriptionId={qualityDescription} min={0} max={100} step={1} scale={1} format={value => `${value}`} onChange={value => patch("quality", { value })} />
+          <div id={qualityDescription} className="flex justify-between px-2 text-tiny text-muted-foreground">
+            <span>{t("render.quality.faster")}</span><span>{t("render.quality.sharper")}</span>
+          </div>
+        </FileSheetSettingsSection>
         <FileSheetSettingsSection title={t("render.partColours")}>
           <Choice label={t("render.source")} name={t("render.colourSource")} value={look.parts.colorMode} options={[["original", t("render.source.original")], ["single", t("render.source.single")], ["by-part", t("render.source.byPart")]]}
             onChange={colorMode => patch("parts", { colorMode })} />
@@ -96,7 +110,6 @@ export function PreviewRenderSettings({ settings = {}, display = {}, appearance 
             : color("parts", t("render.partColour"), look.parts.colorMode !== "single")}
         </FileSheetSettingsSection>
         <FileSheetSettingsSection title={t("render.lighting")}>
-          <Choice label={t("render.quality")} value={look.lighting.quality} options={[["preview", t("render.quality.preview")], ["final", t("render.quality.final")]]} onChange={quality => patch("lighting", { quality })} />
           <Range label={t("render.exposure")} value={look.lighting.exposure} min={-5} max={5} step={0.1} scale={1} format={v => `${v.toFixed(1)} EV`} onChange={exposure => patch("lighting", { exposure })} />
           <Range label={t("render.rotation")} value={look.lighting.rotation} min={-180} max={180} step={1} scale={1} format={v => `${v}°`} onChange={rotation => patch("lighting", { rotation })} />
           <Range label={t("render.softbox")} name={t("render.softboxSize")} value={look.lighting.size} min={0.25} max={3} step={0.05} scale={1} format={v => `${v.toFixed(2)}×`} onChange={size => patch("lighting", { size })} />

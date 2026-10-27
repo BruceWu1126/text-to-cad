@@ -320,6 +320,7 @@ export function resolveViewSceneSettings({
   const configuration = enabled ? {
     studio: view.appearance,
     quality: view.lighting.quality,
+    ...(view.quality ? { performance: { ...view.quality } } : {}),
     exposure: view.lighting.enabled ? view.lighting.exposure : 0,
     lighting: { ...view.lighting },
     backdrop: {

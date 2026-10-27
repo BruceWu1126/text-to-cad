@@ -49,8 +49,8 @@ new PerformanceObserver(list => longTasks.push(...list.getEntries().map(e => e.d
 const requestRender = () => { if (queued) return; queued = true; requestAnimationFrame(draw); };
 function draw() {
   queued = false; renderer.render(scene,camera); draws++;
-  if (changeQuality && ['denoising', 'denoising-alpha'].includes(controller.progress.denoise)) {
-    changeQuality = false; qualityChanged = true; runtime.previewConfiguration.quality = 'final';
+  if (changeQuality && controller.progress.motion && controller.progress.stage === 'denoise-start') {
+    changeQuality = false; qualityChanged = true; runtime.previewConfiguration.performance = { mode: 'manual', value: 100 };
   }
   const result = controller.render(renderer,scene,camera,{still:!moving,moving,sceneChanged:false});
   if(result.refining)requestRender();
@@ -62,6 +62,8 @@ const create = () => {
 };
 window.previewTest = {
   start: create,
+  configurePreparing: () => { renderer.setSize(288,216); runtime.previewConfiguration.performance = { mode: 'manual', value: 100 }; requestRender(); },
+  restoreAuto: () => { renderer.setSize(256,192); runtime.previewConfiguration.performance = { mode: 'auto', value: 50 }; requestRender(); },
   progress: () => ({ ...controller.progress, draws, preparationFrames, longTasks: [...longTasks] }),
   move: () => { moving=true; repeat.position.x=2; controller.invalidate({sceneChanged:true}); draw(); },
   orbit: () => { camera.position.set(6,-6,5); camera.lookAt(0,0.6,0.4); camera.updateMatrixWorld(); controller.invalidate({sceneChanged:false}); draw(); },
@@ -72,7 +74,7 @@ window.previewTest = {
     poll();
   },
   qualityChanged: () => qualityChanged,
-  previewQuality: () => { runtime.previewConfiguration.quality = 'preview'; requestRender(); },
+  previewQuality: () => { runtime.previewConfiguration.performance = { mode: 'auto', value: 50 }; requestRender(); },
   sustainedOrbit: () => { moving=true; let n=0; const tick=() => { if (!moving) return; n++; camera.position.set(6+0.8*Math.sin(n*0.02),-6+0.8*Math.cos(n*0.02),5); camera.lookAt(0,0.6,0.4); camera.updateMatrixWorld(); controller.invalidate({sceneChanged:false}); draw(); requestAnimationFrame(tick); }; tick(); },
   transparent: () => { camera.position.set(0,-3,18); camera.lookAt(0,0,0); camera.updateMatrixWorld(); scene.background=null; renderer.setClearAlpha(0); floor.scale.setScalar(0.5); floor.material.opacity=0.6; floor.material.transparent=true; runtime.photographicStudio.floorFade={value:0.8}; controller.invalidate({sceneChanged:true}); requestRender(); },
   emptyPatch: () => {
@@ -133,7 +135,7 @@ before(async () => {
   const root = fileURLToPath(new URL('../../../../../../', import.meta.url));
   const result = await build({ stdin: { contents: fixture, resolveDir: root, sourcefile: 'preview-fixture.js' },
     bundle: true, write: false, format: 'esm', platform: 'browser', target: 'esnext' });
-  const worker = await build({ entryPoints: [`${root}/node_modules/three-mesh-bvh/src/workers/generateMeshBVH.worker.js`], bundle: true, write: false, format: 'esm', platform: 'browser' });
+  const worker = await build({ entryPoints: [`${root}/packages/core/src/lib/preview-tracing/previewWorker.js`], bundle: true, write: false, format: 'esm', platform: 'browser' });
   const { bundle: uiBundle } = await harnessBundle();
   const css = await readFile(`${root}/packages/ui/dist/styles.css`);
   const glb = await readFile(`${root}/packages/core/src/lib/render/fixtures/pair.glb`);
@@ -147,7 +149,7 @@ before(async () => {
     const url = new URL(request.url, 'http://test');
     const name = url.pathname.split('/').pop();
     if (request.url === '/fixture.js') { response.setHeader('Content-Type', 'text/javascript'); response.end(result.outputFiles[0].contents); }
-    else if (request.url === '/generateMeshBVH.worker.js') { response.setHeader('Content-Type', 'text/javascript'); response.end(worker.outputFiles[0].contents); }
+    else if (request.url === '/previewWorker.js') { response.setHeader('Content-Type', 'text/javascript'); response.end(worker.outputFiles[0].contents); }
     else if (uiWorkers.has(name)) { response.setHeader('Content-Type', 'text/javascript'); response.end(uiWorkers.get(name)); }
     else if (name === 'ui-harness.js') { response.setHeader('Content-Type', 'text/javascript'); response.end(uiBundle); }
     else if (name === 'styles.css') { response.setHeader('Content-Type', 'text/css'); response.end(css); }
@@ -207,11 +209,47 @@ test('Preview offers retry and exit when WebGPU is unavailable', async t => {
 test('the real Preview viewport traces, captures and restores the editor on exit', async t => {
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 }, deviceScaleFactor: 1 });
   t.after(() => page.close());
+  await page.addInitScript(() => {
+    window.previewResourceAudit = { workers: [], adapters: 0, devices: 0, probe: false };
+    const NativeWorker = Worker;
+    window.Worker = class extends NativeWorker {
+      constructor(...args) { super(...args); this.record = { url: String(args[0]), terminated: false }; window.previewResourceAudit.workers.push(this.record); }
+      terminate() { this.record.terminated = true; return super.terminate(); }
+    };
+    if (navigator.gpu) {
+      const requestAdapter = navigator.gpu.requestAdapter.bind(navigator.gpu);
+      navigator.gpu.requestAdapter = (...args) => { if (window.previewResourceAudit.probe) window.previewResourceAudit.probe = false; else window.previewResourceAudit.adapters++; return requestAdapter(...args); };
+    }
+    if (globalThis.GPUAdapter) {
+      const requestDevice = GPUAdapter.prototype.requestDevice;
+      GPUAdapter.prototype.requestDevice = function(...args) { window.previewResourceAudit.devices++; return requestDevice.apply(this, args); };
+    }
+  });
   await page.goto(`http://127.0.0.1:${server.address().port}/ui/?file=pair.glb`);
-  const adapter = await page.evaluate(async () => { const a = await navigator.gpu?.requestAdapter(); return a && !a.info.isFallbackAdapter; });
+  const adapter = await page.evaluate(async () => { window.previewResourceAudit.probe = true; try { const a = await navigator.gpu?.requestAdapter(); return a && !a.info.isFallbackAdapter; } finally { window.previewResourceAudit.probe = false; } });
   if (!adapter) return t.skip('A hardware WebGPU adapter is unavailable.');
   const pane = page.getByTestId('one');
   await page.waitForFunction(() => window.cadHarness?.a.controller?.readState().loading === false);
+  const resources = () => page.evaluate(() => ({
+    previewWorkers: window.previewResourceAudit.workers.filter(worker => /previewWorker/i.test(worker.url)),
+    adapters: window.previewResourceAudit.adapters, devices: window.previewResourceAudit.devices,
+  }));
+  assert.deepEqual(await resources(), { previewWorkers: [], adapters: 0, devices: 0 }, 'the editor starts no Preview worker or WebGPU device');
+  // Make this the person's chosen camera, so the pending opening fit cannot
+  // change the baseline while Preview is active.
+  await page.evaluate(() => { const controller = window.cadHarness.a.controller; controller.setCamera(controller.readState().camera); });
+  await page.waitForFunction(() => window.__cadCamera()?.untouched === false && !window.__cadCamera()?.settling);
+  const editorCanvas = pane.locator('[aria-busy] > div > canvas').first();
+  await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button', { name: 'Pencil', exact: true }).click();
+  const editorRect = await editorCanvas.boundingBox();
+  const inkX = editorRect.x + editorRect.width * 0.35, inkY = editorRect.y + editorRect.height * 0.5;
+  await page.mouse.move(inkX, inkY); await page.mouse.down();
+  await page.mouse.move(inkX + 35, inkY + 10, { steps: 8 }); await page.mouse.up();
+  await pane.locator('[data-quick-edit-ref="annotation"]').waitFor({ state: 'visible' });
+  await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button', { name: 'Select', exact: true }).click();
+  await page.mouse.move(0, 0);
+  const editorBeforeA = PNG.sync.read(await editorCanvas.screenshot({ animations: 'disabled' }));
+  const editorBefore = PNG.sync.read(await editorCanvas.screenshot({ animations: 'disabled' }));
   const camera = await page.evaluate(() => window.__cadCamera());
   await page.evaluate(() => {
     window.previewTimings = { start: performance.now(), first: null, converged: null, longTasks: [] };
@@ -227,6 +265,7 @@ test('the real Preview viewport traces, captures and restores the editor on exit
   await page.waitForFunction(() => { const p = window.__cadStage()?.pathTracing; return p?.state === 'fallback' || (p?.denoisedSamples > 0 && p.denoisedSamples >= p.samples); }, null, { timeout: 120000 })
     .catch(async error => { throw new Error(`${error.message}; stage=${JSON.stringify(await page.evaluate(() => window.__cadStage()))}`); });
   const progress = await page.evaluate(() => window.__cadStage().pathTracing);
+  assert.equal((await resources()).previewWorkers.filter(worker => !worker.terminated).length, 1, 'Preview owns one rendering worker');
   assert.notEqual(progress.state, 'fallback', JSON.stringify(progress));
   t.diagnostic(`Real Preview ${JSON.stringify(await page.evaluate(() => ({...window.previewTimings, progress: window.__cadStage().pathTracing})))}`);
   if (artifacts) await page.screenshot({path: join(artifacts, 'preview-ui-traced.png')});
@@ -264,18 +303,28 @@ test('the real Preview viewport traces, captures and restores the editor on exit
   for (let i=0; i<image.data.length; i+=4) colors.add(`${image.data[i]>>4},${image.data[i+1]>>4},${image.data[i+2]>>4}`);
   assert.ok(colors.size > 20, 'the captured Preview contains shaded model pixels');
   await pressInPreview(page, pane, pane.getByRole('button', { name: 'Preview settings', exact: true }));
-  await pane.getByRole('region', { name: 'Preview settings', exact: true }).getByRole('combobox', { name: 'Quality', exact: true }).click();
+  const settings = pane.getByRole('region', { name: 'Preview settings', exact: true });
+  await settings.getByRole('checkbox', { name: 'Auto quality', exact: true }).click();
   const finalStart = await page.evaluate(() => performance.now());
-  await page.getByRole('option', {name: 'Final', exact:true}).click();
+  const quality = settings.getByRole('textbox', { name: 'Quality value', exact: true });
+  await quality.fill('100'); await quality.press('Enter');
   t.diagnostic(`Quality applied ${JSON.stringify(await page.evaluate(() => ({stage:window.__cadStage(), record:window.cadHarness.state})))}`);
   await pressInPreview(page, pane, pane.getByRole('button', { name: 'Preview settings', exact: true }));
   await page.waitForFunction(previousBudget => { const p = window.__cadStage()?.pathTracing; return p?.samples > previousBudget && p.denoisedSamples >= p.samples; }, progress.samples, {timeout: 180000})
     .catch(async error => { throw new Error(`${error.message}; ${JSON.stringify(await page.evaluate(() => ({stage:window.__cadStage(),record:window.cadHarness.state, body:document.body.innerText})))}`); });
+  assert.equal((await resources()).previewWorkers.length, 1, 'quality-only edits preserve the existing worker and scene');
   t.diagnostic(`Final quality ${JSON.stringify(await page.evaluate(start => ({elapsed:performance.now()-start, progress:window.__cadStage().pathTracing}), finalStart))}`);
   if (artifacts) await page.screenshot({path:join(artifacts, 'preview-ui-final.png')});
   await pressInPreview(page, pane, pane.getByRole('button', { name: 'Exit preview', exact: true }));
   await pane.locator('[data-preview-view]').waitFor({state:'detached'});
   assert.equal(await page.evaluate(() => window.__cadStage().pathTracing), null, 'the editor owns no Preview tracer');
+  const released = await resources();
+  assert.ok(released.previewWorkers.every(worker => worker.terminated), 'exit terminates every Preview worker and its owned GPU context');
+  assert.equal(released.devices, 0, 'Preview never requests a main-thread WebGPU device');
+  await pane.locator('[data-quick-edit-ref="annotation"]').waitFor({ state: 'visible' });
+  await page.mouse.move(0, 0);
+  const editorAfter = PNG.sync.read(await editorCanvas.screenshot({ animations: 'disabled' }));
+
   const restored = await page.evaluate(() => window.__cadCamera());
   // An orthographic eye's distance is fitted to the current viewport/depth range;
   // the picture's pose is its direction, target and zoom.
@@ -285,6 +334,17 @@ test('the real Preview viewport traces, captures and restores the editor on exit
     return [...direction.map(v => v/length), ...c.target, c.zoom];
   };
   pose(camera).forEach((value, index) => assert.ok(Math.abs(value-pose(restored)[index]) < 1e-6, 'exit restores the editor camera pose'));
+  const pixelDifference = (a,b) => {
+    let changed = 0, squared = 0, max = 0;
+    for (let i=0; i<a.data.length; i++) { const delta = Math.abs(a.data[i]-b.data[i]); if(delta)changed++; squared += delta*delta; max = Math.max(max,delta); }
+    return { changed, rms: Math.sqrt(squared/a.data.length), max };
+  };
+  t.diagnostic(`Editor raster variation ${JSON.stringify({ baseline:pixelDifference(editorBeforeA,editorBefore), after:pixelDifference(editorBefore,editorAfter), camera, restored })}`);
+  if (artifacts) {
+    for (const [name,image] of [['before-a',editorBeforeA],['before-b',editorBefore],['after',editorAfter]]) await writeFile(join(artifacts, `editor-${name}.png`), PNG.sync.write(image));
+    t.diagnostic(`Editor artifacts ${artifacts}`);
+  }
+  assert.deepEqual(editorAfter.data, editorBefore.data, 'Preview settings and exit preserve the editor pixels, including annotation ink');
 });
 
 test('hardware Preview converges on authored parts, resets for motion and releases its canvas on every exit', async t => {
@@ -293,7 +353,14 @@ test('hardware Preview converges on authored parts, resets for motion and releas
   if (!adapter || adapter.fallback) return t.skip('A hardware WebGPU adapter is unavailable; the unavailable-device state is tested separately.');
   t.diagnostic(`WebGPU ${JSON.stringify(adapter)}`);
   await page.evaluate(() => window.previewTest.start());
-  await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.state === 'fallback' || (p.denoisedSamples > 0 && p.denoisedSamples >= p.samples); }, null, { timeout: 90000 })
+  await page.waitForFunction(() => window.previewTest.progress().state === 'preparing');
+  await page.evaluate(() => window.previewTest.configurePreparing());
+  await page.waitForFunction(() => ['ready', 'fallback'].includes(window.previewTest.progress().state), null, { timeout: 90000 });
+  const firstReady = await page.evaluate(() => window.previewTest.progress());
+  assert.notEqual(firstReady.state, 'fallback', JSON.stringify(firstReady));
+  assert.deepEqual([firstReady.samples, firstReady.renderWidth, firstReady.renderHeight], [256, 288, 216], 'preparation reconciles the newest quality and viewport before its first picture');
+  await page.evaluate(() => window.previewTest.restoreAuto());
+  await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.state === 'fallback' || (p.renderWidth === 256 && p.renderHeight === 192 && p.samples < 256 && p.denoisedSamples > 0 && p.denoisedSamples >= p.samples); }, null, { timeout: 90000 })
     .catch(async error => { throw new Error(`${error.message}; ${JSON.stringify(await page.evaluate(() => window.previewTest.progress()))}; ${logs.join('\n')}`); });
   const progress = await page.evaluate(() => window.previewTest.progress());
   if (progress.state === 'fallback') t.diagnostic(logs.join('\n'));

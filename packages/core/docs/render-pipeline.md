@@ -84,7 +84,7 @@ anything else (a per-mode tree, a style group) fails validation.
 
 Preview's photographic look (Render) is no mode: it is asked for on its own, by the
 viewer's Preview and the parity page, over the same display. Its own settings
-(`PreviewSettings`: `parts`, `lighting`, `background`, `floor`) are the viewer's,
+(`PreviewSettings`: `quality`, `parts`, `lighting`, `background`, `floor`) are the viewer's,
 kept beside the display, never in it (`normalizePreviewSettings`,
 `resolvePreviewSettings`, `previewSettingsChanged`). `readViewSettings` and `readPreviewSettings` read a stored record setting
 by setting, leaving out what this build cannot read, without rewriting it.
@@ -156,8 +156,8 @@ orthographic views can use a signed near plane when the floor crosses the eye.
 
 Lighting quality is `preview` or `final`, mapping to standard/high scene policy.
 The viewer defaults to `lightingQuality: "preview"`; an explicit Preview
-`lighting.quality` selects `final`. The path tracer converges at 128 samples for
-Preview or 256 for Final.
+`lighting.quality` selects `final`. Browser path-tracing performance has its own
+Preview-only quality preference; changing it does not change this lighting recipe.
 Final is the High scene preset: 4096px spotlight shadows, a 512px procedural environment
 and 2x snapshot capture, and a still view in the viewer converges over 64 samples of the
 studio's frame (Preview: 32). `output.renderScale` is an explicit raster override; every
@@ -189,13 +189,18 @@ default backdrop color.
 
 #### Progressive viewer Preview
 
-`lib/preview-tracing/progressivePreview.js` draws interactive Preview through one WebGPU
-path tracer. The view stays covered while the first usable traced image prepares. Motion
+`lib/preview-tracing/progressivePreview.js` presents interactive Preview from one WebGPU
+path tracer in a dedicated worker. The worker owns scene reconstruction, BVHs, packing,
+tracing and denoising; the page owns input, the displayed image and Exit. Source geometry
+copies yield in bounded chunks before transfer and never detach the editor's buffers.
+The view stays covered while the first usable traced image prepares. Motion
 presents bounded low-resolution traced frames with the same light transport and bounce
 limits. Each latched view receives guided colour and coverage denoising before presentation;
 new input is picked up after that pass. A still view then refines to its denoised sample budget. Camera, pose, material,
 lighting and viewport changes invalidate accumulation. An unsupported scene or device
 shows an error with retry and exit; a late preparation cannot attach to a closed view.
+Preview ignores subpixel camera drift against the last sent view, so idle control updates
+cannot keep restarting refinement. Explicit camera edits still invalidate immediately.
 
 `scene.js` adapts the visible PBR meshes, preserving material arrays, face groups, vertex
 colours and world transforms. BVHs are prepared in a worker over private prototype copies;
@@ -206,11 +211,15 @@ triangles into the top-level acceleration structure. Mirrored, sheared and norma
 placements retain individual meshes for correct guide buffers.
 
 Scene admission rejects unsupported geometry or materials and checks packed buffer sizes
-against the device before upload. The scene's estimated additional CPU/GPU allocation is
-capped at 512 MiB and each storage binding at the lesser of the device limit and 256 MiB;
-ray pools, denoising and render targets have separate limits. Actual worker-built BVH sizes
-and top-level primitive counts are checked before packing. A scene that
-cannot be represented faithfully reports an error. The tracer uses the
+against the device before upload. `resourcePolicy.js` estimates peak allocation across the
+source/editor reserve, private geometry and BVH scratch, packed CPU/GPU buffers, textures,
+ray pools, render targets, OIDN working memory and presentation. Sessions in the same page
+share a 1 GiB policy budget; each storage binding is also bounded by the device and 256 MiB.
+These estimates do not reveal free VRAM or guarantee that a driver allocation succeeds.
+Decoded textures can be reduced into private copies while keeping their mapping and colour
+space. Geometry is never simplified. Actual BVH sizes and top-level primitive counts are
+checked before packing. A scene that cannot fit after image-quality reductions reports an
+error. The tracer uses the
 same procedural studio cards and sweep, sampled into an owned equirectangular HDR texture
 by `common/environmentMap.js`; it needs no downloaded lighting asset. The environment
 supplies both direct illumination and reflections, without duplicating the raster shadow
@@ -218,8 +227,18 @@ light. The private floor uses its configured albedo without the raster material'
 The raster backdrop's screen-space gradient is reconstructed by `backdrop.js` behind the transparent trace, and
 the floor's radial fade is represented as an alpha map. Screenshot capture composites both.
 
-The first picture is denoised after 32 samples, then refined to 128 samples for Preview
-lighting quality or 256 for Final, with up to 12 surface bounces. `previewDenoiser.js` runs
+Preview's **Auto** quality aims for a settled image of up to one million pixels and 128
+samples when its memory budget permits. Manual quality requests a resolution and refinement
+budget through the 0–100 slider, up to 256 samples. Memory admission may reduce that request.
+Completed GPU-work timings adjust the ray budget and moving image size, with a quarter-scale
+motion floor within the admitted budget. Slower devices accept a lower cadence at that floor.
+The settled target
+stays fixed while it refines, so adaptation cannot keep restarting convergence. Quality never
+changes the light sources, authored material parameters or the 12 surface/5 transparent
+bounce limits. A moving image has no more pixels than its ray slots, so its bounded wavefront
+steps cover the whole picture before presentation.
+
+`previewDenoiser.js` runs
 Open Image Denoise on linear HDR color and coverage in sequential passes with clean albedo and
 normal guides. Separate network instances keep each pass's input shader and output buffer
 independent; the additional alpha output uses 16 bytes per pixel, plus its bounded tile
@@ -227,10 +246,13 @@ working memory. It keeps the previous completed picture visible while filtering 
 and lets the tracer's presentation pass apply tone mapping once. The pinned model and its
 license ship with both page bundles; inference needs no external request. A denoising error is reported in Preview.
 
-Interactive Preview caps its render targets at one million pixels. A ray budget bounds each update and only one GPU batch is in flight. A finite update budget stops work even if sample readback stalls; on exhaustion,
-the best available image is denoised and diagnostics report `budgetExhausted` rather than
-claiming target convergence. Hidden documents pause tracing until visible again. These are
-implementation limits, not new UI controls.
+Only one GPU batch and one unacknowledged output image are in flight. Camera and pose input
+is coalesced to the latest request. A watchdog follows completed work, not input events, and
+terminates a worker that stops progressing. Exit never waits for that deadline or a GPU fence.
+Hidden documents pause work and suspend the watchdog until visible again. Retry starts a
+fresh session; no failure switches Preview to a raster picture. Quality-only edits bypass
+studio preparation and update the worker's rendering policy, leaving the default model
+renderer and native snapshots unchanged.
 Hardware convergence is separate from the raster measurements below. See
 [resource ownership](resource-ownership.md#5-preview-tracing) for lifetime and reuse.
 

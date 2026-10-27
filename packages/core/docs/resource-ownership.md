@@ -82,25 +82,47 @@ its pending work.
 
 ## 5. Preview tracing
 
-`lib/preview-tracing/scene.js` copies each admitted prototype once. Worker BVH construction
-may reorder or transfer those private arrays; it never mutates or transfers editor buffers.
-A cache retains complete BVHs across appearance and pose changes, checking attribute/index
-identity, arrays, versions, groups and draw range before reuse and evicting removed sources.
-Material objects and their source textures are borrowed; generated environment, floor
-geometry/material/alpha map, GPU buffers and overlay canvases belong to the tracer.
-Private instance objects are disposed separately from their cached prototype geometry.
+`lib/preview-tracing/progressivePreview.js` owns Preview's presentation canvas and dedicated
+worker session. `previewSnapshot.js` collects admitted topology in yielded batches and copies
+geometry in bounded chunks. Only private buffers and images are transferred: the editor's
+geometry, materials, textures and device remain its own. Shared prototype identities, material
+slots, UV channels and texture transforms survive reconstruction in the worker. Texture
+reduction creates private images; it never changes source geometry or source images.
+
+The worker owns scene reconstruction, BVH construction, packing, WebGPU tracing and OIDN.
+`scene.js` retains private prototype BVHs across pose changes and builds them synchronously
+inside that worker, where terminating the session can interrupt preparation. Exact repeated
+prototypes share one private geometry. BVH construction reuses the transferred worker-owned
+arrays; it does not copy them again. Reconstruction retains their single disposal owner.
+Generated environment, floor geometry/material/alpha
+map and GPU buffers belong to the worker. Private instance objects are disposed separately
+from their cached prototype geometry.
 The denoiser's guide scene expands those instances into ordinary meshes over the same
 geometry and material slots, preserving world transforms while sharing shader programs.
 Textured guide materials have private copies with UV-channel/color-space shader keys;
 their textures remain borrowed. Releasing a guide scene disposes its render objects and
 private material copies, never borrowed geometry, source materials or textures.
 
-Cancellation rejects pending worker preparation and terminates its worker. A generation
-token rejects stale async results. Motion retains the last completed traced picture while a
-new low-resolution traced frame is prepared; rigid pose changes refit the private scene.
-Other scene changes rebuild it using cached prototypes and the same GPU device. Preview exit
-disposes the cache, worker preparation, tracer and device. Admission or device failure is
-reported to Preview's error presentation.
+One replaceable camera/pose input and one unacknowledged image bound the worker message queue.
+Pose matrices are copied together so a picture cannot combine different animation ticks.
+Motion retains the last completed traced picture while a new low-resolution traced frame is
+prepared; rigid pose changes refit the private scene. Scene changes cancel the old generation.
+Exit aborts copying and terminates the worker without awaiting a GPU fence. Stale images are
+closed, and a generation token prevents late results from attaching to a closed view.
+
+`resourcePolicy.js` estimates peak allocation before copies and again against device limits:
+source/editor reserve, private copies and BVH scratch, CPU/GPU packed scene, textures and atlas,
+ray queues, render targets, denoiser networks and intermediate outputs, and presentation.
+Preparation reserves the build-stage peak; rendering is admitted separately using the actual
+BVH sizes, before packing and render-target allocation. Preview sessions in the same page
+reserve against one policy budget. A session retains its highest reservation through quality
+changes and carries forward the largest denoiser shapes, image targets and ray pools when
+planning a resize, so retained buffers remain accounted for alongside the new viewport.
+Exit, cancellation or failure releases the reservation. This is conservative admission, not a measurement of free VRAM;
+other tabs, applications and driver allocations remain outside its knowledge. Oversized
+geometry is refused rather than simplified. A worker stall, allocation error or device loss
+ends the session and reaches Preview's retry/exit presentation. Terminating a worker does not
+isolate the browser from a shared GPU driver failure.
 
 The denoiser owns its auxiliary targets, inference weights and intermediate GPU buffers,
 and the current and previous completed output textures. It publishes a result only when

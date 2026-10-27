@@ -545,6 +545,15 @@ it("Preview answers the press with a cover and reveals the first traced frame", 
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
     // The press is answered at once, before Preview itself is entered under it.
     expect(cover()?.textContent).toContain('Preparing preview…');
+    // The cover reports broad progress while its first frame is still held.
+    for (let step = 0; !inPreview() && step < 20; step++) {
+      await act(async () => { await vi.advanceTimersToNextTimerAsync(); });
+    }
+    act(() => previewProps.current.onPreviewStatus({ state: 'loading', phase: 'rendering' }));
+    expect(cover()?.textContent).toContain('Rendering preview…');
+    act(() => previewProps.current.onPreviewStatus({ state: 'loading', phase: 'refining' }));
+    expect(cover()?.textContent).toContain('Refining preview…');
+    expect(within(cover() as HTMLElement).getByRole('button', { name: 'Exit preview' })).toBeTruthy();
     // The mock viewport reports its first presentable traced frame on mount.
     for (let step = 0; cover() && step < 20; step++) {
       await act(async () => { await vi.advanceTimersToNextTimerAsync(); });

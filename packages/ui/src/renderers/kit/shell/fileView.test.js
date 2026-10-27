@@ -56,11 +56,12 @@ test("preview's playback settings are the view's: written whole, read back bound
   assert.deepEqual(readFileView(undefined).playback, { orbitSpeed: 1, autoplay: false });
 });
 
-test("a chosen floor finish is kept with Preview's settings, in the record either app writes, group by group", () => {
-  const { preview } = readFileView({ version: FILE_VIEW_VERSION, preview: { floor: { finish: "glossy" } } });
-  assert.deepEqual(preview, { floor: { finish: "glossy" } });
+test("floor finish and Preview quality survive a view record round trip, group by group", () => {
+  const preference = { floor: { finish: "glossy" }, quality: { mode: "manual", value: 75 } };
+  const { preview } = readFileView({ version: FILE_VIEW_VERSION, preview: preference });
+  assert.deepEqual(preview, preference);
   const copy = JSON.parse(JSON.stringify(writeFileView({ camera, preview })));
-  assert.deepEqual(readFileView(copy).preview, { floor: { finish: "glossy" } });
+  assert.deepEqual(readFileView(copy).preview, preference);
   assert.deepEqual(readFileView({ version: FILE_VIEW_VERSION, preview: { floor: { finish: "chrome" }, lighting: { exposure: 1 } } }).preview,
     { lighting: { exposure: 1 } });
   assert.deepEqual(readFileView(undefined).preview, {});

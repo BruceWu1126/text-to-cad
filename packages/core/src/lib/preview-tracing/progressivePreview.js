@@ -1,360 +1,201 @@
-import * as THREE from 'three';
-import { WebGPURenderer } from 'three/webgpu';
-import { WebGPUPathTracer } from 'three-gpu-pathtracer/webgpu';
-import { RenderToScreenNodeMaterial } from 'three-gpu-pathtracer/src/webgpu/materials/RenderToScreenMaterial.js';
-import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
-import { initUNetFromURL } from 'oidn-webgpu/dist/oidn.js';
-import { PreviewDenoiser } from './previewDenoiser.js';
-import { OIDN_WEIGHTS_URL } from './weights/index.js';
-import { drawPreviewBackdrop } from './backdrop.js';
-import { inspectPreviewScene, preparePreviewScene, disposePreviewScene, createPreviewGeometryCache, previewSceneBudget, syncPreviewSceneTransforms, PREVIEW_LIMITS } from './scene.js';
+import { snapshotPreviewScene } from './previewSnapshot.js';
+import { previewResourcePool, PREVIEW_RESOURCE_LIMITS } from './resourcePolicy.js';
 
-const FRAME_PATH_BUDGET = 250000;
-// Upstream low-res mode advances five wavefront steps per update. Four bounded
-// updates let paths traverse the full 12 surface plus 5 transparent bounces.
-const MOTION_UPDATES = 4, MOTION_SCALE = 0.3;
-const RAY_STATE_BYTES = 224;
-const MAX_RENDER_PIXELS = 1000000;
-const FIRST_DENOISE_SAMPLES = 32, PREVIEW_SAMPLES = 128, FINAL_SAMPLES = 256;
-const MAX_BOUNCES = 12, MAX_TRANSPARENT_BOUNCES = 5;
-const MIN_FRAME_LIMIT = 2048, MAX_FRAME_LIMIT = 32768, MAX_REFERENCE_FRAMES = 65536;
+const STALL_MS = 45000;
+const createWorker = () => new Worker(new URL('./previewWorker.js', import.meta.url), { type: 'module' });
+const cameraRecord = camera => ({ type: camera.type, position: camera.position.toArray(), quaternion: camera.quaternion.toArray(), scale: camera.scale.toArray(),
+  projection: camera.projectionMatrix.toArray(), projectionInverse: camera.projectionMatrixInverse.toArray(),
+  near: camera.near, far: camera.far, zoom: camera.zoom, fov: camera.fov, aspect: camera.aspect,
+  left: camera.left, right: camera.right, top: camera.top, bottom: camera.bottom, filmGauge: camera.filmGauge, filmOffset: camera.filmOffset });
 
-// Preview presents only this tracer; the caller owns loading and error UI.
-export function createProgressivePreview(runtime, { requestRender = () => {}, onFailure = () => {}, diagnostic = null } = {}) {
-  // For reproducible visual comparisons only: a bounded raw reference rendered
-  // with this same scene and tracer. There is no viewer control for this profile.
-  const rawReferenceSamples = diagnostic?.rawReferenceSamples ?? null;
-  if (rawReferenceSamples !== null && (!Number.isInteger(rawReferenceSamples) || rawReferenceSamples < 1 || rawReferenceSamples > 1024)) {
-    throw new RangeError('rawReferenceSamples must be an integer between 1 and 1024');
-  }
-  const rawReference = rawReferenceSamples !== null;
-  let state = 'idle', reason = null, generation = 0, cameraEpoch = 0, abort = null, tracer = null;
-  let gpu = null, scene = null, camera = null, canvas = null, background = null, presented = null, capture = null, frames = 0, visible = false, renderWidth = 0, renderHeight = 0;
-  let rasterOpacity = null;
-  let started = false, disposed = false, cameraDirty = false, transformsDirty = false, measuring = null, sample = 0, frameBudget = FRAME_PATH_BUDGET;
-  let inFlight = null, denoiser = null, denoisedSamples = 0, denoisingSamples = 0, budgetExhausted = false, motionRemaining = 0, motionActive = false, presentedFrames = 0, shownSamples = 0;
-  let motionReady = false, motionDenoising = false, motionQuad = null;
-  const cache = createPreviewGeometryCache();
-  let maxSamples = rawReferenceSamples ?? (runtime.previewConfiguration?.quality === 'final' ? FINAL_SAMPLES : PREVIEW_SAMPLES);
-  const hide = (restoreRaster = true) => { visible = false; if (canvas) canvas.style.visibility = 'hidden'; if (presented) presented.style.visibility = 'hidden'; if (background) background.style.visibility = 'hidden'; if (restoreRaster && rasterOpacity !== null) { runtime.renderer.domElement.style.opacity = rasterOpacity; rasterOpacity = null; } };
-  // The GPU canvas can be rewritten while tracing. Hold a completed traced frame
-  // on a separate canvas until its next complete low-resolution update is ready.
-  const show = (newFrame = true) => {
-    if (presented.width !== canvas.width || presented.height !== canvas.height) { presented.width = canvas.width; presented.height = canvas.height; }
-    const context = presented.getContext('2d');
-    if (!context) throw new Error('Preview presentation unavailable');
-    context.clearRect(0, 0, presented.width, presented.height);
-    context.drawImage(canvas, 0, 0);
-    presented.style.visibility = 'visible';
-    if (!visible) { rasterOpacity = runtime.renderer.domElement.style.opacity; runtime.renderer.domElement.style.opacity = '0'; }
-    visible = true; background.style.visibility = 'visible';
-    if (newFrame) presentedFrames++;
-  };
-  const release = (restoreRaster = true) => {
-    hide(restoreRaster); inFlight = null;
-    tracer?.dispose(); tracer = null; denoiser = null; denoisedSamples = 0; denoisingSamples = 0;
-    motionQuad?.material.dispose(); motionQuad?.dispose(); motionQuad = null; motionReady = false; motionDenoising = false;
-    disposePreviewScene(scene); scene = null;
-    gpu?.dispose(); gpu = null;
-    canvas?.remove(); canvas = null; presented?.remove(); presented = null; background?.remove(); background = null; capture = null;
-    motionRemaining = 0; motionActive = false;
-    camera = null;
-    frames = 0; sample = 0; budgetExhausted = false;
-  };
-  // OIDN aborts between tiles. Wait for its already-submitted tile before the
-  // next trace batch, keeping the GPU queue bounded across gesture and setting changes.
-  const fenceDenoise = () => {
-    if (!gpu || inFlight) return;
-    const token = generation;
-    const fence = gpu.backend.device.queue.onSubmittedWorkDone();
-    inFlight = fence;
-    fence.then(() => {
-      if (inFlight !== fence) return;
-      inFlight = null;
-      if (!disposed && state === 'ready') requestRender();
-    }).catch(error => {
-      if (inFlight !== fence) return;
-      inFlight = null;
-      if (token === generation && !disposed && state === 'ready') fail(error, token);
-      else if (!disposed && state === 'ready') requestRender();
-    });
-  };
-  const invalidate = ({ sceneChanged = false, transformsChanged = false } = {}) => {
-    cameraEpoch++; measuring = null;
-    const wasDenoising = denoiser?.running;
-    // Keep an in-progress interactive picture latched despite newer input.
-    if ((!motionReady && !motionDenoising) || sceneChanged || globalThis.document?.visibilityState === 'hidden') {
-      denoiser?.reset(); denoisedSamples = 0; denoisingSamples = 0;
-      motionDenoising = false; motionReady = false;
-      if (wasDenoising) fenceDenoise();
-    }
-    if (sceneChanged) {
-      generation++;
-      // Abort also rejects an in-flight worker task, so its private geometry is released.
-      abort?.abort(); abort = null;
-      motionRemaining = 0; motionActive = false; transformsDirty = false; started = false; state = 'idle'; reason = null; frames = 0; sample = 0; measuring = null; budgetExhausted = false;
-    } else {
-      cameraDirty = true; transformsDirty ||= transformsChanged;
-    }
+// OrbitControls can change a camera's last bits even when it reports no motion.
+// Compare against the last sent view, so small intended movement accumulates.
+function sameCamera(a, b, viewDistance) {
+  if (!a || !b) return false;
+  const close = (x, y, absolute, relative) => x === y || (Number.isFinite(x) && Number.isFinite(y)
+    && Math.abs(x - y) <= Math.max(absolute, Math.abs(x) * relative, Math.abs(y) * relative));
+  return Object.keys(a).every(key => {
+    const x = a[key], y = b[key];
+    const absolute = key === 'position' ? Math.max(1e-10, viewDistance * 1e-6) : key === 'quaternion' ? 1e-6 : 1e-9;
+    const relative = key === 'projection' || key === 'projectionInverse' || key === 'near' || key === 'far' ? 2e-6 : 1e-13;
+    return Array.isArray(x) ? Array.isArray(y) && x.length === y.length && x.every((value, index) => close(value, y[index], absolute, relative)) : close(x, y, absolute, relative);
+  });
+}
+
+// Owns only browser presentation and worker lifecycle. All trace scenes, GPU
+// objects, BVHs and denoisers live in the dedicated worker.
+export function createProgressivePreview(runtime, { requestRender = () => {}, onFailure = () => {}, diagnostic = null,
+  workerFactory = createWorker, stallMs = STALL_MS, snapshotScene = snapshotPreviewScene,
+  setTimer = globalThis.setTimeout, clearTimer = globalThis.clearTimeout } = {}) {
+  const raw = diagnostic?.rawReferenceSamples ?? null;
+  if (raw !== null && (!Number.isInteger(raw) || raw < 1 || raw > 1024)) throw new RangeError('rawReferenceSamples must be an integer between 1 and 1024');
+  let generation = 0, worker = null, abort = null, timer = null, canvas = null, visible = false, disposed = false, started = false;
+  let rasterOpacity = null, inputBusy = false, pending = null, sources = null, dirtyTransforms = false, paused = false, inputDirty = false, lastSentFrame = null, lastPerformanceKey = null, lease = null, initialized = false, sourceGround = null, sourceNodes = null;
+  let progress = { state: 'idle', presentedFrames: 0, sample: 0, samples: 0, fallbackReason: null };
+  const cancelTimer = () => { if (timer !== null) clearTimer(timer); timer = null; };
+  const arm = token => { cancelTimer(); timer = setTimer(() => fail(new Error('Preview worker stopped making progress'), token), stallMs); };
+  const beginWatch = token => { if (timer === null) arm(token); };
+  const release = (restore = true, retainFrame = false) => {
+    cancelTimer(); abort?.abort(); abort = null;
+    if (worker) { worker.onmessage = null; worker.onerror = null; worker.onmessageerror = null; worker.terminate(); }
+    worker = null; lease?.release(); lease = null; inputBusy = false; pending = null; sources = null; sourceGround = null; sourceNodes = null; initialized = false;
+    if (!retainFrame && canvas) { canvas.remove(); canvas = null; visible = false; }
+    lastSentFrame = null; lastPerformanceKey = null; inputDirty = false;
+    if (restore && rasterOpacity !== null) { runtime.renderer.domElement.style.opacity = rasterOpacity; rasterOpacity = null; }
   };
   const fail = (error, token) => {
-    if (disposed || token !== generation || state === 'fallback') return;
-    state = 'fallback'; reason = error?.message || String(error);
-    generation++; cameraEpoch++; measuring = null; abort?.abort(); abort = null;
-    try { onFailure(error); } catch { /* Reporting must not prevent cleanup. */ }
-    release(false); cache.dispose();
-    requestRender();
+    if (disposed || token !== generation || progress.state === 'fallback') return;
+    generation++; release(false);
+    progress = { ...progress, state: 'fallback', fallbackReason: error?.message || String(error) };
+    try { onFailure(error); } finally { requestRender(); }
   };
-  const prepare = async (sourceCamera) => {
-    const token = ++generation;
-    started = true;
-    state = 'preparing'; reason = null;
-    maxSamples = rawReferenceSamples ?? (runtime.previewConfiguration?.quality === 'final' ? FINAL_SAMPLES : PREVIEW_SAMPLES);
-    let localGpu = gpu, localScene = null, localCanvas = null, localBackdrop = null, localPresented = null;
-    const taskAbort = new AbortController();
-    abort = taskAbort;
+  const sendInput = async () => {
+    if (!worker || !initialized || inputBusy || !pending || paused) return;
+    const input = pending, local = worker, token = generation; pending = null; inputBusy = true;
+    const takeTransforms = dirtyTransforms; dirtyTransforms = false;
+    try {
+      if (takeTransforms) {
+        if (!sources) throw new Error('Preview placements are unavailable');
+        // Update the admitted hierarchy in parent-first order, without another
+        // recursive traversal, and latch all placements in the same event turn.
+        runtime.modelGroup.parent?.updateWorldMatrix(true, false);
+        for (const node of sourceNodes || []) {
+          if (node.object.parent !== node.parent || node.object.visible !== node.visible) { invalidate({ sceneChanged: true }); requestRender(); return; }
+          if (node.visible) node.object.updateWorldMatrix(false, false);
+        }
+        input.transforms = new Float32Array(sources.length * 16);
+        sources.forEach((source, index) => source.matrixWorld.toArray(input.transforms, index * 16));
+        const ground = runtime.photographicStudio?.ground;
+        if ((ground?.visible ? ground : null) !== sourceGround) { invalidate({ sceneChanged: true }); requestRender(); return; }
+        if (sourceGround) input.floorMatrix = sourceGround.matrixWorld.toArray();
+      }
+      beginWatch(token);
+      if (input.transforms) local.postMessage(input, [input.transforms.buffer]);
+      else local.postMessage(input);
+      if (input.frameChanged) lastSentFrame = input;
+      lastPerformanceKey = JSON.stringify(input.performance || {});
+    } catch (error) { if (token === generation && error?.name !== 'AbortError') fail(error, token); }
+  };
+  const start = camera => {
+    const token = ++generation; started = true; progress = { ...progress, state: 'preparing', fallbackReason: null, stage: 'probe' };
+    abort = new AbortController(); arm(token);
+    let outgoing = null, snapshotStarted = false;
     try {
       if (!globalThis.navigator?.gpu) throw new Error('WebGPU unavailable');
-      if (typeof Worker !== 'function') throw new Error('Worker unavailable');
-      if (runtime.previewConfiguration?.lighting?.enabled === false) throw new Error('studio lighting disabled');
-      const admission = inspectPreviewScene(runtime.modelGroup);
-      if (admission.reason) throw new Error(admission.reason);
-      if (!localGpu) {
-        // The default device exposes only 128 MiB per storage binding even
-        // when its adapter can support more. Request no more than our explicit
-        // cap; requesting a limit does not allocate the buffer.
-        const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance', featureLevel: 'compatibility' });
-        if (!adapter) throw new Error('WebGPU unavailable');
-        if (token !== generation || disposed) return;
-        const maxBufferSize = Math.min(adapter.limits.maxBufferSize, PREVIEW_LIMITS.bindingBytes);
-        const maxStorageBufferBindingSize = Math.min(adapter.limits.maxStorageBufferBindingSize, maxBufferSize);
-        const requiredLimits = { maxBufferSize, maxStorageBufferBindingSize };
-        localCanvas = document.createElement('canvas');
-        const backdrop = document.createElement('canvas');
-        localBackdrop = backdrop;
-        Object.assign(backdrop.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', pointerEvents: 'none', visibility: 'hidden' });
-        runtime.renderer.domElement.parentElement.appendChild(backdrop);
-        background = backdrop;
-        Object.assign(localCanvas.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', pointerEvents: 'none', visibility: 'hidden' });
-        runtime.renderer.domElement.parentElement.appendChild(localCanvas);
-        canvas = localCanvas;
-        localPresented = document.createElement('canvas');
-        Object.assign(localPresented.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', pointerEvents: 'none', visibility: 'hidden' });
-        runtime.renderer.domElement.parentElement.appendChild(localPresented);
-        presented = localPresented;
-        localGpu = new WebGPURenderer({ canvas: localCanvas, alpha: true, antialias: false, powerPreference: 'high-performance', requiredLimits });
-        await localGpu.init();
-        if (!localGpu.backend?.isWebGPUBackend) throw new Error('WebGPU unavailable');
-        if (token !== generation || disposed) { localGpu.dispose(); localCanvas.remove(); backdrop.remove(); localPresented?.remove(); return; }
-        gpu = localGpu;
-        const device = localGpu.backend.device;
-        device.addEventListener('uncapturederror', event => { if (gpu === localGpu) fail(event.error || new Error('WebGPU error'), generation); });
-        device.lost.then(info => { if (gpu === localGpu) fail(new Error(info.message || 'WebGPU device lost'), generation); });
-      }
-      localGpu.toneMapping = runtime.renderer.toneMapping;
-      localGpu.toneMappingExposure = runtime.renderer.toneMappingExposure;
-      localGpu.setClearColor(0x000000, 0);
-      const deviceLimits = localGpu.backend.device.limits;
-      const deviceBudget = previewSceneBudget(admission, undefined, deviceLimits);
-      if (deviceBudget) throw new Error(deviceBudget);
-      localScene = await preparePreviewScene(runtime, admission, taskAbort.signal, cache, deviceLimits);
-      if (token !== generation || disposed) { disposePreviewScene(localScene); return; }
-      camera = sourceCamera.clone();
-      if (!tracer) {
-        tracer = new WebGPUPathTracer(localGpu);
-        denoiser = new PreviewDenoiser({ initUNetFromURL, auxWeightsUrl: OIDN_WEIGHTS_URL,
-          maxTileSize: 256, dynamicTile: false }, {
-          onComplete: () => { denoisedSamples = denoisingSamples; requestRender(); },
-          onError: error => fail(error, generation),
-        });
-        tracer.setDenoiser(denoiser);
-      }
-      tracer.generateMissingAttributes = false;
-      tracer.maxSamples = maxSamples;
-      tracer.maxBounces = MAX_BOUNCES;
-      tracer.maxTransparentBounces = MAX_TRANSPARENT_BOUNCES;
-      // Upstream's wavefront pool costs 448 bytes per slot across five buffers. The
-      // largest is ray state (224 bytes/slot), so respect the device's binding and
-      // buffer limits.
-      const limits = localGpu.backend.device.limits;
-      const perBinding = Math.min(limits.maxStorageBufferBindingSize, limits.maxBufferSize);
-      frameBudget = Math.max(1, Math.min(FRAME_PATH_BUDGET, Math.floor(perBinding / RAY_STATE_BYTES)));
-      tracer.frameBudget = frameBudget;
-      tracer.dynamicLowRes = false;
-      tracer.renderDelay = 0;
-      tracer.minSamples = 0;
-      tracer.setScene(localScene, camera);
-      disposePreviewScene(scene);
-      scene = localScene;
-      state = 'ready'; cameraDirty = true;
-      requestRender();
-    } catch (error) {
-      if (token !== generation || disposed) { if (localScene && localScene !== scene) disposePreviewScene(localScene); if (localGpu && localGpu !== gpu) localGpu.dispose(); localCanvas?.remove(); localBackdrop?.remove(); localPresented?.remove(); return; }
-      if (localScene && localScene !== scene) disposePreviewScene(localScene);
-      if (localGpu && localGpu !== gpu) localGpu.dispose();
-      fail(error, token);
-    }
-  };
-  const render = (_renderer, _scene, sourceCamera, { still = true, moving = false, sceneChanged = false } = {}) => {
-    if (disposed) return { refining: false, visible: false };
-    if (globalThis.document?.visibilityState === 'hidden') return { refining: false, visible };
-    if (sceneChanged && started) invalidate({ sceneChanged: true });
-    if (!started) { void prepare(sourceCamera); return { refining: false, visible: false }; }
-    if (state !== 'ready') return { refining: false, visible: false };
-    // A quality-only setting can extend a converged image without rebuilding
-    // geometry or discarding the accumulated samples.
-    const desiredSamples = rawReferenceSamples ?? (runtime.previewConfiguration?.quality === 'final' ? FINAL_SAMPLES : PREVIEW_SAMPLES);
-    if (desiredSamples !== maxSamples) {
-      const wasDenoising = denoiser?.running;
-      maxSamples = desiredSamples; tracer.maxSamples = maxSamples; denoisedSamples = 0; denoisingSamples = 0; budgetExhausted = false;
-      if (motionReady || motionDenoising) { motionReady = false; motionDenoising = false; cameraDirty = true; }
-      if (wasDenoising) fenceDenoise();
-    }
-    // Do not queue more than one GPU batch; camera changes can then take effect
-    // after the current batch without draining a backlog.
-    if (inFlight) return { refining: false, visible };
-    try {
-      if (motionDenoising) {
-        if (denoiser.running) return { refining: false, visible };
-        if (!denoiser.texture) throw new Error('Interactive denoising did not produce an image');
-        if (!motionQuad) motionQuad = new FullScreenQuad(new RenderToScreenNodeMaterial());
-        const material = motionQuad.material;
-        material.texture = denoiser.texture; material.transition = 1;
-        const previousTarget = gpu.getRenderTarget(), previousAutoClear = gpu.autoClear;
-        try { gpu.setRenderTarget(null); gpu.autoClear = true; motionQuad.render(gpu); }
-        finally { gpu.autoClear = previousAutoClear; gpu.setRenderTarget(previousTarget); }
-        show(); shownSamples = 0; motionDenoising = false; denoiser.reset();
-      }
-      if (motionReady) {
-        motionReady = false; motionDenoising = true;
-        void denoiser.run(tracer.target, { scheduling: 'event-loop' });
-        return { refining: false, visible };
-      }
-      const wantsMotion = moving || !still;
-      // Finish the current latched motion picture before sampling a newer pose;
-      // otherwise a continuous stream of pointer changes would reset every path.
-      if (motionRemaining === 0 && transformsDirty) {
-        transformsDirty = false;
-        if (!scene || !syncPreviewSceneTransforms(scene, runtime.modelGroup, runtime.photographicStudio?.ground)) {
-          invalidate({ sceneChanged: true });
-          void prepare(sourceCamera);
-          return { refining: false, visible: false };
+      if (typeof OffscreenCanvas !== 'function' || typeof Worker !== 'function') throw new Error('Preview worker unavailable');
+      lease = previewResourcePool.reserve(PREVIEW_RESOURCE_LIMITS.driverReserveBytes);
+      if (!lease) throw new Error('Preview resource budget is in use');
+      const local = workerFactory(); worker = local;
+      const view = runtime.renderer.domElement;
+      const snapshotAfterProbe = async limits => {
+        if (snapshotStarted) return; snapshotStarted = true; arm(token);
+        progress = { ...progress, stage: 'snapshot' };
+        try {
+          const snapshot = await snapshotScene(runtime, { signal: abort.signal, deviceLimits: limits, lease, yieldWork: async () => {
+            await new Promise(resolve => setTimeout(resolve, 0)); if (token === generation && !abort?.signal.aborted) arm(token);
+          } });
+          if (disposed || token !== generation || worker !== local) { snapshot.lease?.release(); for (const item of snapshot.transfers) item.close?.(); return; }
+          if (snapshot.lease && snapshot.lease !== lease) { lease?.release(); lease = snapshot.lease; }
+          sources = snapshot.sourceMeshes; sourceNodes = snapshot.sourceNodes || []; sourceGround = snapshot.sourceGround || null; outgoing = snapshot.transfers;
+          if (!canvas) {
+            canvas = document.createElement('canvas');
+            Object.assign(canvas.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', pointerEvents: 'none', visibility: 'hidden' });
+            view.parentElement.appendChild(canvas);
+          }
+          local.postMessage({ type: 'init', scene: snapshot.payload, width: view.width || view.clientWidth, height: view.height || view.clientHeight,
+            camera: cameraRecord(camera), diagnostic }, snapshot.transfers);
+          outgoing = null; initialized = true; sendInput();
+        } catch (error) { for (const item of outgoing || []) item.close?.(); outgoing = null; if (token === generation && error?.name !== 'AbortError') fail(error, token); }
+      };
+      local.onmessage = event => {
+        const msg = event.data;
+        if (disposed || token !== generation || worker !== local) { msg.bitmap?.close(); return; }
+        if (msg.type === 'probe') { void snapshotAfterProbe(msg.limits); return; }
+        if (msg.type === 'error') { fail(new Error(msg.message), token); return; }
+        if (msg.type === 'progress') {
+          progress = { ...progress, ...msg.progress, presentedFrames: progress.presentedFrames, state: msg.progress?.state === 'ready' && visible ? 'ready' : 'preparing', stage: msg.stage, stageMs: msg.stageMs };
+          const complete = (msg.progress?.budgetExhausted && msg.progress.sample > 0 && msg.progress.denoisedSamples >= msg.progress.sample) || (msg.progress?.samples > 0 && msg.progress.sample >= msg.progress.samples && msg.progress.denoisedSamples >= msg.progress.samples);
+          if (complete) cancelTimer(); else arm(token);
+          requestRender(); return;
         }
-        tracer.updateTransforms();
-        // Guide meshes are ordinary private copies, so rebuild them over the new matrices.
-        denoiser.setScene(scene, camera);
-      }
-      const rasterCanvas = runtime.renderer.domElement;
-      const width = Math.max(1, rasterCanvas.width || rasterCanvas.clientWidth);
-      const height = Math.max(1, rasterCanvas.height || rasterCanvas.clientHeight);
-      const scale = Math.min(1, Math.sqrt(MAX_RENDER_PIXELS / (width * height)));
-      const w = Math.max(1, Math.floor(width * scale)), h = Math.max(1, Math.floor(height * scale));
-      renderWidth = w; renderHeight = h;
-      if (canvas.width !== w || canvas.height !== h) { gpu.setSize(w, h, false); cameraDirty = true; motionRemaining = 0; }
-      if (motionRemaining === 0 && wantsMotion && (cameraDirty || !motionActive)) {
-        tracer.dynamicLowRes = true; tracer.lowResScale = MOTION_SCALE; tracer.renderDelay = 60000000; tracer.fadeDuration = 0;
-        motionActive = true; motionRemaining = MOTION_UPDATES;
-      }
-      if (motionRemaining === 0 && !wantsMotion && motionActive) {
-        tracer.dynamicLowRes = false; tracer.renderDelay = 0; motionActive = false; cameraDirty = true;
-      }
-      if (cameraDirty && motionRemaining !== MOTION_UPDATES && motionRemaining > 0) {
-        // A newer camera waits until the latched low-resolution image completes.
-      } else if (cameraDirty) {
-        camera.copy(sourceCamera, false); camera.coordinateSystem = THREE.WebGPUCoordinateSystem;
-        tracer.updateCamera(); cameraDirty = false; frames = 0; sample = 0; budgetExhausted = false; denoisedSamples = 0; denoisingSamples = 0; cameraEpoch++; measuring = null;
-        drawPreviewBackdrop(background, sourceCamera, runtime.photographicStudio, w, h, runtime.renderer.getClearAlpha());
-      }
-      if (motionRemaining > 0) {
-        // Submit one latched picture as one bounded GPU batch. Low-resolution
-        // updates each advance five wavefront steps, and are not tied to vsync.
-        while (motionRemaining > 0) { tracer.renderSample(); motionRemaining--; }
-        motionReady = true;
-        const fence = gpu.backend.device.queue.onSubmittedWorkDone();
-        inFlight = fence;
-        const token = generation;
-        fence.then(() => {
-          if (inFlight !== fence) return;
-          inFlight = null;
-          if (disposed || state !== 'ready') return;
-          // Start the latched guide/network work as soon as the trace batch
-          // finishes; waiting for another animation frame would add a whole
-          // display interval to every interactive picture.
-          if (token === generation && motionReady && globalThis.document?.visibilityState !== 'hidden') {
-            motionReady = false; motionDenoising = true;
-            void denoiser.run(tracer.target, { scheduling: 'event-loop' });
-          } else requestRender();
-        }).catch(error => { if (inFlight !== fence) return; inFlight = null; if (token === generation) fail(error, token); });
-        return { refining: false, visible };
-      }
-      if (wantsMotion) return { refining: false, visible };
-      if (denoiser.running) return { refining: false, visible };
-      const estimatedFrames = Math.ceil(w * h / frameBudget * maxSamples * (MAX_BOUNCES + MAX_TRANSPARENT_BOUNCES + 4));
-      const limit = Math.min(rawReference ? MAX_REFERENCE_FRAMES : MAX_FRAME_LIMIT, Math.max(MIN_FRAME_LIMIT, estimatedFrames));
-      if (frames >= limit && !budgetExhausted) {
-        // Wait for an in-flight count before reporting the budget result; then
-        // denoise the best available image instead of leaving the first pass up.
-        if (measuring) return { refining: false, visible };
-        budgetExhausted = true;
-      }
-      const nextDenoise = budgetExhausted ? sample : (denoisedSamples ? maxSamples : FIRST_DENOISE_SAMPLES);
-      if (!rawReference && sample >= nextDenoise && denoisedSamples < nextDenoise) {
-        denoisingSamples = sample;
-        void denoiser.run(tracer.target);
-        return { refining: false, visible };
-      }
-      const wasPaused = tracer.pause;
-      tracer.pause = budgetExhausted;
-      try { tracer.renderSample(); } finally { tracer.pause = wasPaused; }
-      if (!budgetExhausted) frames++;
-      if (denoiser.texture || (rawReference && sample >= 1)) {
-        const newFrame = rawReference || denoisedSamples !== shownSamples || !visible;
-        if (newFrame) show(newFrame);
-        shownSamples = denoisedSamples;
-      }
-      // Readback only occasionally: it is asynchronous and only used to stop the loop.
-      if (!budgetExhausted && !measuring && frames % 16 === 0) {
-        const measurement = {};
-        measuring = measurement;
-        const token = generation, epoch = cameraEpoch;
-        tracer.getSampleCountsAsync().then(counts => {
-          if (token === generation && epoch === cameraEpoch && !disposed) { sample = counts.min; requestRender(); }
-        }).catch(error => { if (epoch === cameraEpoch) fail(error, token); }).finally(() => { if (measuring === measurement) measuring = null; });
-      }
-      // The fence closes the loop only after the submitted work has completed.
-      // A completion from an older scene can wake a new ready scene, but cannot
-      // fail it or present its result.
-      const token = generation;
-      const fence = gpu.backend.device.queue.onSubmittedWorkDone();
-      inFlight = fence;
-      fence.then(() => {
-        if (inFlight !== fence) return;
-        inFlight = null;
-        if (!disposed && state === 'ready' && (token !== generation || cameraDirty || (!budgetExhausted && (frames >= limit || sample < maxSamples || (!rawReference && denoisedSamples < maxSamples))))) requestRender();
-      }).catch(error => {
-        if (inFlight !== fence) return;
-        inFlight = null;
-        if (token === generation) fail(error, token);
-        else if (!disposed && state === 'ready') requestRender();
-      });
-      return { refining: false, visible };
-    } catch (error) { fail(error, generation); return { refining: false, visible: false }; }
+        if (msg.type === 'resource-diagnostic') { progress = { ...progress, memory: msg.memory, effectiveQuality: msg.profile, resourceReason: msg.reason }; return; }
+        if (msg.type === 'resource') {
+          const ok = Boolean(lease?.resize(Math.max(lease.bytes, msg.memory.peakBytes)));
+          progress = { ...progress, memory: msg.memory, effectiveQuality: msg.profile };
+          local.postMessage({ type: 'resource-ack', id: msg.id, ok });
+          return;
+        }
+        if (msg.type === 'input-ack') { inputBusy = false; sendInput(); return; }
+        if (msg.type === 'frame') {
+          try {
+            const bitmap = msg.bitmap;
+            if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) { canvas.width = bitmap.width; canvas.height = bitmap.height; }
+            const context = canvas.getContext('2d');
+            if (!context) throw new Error('Preview presentation unavailable');
+            context.clearRect(0, 0, canvas.width, canvas.height); context.drawImage(bitmap, 0, 0); bitmap.close();
+            if (!visible) { rasterOpacity = view.style.opacity; view.style.opacity = '0'; }
+            canvas.style.visibility = 'visible'; visible = true;
+            progress = { ...progress, ...msg.progress, presentedFrames: progress.presentedFrames + 1, state: 'ready', fallbackReason: null };
+            if (msg.progress?.motion || (msg.progress?.samples > 0 && msg.progress.sample >= msg.progress.samples && msg.progress.denoisedSamples >= msg.progress.samples)) cancelTimer();
+            else arm(token);
+            local.postMessage({ type: 'frame-ack' }); requestRender();
+          } catch (error) { msg.bitmap?.close(); fail(error, token); }
+        }
+      };
+      local.onerror = event => { event.preventDefault?.(); fail(new Error(event.message || 'Preview worker failed'), token); };
+      local.onmessageerror = () => fail(new Error('Preview worker sent an invalid message'), token);
+      local.postMessage({ type: 'probe' });
+    } catch (error) { for (const item of outgoing || []) item.close?.(); if (token === generation) fail(error, token); }
   };
+  const invalidate = ({ sceneChanged = false, transformsChanged = false } = {}) => {
+    if (disposed) return;
+    if (sceneChanged) { generation++; release(false, true); started = false; progress = { ...progress, state: 'idle', sample: 0, samples: 0, denoisedSamples: 0, fallbackReason: null }; }
+    else { dirtyTransforms ||= transformsChanged; inputDirty = true; }
+  };
+  const onVisibilityChange = () => {
+    if (disposed) return;
+    const hidden = globalThis.document?.visibilityState === 'hidden';
+    if (hidden === paused) return;
+    paused = hidden;
+    if (paused) {
+      cancelTimer();
+      if (progress.state === 'preparing') invalidate({ sceneChanged: true });
+      else worker?.postMessage({ type: 'pause', paused: true });
+    } else {
+      worker?.postMessage({ type: 'pause', paused: false });
+      if (worker) beginWatch(generation);
+      requestRender();
+    }
+  };
+  globalThis.document?.addEventListener?.('visibilitychange', onVisibilityChange);
   return {
-    render, invalidate,
-    dispose() { if (disposed) return; disposed = true; generation++; abort?.abort(); abort = null; release(); cache.dispose(); state = 'disposed'; },
-    get visible() { return visible; },
-    get captureCanvas() {
-      if (!visible) return null;
-      // WebGPU's presentation texture expires after the frame. Redraw the settled
-      // accumulation into a fresh one before the synchronous canvas copy.
-      capture ||= document.createElement('canvas');
-      capture.width = canvas.width; capture.height = canvas.height;
-      const context = capture.getContext('2d');
-      context.drawImage(background, 0, 0, capture.width, capture.height);
-      context.drawImage(presented, 0, 0);
-      return capture;
+    invalidate,
+    render(_renderer, _scene, camera, { still = true, moving = false, sceneChanged = false } = {}) {
+      if (disposed) return { visible: false, refining: false };
+      if (sceneChanged && started) invalidate({ sceneChanged: true });
+      const hidden = globalThis.document?.visibilityState === 'hidden';
+      if (hidden !== paused) onVisibilityChange();
+      if (hidden || progress.state === 'fallback') return { visible, refining: false };
+      if (!started) { void start(camera); return { visible, refining: false }; }
+      if (worker) {
+        const view = runtime.renderer.domElement;
+        const next = { type: 'input', camera: cameraRecord(camera), width: view.width || view.clientWidth, height: view.height || view.clientHeight,
+          moving: moving || !still, quality: runtime.previewConfiguration?.quality, performance: runtime.previewConfiguration?.performance };
+        const target = runtime.controls?.target;
+        const viewDistance = target && camera.position?.distanceTo ? camera.position.distanceTo(target) : 1;
+        const frameChanged = inputDirty || dirtyTransforms || !lastSentFrame || !sameCamera(next.camera, lastSentFrame.camera, viewDistance)
+          || next.width !== lastSentFrame.width || next.height !== lastSentFrame.height || next.moving !== lastSentFrame.moving || next.quality !== lastSentFrame.quality;
+        const performanceKey = JSON.stringify(next.performance || {});
+        if (pending || frameChanged || performanceKey !== lastPerformanceKey) {
+          next.frameChanged = Boolean(pending?.frameChanged || frameChanged);
+          pending = next; inputDirty = false; sendInput();
+        }
+      }
+      return { visible, refining: false };
     },
-    get progress() { return { state, motion: motionActive, motionRemaining, presentedFrames, traceWidth: motionActive ? Math.ceil(renderWidth * MOTION_SCALE) : renderWidth, traceHeight: motionActive ? Math.ceil(renderHeight * MOTION_SCALE) : renderHeight, sample, samples: maxSamples, frames, renderWidth, renderHeight, denoise: denoiser?.status || 'idle', denoisedSamples, budgetExhausted, denoiseTimings: denoiser?.timings || null, fallbackReason: reason }; },
+    dispose() { if (disposed) return; disposed = true; globalThis.document?.removeEventListener?.('visibilitychange', onVisibilityChange); generation++; release(); progress = { ...progress, state: 'disposed' }; },
+    get visible() { return visible; },
+    get captureCanvas() { return visible ? canvas : null; },
+    get progress() { return progress; },
   };
 }
