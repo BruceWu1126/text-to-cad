@@ -3,26 +3,46 @@
 Millimetres, Z up. The four scenes deliberately exercise different material and
 light-transport problems rather than a shared primitive arrangement.
 """
+import copy
 import math
 
 import build123d as bd
-from cadgen import Material, materials, model, paint
+from bd_materials import FinishedMaterial, glass, metals
+from bd_materials.core import RangeMaterial
+from threejs_materials import PbrProperties
+from cadgen import model, paint
 
 
-BLUE = Material("Regulator powder coat", color="#145d89", metallic=0.0, roughness=0.27, coat=0.25)
-BLACK = Material("Moulded engineering polymer", color="#15191d", roughness=0.47)
-GREEN = Material("Green solder mask", color="#134a38", roughness=0.36, coat=0.2)
-WHITE = Material("Ceramic dial", color="#ede8db", roughness=0.3)
-ALUMINIUM = materials.aluminium_6061.but(color="#c0c5ca", roughness=0.24, anisotropy=0.45)
-STEEL = materials.stainless_304.but(color="#c2c7cc", roughness=0.16)
-BRASS = materials.brass_c360.but(color="#cba35b", roughness=0.23)
-GLASS = materials.glass_soda_lime.but(roughness=0.025, transmission=1.0)
+def coating(name, **values):
+    return FinishedMaterial(RangeMaterial(name=name, density=None), pbr=PbrProperties.create(name, **values))
+
+
+def appearance(material, **values):
+    result = copy.deepcopy(material)
+    result.pbr = result.pbr.override(**values)
+    return result
+
+
+BLUE = coating("Regulator powder coat", color="#145d89", metalness=0.0, roughness=0.27, clearcoat=0.25)
+BLACK = coating("Moulded engineering polymer", color="#15191d", roughness=0.47)
+GREEN = coating("Green solder mask", color="#134a38", roughness=0.36, clearcoat=0.2)
+WHITE = coating("Ceramic dial", color="#ede8db", roughness=0.3)
+ALUMINIUM = appearance(metals.aluminum(metals.Alu.G6061_T6), color="#c0c5ca", metalness=1, roughness=0.24, anisotropy=0.45)
+STEEL = appearance(metals.stainless(metals.Stainless.G304_ANNEALED), color="#c2c7cc", metalness=1, roughness=0.16)
+BRASS = appearance(metals.brass(metals.Brass.C360_HALF_HARD), color="#cba35b", metalness=1, roughness=0.23)
+COPPER = appearance(metals.copper(metals.Copper.C110_ANNEALED), roughness=0.2)
+# Preserve this review scene's original soda-lime absorption and opaque base alpha.
+GLASS = appearance(glass.soda_lime(), color="#ffffff", roughness=0.025, transmission=1.0,
+                   attenuation_color=(0.822786, 0.930111, 0.871367), attenuation_distance=0.05, dispersion=0)
 
 
 def finish(part, label, material):
     part.label = label
     part.material = material
-    part.color = None
+    # Native material assignment infers transparency for glass; the physical
+    # transmission model needs an opaque authored base colour instead.
+    color = material.pbr.to_dict()["values"].get("color", (1, 1, 1))
+    part.color = bd.Color(*color, 1)
     return part
 
 
@@ -56,7 +76,7 @@ def machined_bearing_housing():
     for x in (-39, 39):
         cuts.append(bd.Pos(x, 0, 11) * rounded_plate(13, 24, 12, 4))
     body = finish(body - cuts, "counterbored_machined_housing", ALUMINIUM)
-    paint(body, body.faces().filter_by(bd.Axis.Z)[-1:], ALUMINIUM.but(roughness=0.12))
+    paint(body, body.faces().filter_by(bd.Axis.Z)[-1:], appearance(ALUMINIUM, roughness=0.12))
     bearing = finish(bd.Pos(0, 0, 21) * tube(17.95, 12.5, 12), "bronze_bearing", BRASS)
     seal = finish(bd.Pos(0, 0, 32.7) * tube(22.5, 17.8, 1.8), "retaining_seal", BLACK)
     screw = socket_screw()
@@ -89,7 +109,7 @@ def painted_pressure_regulator():
         a = math.radians(-140 + i * 280 / 24)
         tick = bd.Pos(13 * math.sin(a), 13 * math.cos(a), 6.4) * bd.Rot(0, 0, -math.degrees(a)) * bd.Box(0.65, 2.8 if i % 3 == 0 else 1.6, 0.2)
         ticks.append(finish(place * tick, "dial_tick", BLACK))
-    needle = finish(place * bd.Pos(-3, 2, 6.7) * bd.Rot(0, 0, -45) * bd.Box(0.9, 15, 0.3), "red_indicator_needle", Material("Red enamel", color="#c32123", roughness=0.27))
+    needle = finish(place * bd.Pos(-3, 2, 6.7) * bd.Rot(0, 0, -45) * bd.Box(0.9, 15, 0.3), "red_indicator_needle", coating("Red enamel", color="#c32123", roughness=0.27))
     crystal = finish(place * bd.Pos(0, 0, 7.4) * bd.Cylinder(16.7, 0.7), "gauge_glass", GLASS)
     screw = socket_screw()
     screws = [bd.Pos(x, y, 6) * screw for x in (-26, 26) for y in (-15, 15)]
@@ -102,7 +122,7 @@ def glass_sample_vessel():
     shell -= bd.Pos(0, 0, 3) * bd.Cylinder(28, 71, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
     shell += bd.Pos(0, 0, 70) * tube(32.3, 27.5, 5)
     shell = finish(shell, "thick_walled_glass_vessel", GLASS)
-    liquid_material = Material("Amber sample liquid", color="#efb546", roughness=0.03, ior=1.333, transmission=0.92, transmission_color="#b8671e", transmission_depth=0.07)
+    liquid_material = coating("Amber sample liquid", color="#efb546", roughness=0.03, ior=1.333, transmission=0.92, attenuation_color="#b8671e", attenuation_distance=0.07)
     liquid = finish(bd.Pos(0, 0, 3.1) * bd.Cylinder(27.8, 39, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN)), "amber_liquid", liquid_material)
     contents = []
     for x, y, z in [(-10, -6, 11), (8, 5, 12), (0, 0, 25)]:
@@ -145,7 +165,7 @@ def mixed_material_instrument():
     parts.append(finish(sink, "finned_aluminium_heatsink", ALUMINIUM))
     # A short copper wound inductor is modelled as separate circular turns.
     for i in range(9):
-        parts.append(finish(bd.Pos(-25, 22, 10 + i * 0.9) * tube(7.3, 6.3, 0.75), "copper_coil_turn", materials.copper_c110.but(roughness=0.2)))
+        parts.append(finish(bd.Pos(-25, 22, 10 + i * 0.9) * tube(7.3, 6.3, 0.75), "copper_coil_turn", COPPER))
     return bd.Compound(children=parts, label="mixed_material_instrument")
 
 

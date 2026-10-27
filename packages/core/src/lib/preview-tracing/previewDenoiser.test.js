@@ -5,10 +5,12 @@ import { PreviewDenoiser } from './previewDenoiser.js';
 function fixture() {
   let rgbFinish, alphaFinish, rgbFail, alphaFail, aborted = 0, completed = 0, errors = 0, initializations = 0;
   let alphaStartedResolve;
+  const schedules = [];
   const alphaStarted = new Promise(resolve => { alphaStartedResolve = resolve; });
-  const rgbNetwork = { tileExecute(inputs) { rgbFinish = inputs.done; rgbFail = inputs.error; return () => { aborted++; }; }, dispose() {} };
+  const rgbNetwork = { tileExecute(inputs) { schedules.push(inputs.scheduling); rgbFinish = inputs.done; rgbFail = inputs.error; return () => { aborted++; }; }, dispose() {} };
   const alphaNetwork = { tileExecute(inputs) {
     assert.equal(inputs.denoiseAlpha, true);
+    schedules.push(inputs.scheduling);
     alphaFinish = inputs.done; alphaFail = inputs.error; alphaStartedResolve();
     return () => { aborted++; };
   }, dispose() {} };
@@ -20,7 +22,7 @@ function fixture() {
   denoiser._renderAuxiliaryBuffers = () => ({ textures: [{}, {}] });
   denoiser._copyOutputToTexture = (rgb, alpha) => { assert.equal(rgb.label, 'rgb'); assert.equal(alpha.label, 'alpha'); denoiser._texture = { dispose() {} }; };
   return { denoiser, finishRGB: () => rgbFinish({ label: 'rgb' }), finishAlpha: () => alphaFinish({ label: 'alpha' }), alphaStarted,
-    failRGB: () => rgbFail(new Error('device')), failAlpha: () => alphaFail(new Error('device')), counts: () => ({ aborted, completed, errors, initializations }) };
+    schedules, failRGB: () => rgbFail(new Error('device')), failAlpha: () => alphaFail(new Error('device')), counts: () => ({ aborted, completed, errors, initializations }) };
 }
 
 async function finish(f) { f.finishRGB(); await f.alphaStarted; f.finishAlpha(); }
@@ -38,6 +40,14 @@ test('only the completed RGB and alpha passes become presentable', async () => {
   assert.ok(f.denoiser.texture);
   assert.equal(f.counts().completed, 1);
   assert.equal(f.counts().initializations, 2, 'RGB and alpha use separate network shader state');
+  f.denoiser.dispose();
+});
+
+test('interactive scheduling applies to both guided passes', async () => {
+  const f = fixture();
+  await f.denoiser.run({ width: 2, height: 2 }, { scheduling: 'event-loop' });
+  await finish(f);
+  assert.deepEqual(f.schedules, ['event-loop', 'event-loop']);
   f.denoiser.dispose();
 });
 

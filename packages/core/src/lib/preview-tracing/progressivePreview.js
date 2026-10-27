@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { WebGPURenderer } from 'three/webgpu';
 import { WebGPUPathTracer } from 'three-gpu-pathtracer/webgpu';
+import { RenderToScreenNodeMaterial } from 'three-gpu-pathtracer/src/webgpu/materials/RenderToScreenMaterial.js';
+import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { initUNetFromURL } from 'oidn-webgpu/dist/oidn.js';
 import { PreviewDenoiser } from './previewDenoiser.js';
 import { OIDN_WEIGHTS_URL } from './weights/index.js';
@@ -31,6 +33,7 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, on
   let rasterOpacity = null;
   let started = false, disposed = false, cameraDirty = false, transformsDirty = false, measuring = null, sample = 0, frameBudget = FRAME_PATH_BUDGET;
   let inFlight = null, denoiser = null, denoisedSamples = 0, denoisingSamples = 0, budgetExhausted = false, motionRemaining = 0, motionActive = false, presentedFrames = 0, shownSamples = 0;
+  let motionReady = false, motionDenoising = false, motionQuad = null;
   const cache = createPreviewGeometryCache();
   let maxSamples = rawReferenceSamples ?? (runtime.previewConfiguration?.quality === 'final' ? FINAL_SAMPLES : PREVIEW_SAMPLES);
   const hide = (restoreRaster = true) => { visible = false; if (canvas) canvas.style.visibility = 'hidden'; if (presented) presented.style.visibility = 'hidden'; if (background) background.style.visibility = 'hidden'; if (restoreRaster && rasterOpacity !== null) { runtime.renderer.domElement.style.opacity = rasterOpacity; rasterOpacity = null; } };
@@ -50,6 +53,7 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, on
   const release = (restoreRaster = true) => {
     hide(restoreRaster); inFlight = null;
     tracer?.dispose(); tracer = null; denoiser = null; denoisedSamples = 0; denoisingSamples = 0;
+    motionQuad?.material.dispose(); motionQuad?.dispose(); motionQuad = null; motionReady = false; motionDenoising = false;
     disposePreviewScene(scene); scene = null;
     gpu?.dispose(); gpu = null;
     canvas?.remove(); canvas = null; presented?.remove(); presented = null; background?.remove(); background = null; capture = null;
@@ -78,8 +82,12 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, on
   const invalidate = ({ sceneChanged = false, transformsChanged = false } = {}) => {
     cameraEpoch++; measuring = null;
     const wasDenoising = denoiser?.running;
-    denoiser?.reset(); denoisedSamples = 0; denoisingSamples = 0;
-    if (wasDenoising) fenceDenoise();
+    // Keep an in-progress interactive picture latched despite newer input.
+    if ((!motionReady && !motionDenoising) || sceneChanged || globalThis.document?.visibilityState === 'hidden') {
+      denoiser?.reset(); denoisedSamples = 0; denoisingSamples = 0;
+      motionDenoising = false; motionReady = false;
+      if (wasDenoising) fenceDenoise();
+    }
     if (sceneChanged) {
       generation++;
       // Abort also rejects an in-flight worker task, so its private geometry is released.
@@ -199,12 +207,29 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, on
     if (desiredSamples !== maxSamples) {
       const wasDenoising = denoiser?.running;
       maxSamples = desiredSamples; tracer.maxSamples = maxSamples; denoisedSamples = 0; denoisingSamples = 0; budgetExhausted = false;
+      if (motionReady || motionDenoising) { motionReady = false; motionDenoising = false; cameraDirty = true; }
       if (wasDenoising) fenceDenoise();
     }
     // Do not queue more than one GPU batch; camera changes can then take effect
     // after the current batch without draining a backlog.
     if (inFlight) return { refining: false, visible };
     try {
+      if (motionDenoising) {
+        if (denoiser.running) return { refining: false, visible };
+        if (!denoiser.texture) throw new Error('Interactive denoising did not produce an image');
+        if (!motionQuad) motionQuad = new FullScreenQuad(new RenderToScreenNodeMaterial());
+        const material = motionQuad.material;
+        material.texture = denoiser.texture; material.transition = 1;
+        const previousTarget = gpu.getRenderTarget(), previousAutoClear = gpu.autoClear;
+        try { gpu.setRenderTarget(null); gpu.autoClear = true; motionQuad.render(gpu); }
+        finally { gpu.autoClear = previousAutoClear; gpu.setRenderTarget(previousTarget); }
+        show(); shownSamples = 0; motionDenoising = false; denoiser.reset();
+      }
+      if (motionReady) {
+        motionReady = false; motionDenoising = true;
+        void denoiser.run(tracer.target, { scheduling: 'event-loop' });
+        return { refining: false, visible };
+      }
       const wantsMotion = moving || !still;
       // Finish the current latched motion picture before sampling a newer pose;
       // otherwise a continuous stream of pointer changes would reset every path.
@@ -244,12 +269,22 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, on
         // Submit one latched picture as one bounded GPU batch. Low-resolution
         // updates each advance five wavefront steps, and are not tied to vsync.
         while (motionRemaining > 0) { tracer.renderSample(); motionRemaining--; }
-        show(); shownSamples = 0;
+        motionReady = true;
         const fence = gpu.backend.device.queue.onSubmittedWorkDone();
         inFlight = fence;
         const token = generation;
-        fence.then(() => { if (inFlight !== fence) return; inFlight = null; if (!disposed && state === 'ready') requestRender(); })
-          .catch(error => { if (inFlight !== fence) return; inFlight = null; if (token === generation) fail(error, token); });
+        fence.then(() => {
+          if (inFlight !== fence) return;
+          inFlight = null;
+          if (disposed || state !== 'ready') return;
+          // Start the latched guide/network work as soon as the trace batch
+          // finishes; waiting for another animation frame would add a whole
+          // display interval to every interactive picture.
+          if (token === generation && motionReady && globalThis.document?.visibilityState !== 'hidden') {
+            motionReady = false; motionDenoising = true;
+            void denoiser.run(tracer.target, { scheduling: 'event-loop' });
+          } else requestRender();
+        }).catch(error => { if (inFlight !== fence) return; inFlight = null; if (token === generation) fail(error, token); });
         return { refining: false, visible };
       }
       if (wantsMotion) return { refining: false, visible };

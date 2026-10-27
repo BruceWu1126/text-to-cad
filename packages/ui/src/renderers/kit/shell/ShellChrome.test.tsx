@@ -530,6 +530,7 @@ it("Preview is in Render: the strip, the view's controls, the stack and the file
   // What was set in Preview is the file's Render settings: the next visit has it.
   act(() => { fireEvent.click(document.querySelector('[data-harness-ask-preview]')!); });
   expect(inPreview()).toBe(true);
+  await waitFor(() => expect(document.querySelector('[data-preview-cover]')).toBeNull());
   await user.click(within(previewBar()!).getByRole('button', { name: 'Preview settings' }));
   expect(floor().getAttribute('aria-checked')).toBe('false');
   await user.click(within(previewBar()!).getByRole('button', { name: 'Exit preview' }));

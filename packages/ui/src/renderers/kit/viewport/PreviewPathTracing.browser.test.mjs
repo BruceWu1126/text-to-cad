@@ -13,7 +13,7 @@ import { pressInPreview } from '../../harness/preview.mjs';
 
 // A small, generated scene: face-painted and repeated parts, metal and translucent
 // material. This exercises actual GPU output, without the sample-model corpus or a
-// noisy screenshot golden. Unsupported browsers still run the fallback case.
+// noisy screenshot golden. Unsupported browsers still exercise the error state.
 const fixture = `
 import * as THREE from 'three';
 import { createProgressivePreview } from './packages/core/src/lib/preview-tracing/progressivePreview.js';
@@ -43,11 +43,18 @@ scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8a8a, 2));
 const camera = new THREE.PerspectiveCamera(38, 256/192, 0.1, 100);
 camera.up.set(0,0,1); camera.position.set(5,-7,5); camera.lookAt(0,0.6,0.4); camera.updateMatrixWorld();
 const runtime = { THREE, renderer, scene, modelGroup, photographicStudio: { ground: floor, keyLight }, previewConfiguration: { exposure: 0, lighting: { size: 1, fill: 0.25, rotation: 0 } }, previewQuality: 'preview' };
-let controller, queued = false, moving = false, draws = 0, preparationFrames = 0;
+let controller, queued = false, moving = false, draws = 0, preparationFrames = 0, changeQuality = false, qualityChanged = false;
 const longTasks = [];
 new PerformanceObserver(list => longTasks.push(...list.getEntries().map(e => e.duration))).observe({type:'longtask',buffered:true});
 const requestRender = () => { if (queued) return; queued = true; requestAnimationFrame(draw); };
-function draw() { queued = false; renderer.render(scene,camera); draws++; const result = controller.render(renderer,scene,camera,{still:!moving,moving,sceneChanged:false}); if(result.refining)requestRender(); }
+function draw() {
+  queued = false; renderer.render(scene,camera); draws++;
+  if (changeQuality && ['denoising', 'denoising-alpha'].includes(controller.progress.denoise)) {
+    changeQuality = false; qualityChanged = true; runtime.previewConfiguration.quality = 'final';
+  }
+  const result = controller.render(renderer,scene,camera,{still:!moving,moving,sceneChanged:false});
+  if(result.refining)requestRender();
+}
 const create = () => {
   controller = createProgressivePreview(runtime,{requestRender}); requestRender();
   const preparing = () => { if(controller.progress.state === 'preparing') preparationFrames++; if(['idle','preparing'].includes(controller.progress.state)) requestAnimationFrame(preparing); };
@@ -59,6 +66,13 @@ window.previewTest = {
   move: () => { moving=true; repeat.position.x=2; controller.invalidate({sceneChanged:true}); draw(); },
   orbit: () => { camera.position.set(6,-6,5); camera.lookAt(0,0.6,0.4); camera.updateMatrixWorld(); controller.invalidate({sceneChanged:false}); draw(); },
   stop: () => { moving=false; requestRender(); },
+  changeQualityDuringMotion: () => {
+    changeQuality = true;
+    const poll = () => { if (!changeQuality) return; draw(); if (changeQuality) setTimeout(poll, 0); };
+    poll();
+  },
+  qualityChanged: () => qualityChanged,
+  previewQuality: () => { runtime.previewConfiguration.quality = 'preview'; requestRender(); },
   sustainedOrbit: () => { moving=true; let n=0; const tick=() => { if (!moving) return; n++; camera.position.set(6+0.8*Math.sin(n*0.02),-6+0.8*Math.cos(n*0.02),5); camera.lookAt(0,0.6,0.4); camera.updateMatrixWorld(); controller.invalidate({sceneChanged:false}); draw(); requestAnimationFrame(tick); }; tick(); },
   transparent: () => { camera.position.set(0,-3,18); camera.lookAt(0,0,0); camera.updateMatrixWorld(); scene.background=null; renderer.setClearAlpha(0); floor.scale.setScalar(0.5); floor.material.opacity=0.6; floor.material.transparent=true; runtime.photographicStudio.floorFade={value:0.8}; controller.invalidate({sceneChanged:true}); requestRender(); },
   emptyPatch: () => {
@@ -276,7 +290,7 @@ test('the real Preview viewport traces, captures and restores the editor on exit
 test('hardware Preview converges on authored parts, resets for motion and releases its canvas on every exit', async t => {
   const { page, errors, logs } = await open(t);
   const adapter = await page.evaluate(async () => { const a = await navigator.gpu?.requestAdapter(); return a ? { vendor: a.info.vendor, architecture: a.info.architecture, fallback: a.info.isFallbackAdapter } : null; });
-  if (!adapter || adapter.fallback) return t.skip('A hardware WebGPU adapter is unavailable; the raster fallback is tested separately.');
+  if (!adapter || adapter.fallback) return t.skip('A hardware WebGPU adapter is unavailable; the unavailable-device state is tested separately.');
   t.diagnostic(`WebGPU ${JSON.stringify(adapter)}`);
   await page.evaluate(() => window.previewTest.start());
   await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.state === 'fallback' || (p.denoisedSamples > 0 && p.denoisedSamples >= p.samples); }, null, { timeout: 90000 })
@@ -309,7 +323,11 @@ test('hardware Preview converges on authored parts, resets for motion and releas
   await page.evaluate(() => window.previewTest.sustainedOrbit());
   await page.waitForFunction(count => window.previewTest.progress().presentedFrames >= count + 2, previousFrames, { timeout: 120000 });
   assert.ok(await page.evaluate(() => window.previewTest.progress().motion), 'continuous camera motion presents new traced frames');
-  await page.evaluate(() => window.previewTest.stop());
+  await page.evaluate(() => window.previewTest.changeQualityDuringMotion());
+  await page.waitForFunction(() => window.previewTest.qualityChanged());
+  await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.samples === 256 || p.state === 'fallback'; });
+  assert.notEqual((await page.evaluate(() => window.previewTest.progress())).state, 'fallback', 'quality changes cancel an interactive denoise safely');
+  await page.evaluate(() => { window.previewTest.previewQuality(); window.previewTest.stop(); });
   await page.waitForFunction(() => !window.previewTest.progress().motion, null, { timeout: 120000 });
   await page.evaluate(() => window.previewTest.move());
   assert.ok(await page.evaluate(() => window.previewTest.capture()), 'scene motion retains a traced picture');

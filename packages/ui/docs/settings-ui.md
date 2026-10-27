@@ -965,7 +965,7 @@ tile after Display, in every host. A press covers the view at once
 ("Preparing preview…", in the scene's backdrop colour) and enters Preview under the cover,
 which lifts once Preview has presented its first traced image and its published mesh is complete
 (`kit/shell/previewCover.js`). The traced image refines while visible. Orbiting or playing a
-routine uses bounded, low-resolution traced frames with the same material transport; at rest,
+routine uses bounded, low-resolution traced and denoised frames with the same material transport; at rest,
 the picture refines and is denoised. Missing WebGPU, unsupported materials or geometry, and
 scenes beyond the resource budget show an error with Retry and Exit preview. Exit is available
 while preparation is in progress. The navbar is gone too, in every host

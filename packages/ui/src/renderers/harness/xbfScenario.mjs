@@ -42,7 +42,7 @@ export async function serveXbfHarness(t, { transmission = false } = {}) {
   const { bundle, css: bundledCss } = await harnessBundle();
   // The document as it is served now: its version moves with each `update` of an open page.
   const structure = JSON.parse(STRUCTURE);
-  if (transmission) structure.prototypes[0].material = { transmission: 0.9, roughness: 0.1, ior: 1.5 };
+  if (transmission) structure.prototypes[0].material = { pbr: { values: { transmission: 0.9, roughness: 0.1, ior: 1.5 }, textures: {} } };
   const initial = Buffer.from(JSON.stringify(structure));
   let served = { version: VERSION, structure: initial };
   let updates = 0;

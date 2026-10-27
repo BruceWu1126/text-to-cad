@@ -469,6 +469,7 @@ const ShellViewport = forwardRef(function ShellViewport({
     },
     activateViewPlaneFace,
     requestRender() { runtimeRef.current?.requestRender?.(); },
+    requestMotionFrame() { runtimeRef.current?.requestMotionFrame?.(); },
     // A frame that keeps the shadow maps: for a highlight, which moves and reshapes no caster.
     requestFrame() { requestSceneFrame(runtimeRef.current, false); },
     getPerspective() {

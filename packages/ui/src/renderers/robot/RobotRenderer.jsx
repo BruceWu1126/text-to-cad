@@ -218,7 +218,7 @@ function RobotSurface({ view, data }) {
     const present = () => {
       if (!previewScene.setControlValues(previewPose.getSnapshot().values)) return;
       const view = shellRef.current?.frame.previewViewRef.current;
-      view?.requestRender?.();
+      view?.requestMotionFrame?.();
       boundsFrame ||= window.requestAnimationFrame(() => { boundsFrame = 0; shellRef.current?.frame.previewViewRef.current?.syncSceneBounds?.(); });
     };
     present();

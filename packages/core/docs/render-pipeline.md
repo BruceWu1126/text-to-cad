@@ -192,7 +192,8 @@ default backdrop color.
 `lib/preview-tracing/progressivePreview.js` draws interactive Preview through one WebGPU
 path tracer. The view stays covered while the first usable traced image prepares. Motion
 presents bounded low-resolution traced frames with the same light transport and bounce
-limits, then refines a still view to its denoised sample budget. Camera, pose, material,
+limits. Each latched view receives guided colour and coverage denoising before presentation;
+new input is picked up after that pass. A still view then refines to its denoised sample budget. Camera, pose, material,
 lighting and viewport changes invalidate accumulation. An unsupported scene or device
 shows an error with retry and exit; a late preparation cannot attach to a closed view.
 

@@ -28,7 +28,7 @@ export class PreviewDenoiser extends OIDNDenoiser {
   get texture() { return this._complete ? this._texture : this.previousTexture; }
   update() { return this.texture; }
 
-  async run(color) {
+  async run(color, { scheduling = 'animation-frame' } = {}) {
     if (this._running) return;
     if (this._complete) {
       this.previousTexture?.dispose();
@@ -61,12 +61,12 @@ export class PreviewDenoiser extends OIDNDenoiser {
         color: { data: backend.get(color).texture, width, height },
         albedo: { data: backend.get(aux.textures[0]).texture, width, height },
         normal: { data: backend.get(aux.textures[1]).texture, width, height },
-        scheduling: 'animation-frame',
+        scheduling,
         done: output => {
           if (id !== this._requestId || !this._running) return;
           this.timings.rgbMs = performance.now() - rgbStart;
           this._abort = null;
-          void this._runAlphaPass(output, aux, width, height, id);
+          void this._runAlphaPass(output, aux, width, height, id, scheduling);
         },
         error: error => this._fail(error, id),
       });
@@ -77,7 +77,7 @@ export class PreviewDenoiser extends OIDNDenoiser {
   // so RGB and alpha need separate UNets. Their output buffers remain owned by
   // those networks; keep RGB alive until the alpha pass completes and combine
   // straight RGB with estimated coverage in a GPU copy.
-  async _runAlphaPass(rgb, aux, width, height, id) {
+  async _runAlphaPass(rgb, aux, width, height, id, scheduling) {
     try {
       this.status = 'preparing-alpha';
       const start = performance.now();
@@ -99,7 +99,7 @@ export class PreviewDenoiser extends OIDNDenoiser {
         albedo: { data: backend.get(aux.textures[0]).texture, width, height },
         normal: { data: backend.get(aux.textures[1]).texture, width, height },
         denoiseAlpha: true,
-        scheduling: 'animation-frame',
+        scheduling,
         done: alpha => {
           if (id !== this._requestId || !this._running) return;
           try {

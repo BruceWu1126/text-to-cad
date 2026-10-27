@@ -106,7 +106,7 @@ function GlbSurface({ view, data }) {
 
   // ---- Preview: its own scene, the editor's sibling over its geometry, and its own routine ---
   const previewScene = usePreviewScene(scene, previewing);
-  const previewAnimation = useGlbAnimation(previewScene?.document || null, () => shell.frame.previewViewRef.current?.requestRender?.());
+  const previewAnimation = useGlbAnimation(previewScene?.document || null, () => shell.frame.previewViewRef.current?.requestMotionFrame?.());
   const previewView = useMemo(() => ({ scene: previewScene, animation: previewAnimation }), [previewScene, previewAnimation]);
 
   // Export converts the file shown to the other two mesh kinds: its path names it and the bytes on

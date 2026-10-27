@@ -27,6 +27,7 @@ import { createZoomPivotReanchor } from "../camera/zoomPivotReanchor.js";
 import { createFramePresentation } from "./framePresentation.js";
 import { acquireGpuDevice } from "./gpuDevice.js";
 import { createPreviewRefinement, renderPreviewFrame } from "./previewRefinement.js";
+import { createPreviewSceneRequests } from "./previewSceneRequests.js";
 
 // A pan moves what it grabs 1.35x as far as the cursor, in either projection (`handlePanPress`).
 const PAN_SPEED = 1.35;
@@ -596,11 +597,11 @@ export function useViewerRuntime({
                 renderWithSceneRig(runtimeRef.current?.sceneRig, renderer, scene, drawCamera);
                 return { refining: false };
               };
-              if (runtimeRef.current?.renderMode && previewRef.current) {
+              if (previewRef.current) {
                 const active = runtimeRef.current;
                 active.progressivePreview ||= createPreviewRefinement(active, { requestRender, onStatus: status => previewStatusRef.current?.(status) });
                 const traced = renderPreviewFrame(active.progressivePreview, renderer, scene, drawCamera,
-                  { still, moving, sceneChanged: sceneChanged && !previewMotionRef.current });
+                  { still, moving, sceneChanged: false });
                 refining = traced.refining;
                 return traced.visible === true;
               }
@@ -1018,30 +1019,9 @@ export function useViewerRuntime({
         onWindowResize,
         resizeObserver,
         rafId,
-        // Renders requested through the runtime come from scene mutations
-        // (model/theme/params/overlay effects), so they also refresh shadows.
-        // Camera-driven paths use the closure-local requestRender and keep the
-        // last shadow map.
-        requestRender: () => {
-          runtimeRef.current?.progressivePreview?.invalidate(previewMotionRef.current ? { transformsChanged: true } : { sceneChanged: true });
-          interactionState.shadowsDirty = true;
-          interactionState.sceneChanged = true;
-          requestRender();
-        },
-        // A frame for a change that moves, shows, hides and reshapes no shadow caster (a
-        // highlight's colour, an overlay, the floor shadow's deferred bake): the shadow maps
-        // it has are kept, as on a frame that only moved the camera.
-        requestFrame: () => {
-          runtimeRef.current?.progressivePreview?.invalidate(previewMotionRef.current ? { transformsChanged: true } : { sceneChanged: true });
-          interactionState.sceneChanged = true;
-          requestRender();
-        },
+        ...createPreviewSceneRequests(() => runtimeRef.current, interactionState, requestRender),
         drawCurrentFrame: renderNow,
         progressivePreview: null,
-        invalidateShadows: () => {
-          runtimeRef.current?.progressivePreview?.invalidate(previewMotionRef.current ? { transformsChanged: true } : { sceneChanged: true });
-          interactionState.shadowsDirty = true;
-        },
         beginInteraction,
         scheduleIdleQuality,
         setIdlePixelRatioCap,

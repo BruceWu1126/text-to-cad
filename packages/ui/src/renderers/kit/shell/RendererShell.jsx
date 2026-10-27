@@ -294,7 +294,12 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     // Over a mark or a measurement the part under it hears nothing of the pointer.
     if (over) event.stopPropagation();
   };
-  useEffect(() => { setPreviewing(false); }, [frame.modelKey, setPreviewing]);
+  useEffect(() => {
+    previewEntryRef.current++; setCoverRequested(false); setPreviewing(false);
+  }, [frame.modelKey, setPreviewing]);
+  useEffect(() => {
+    if (!shell.previewable) { previewEntryRef.current++; setCoverRequested(false); setPreviewing(false); }
+  }, [shell.previewable, setPreviewing]);
   // Preview is a view of its own (`PreviewView.jsx`): it opens on the model as authored, in Render,
   // still, its routine at rest and started only by Autoplay, and leaving it takes it away.
   const enterPreview = () => {

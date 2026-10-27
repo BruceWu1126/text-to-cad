@@ -115,7 +115,7 @@ draw, as before.
 Preview uses a WebGPU path tracer (`core/lib/preview-tracing/progressivePreview.js`)
 for both movement and still views. A cover stays up while the first traced image prepares;
 a failed or unsupported device or scene offers retry and exit. During motion, a bounded
-low-resolution traced image is updated at the same material and bounce settings. At rest,
+low-resolution traced and denoised image is updated at the same material and bounce settings. At rest,
 it is replaced by a denoised image after 32 samples and refined to 128 samples for Preview
 lighting quality or 256 for Final. Filtering uses bundled Open Image Denoise weights.
 Tracing is limited to one million interactive pixels and bounded scene resources. The
