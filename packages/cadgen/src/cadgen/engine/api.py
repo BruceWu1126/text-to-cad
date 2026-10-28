@@ -1204,7 +1204,9 @@ def _error(error: BaseException | None, reports: list[dict[str, Any]], worker: d
     if error is None:
         return None
     if isinstance(error, EngineError):
-        text = str(error)
+        from cadgen.engine.daemon import WORKER_STDERR
+
+        text = str(error).partition(WORKER_STDERR)[0]
         died = _DIED.search(text)
         if died:
             worker["died"] = int(died["status"])

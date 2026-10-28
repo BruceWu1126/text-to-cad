@@ -669,6 +669,12 @@ a process group of its own too (`daemon.detached`), never no console at all: a c
 started with none gets a new console, with a window (#597). What they start in turn (the
 meshing and reading pools) shares their windowless console.
 
+Workers start with Python's fault handler enabled, so a native fault writes its Python stack
+to stderr. A worker that fails to start or exits during a request includes its last 16,384
+stderr characters in the local error, including startup diagnostics before a client can receive
+logs. This tail is held only in memory and reset for each request; telemetry still reports the
+worker's exit status alone, never its stderr.
+
 A worker runs each request in that request's folder (its script's, or the caller's), so a model's
 relative reads resolve as they would under `python SCRIPT`, and stands in the temporary folder
 between requests: an idle worker holds no project folder (on Windows, one a process stands in
@@ -1267,7 +1273,9 @@ up in place of the theme's. Preview is drawn as any file's is.
 
 `cadgen snapshot` draws a document as the viewer does. The engine serves and meshes it (the
 daemon's meshes, or with `daemon=False` a server of this process), and OCCT draws it from those meshes
-(`render/`, below), in the look the viewer resolves for the same display settings. `--display` takes
+(`render/`, below), in the look the viewer resolves for the same display settings. A mesh file
+passed through a worker's export request still uses its render reader, preserving textures,
+feature edges and file units; its export source holds no B-rep to mesh. `--display` takes
 a mode (`solid`, `shaded`, `parts`, `xray`, `hidden-line`, `wireframe`), `exploded=A` (the parts
 moved apart as the viewer's Explode moves them, by an amount from 0 to 1; with a mode,
 `hidden-line,exploded=0.6`), `light` or `dark` (the appearance, all a drawing takes), or the display
