@@ -20,6 +20,126 @@ from tests.python.packages.cadgen.engine.test_pool import Fake
 
 
 class RuntimeTest(unittest.TestCase):
+    def _editable_project(self, root, layout=""):
+        project, site = root / "project", root / "site"
+        source = project / layout / "dependency.py"
+        source.parent.mkdir(parents=True)
+        source.write_text("WIDTH=1\n", encoding="utf-8")
+        egg, wheel = source.parent / "custom_dependency.egg-info", site / "custom_dependency-1.dist-info"
+        egg.mkdir()
+        wheel.mkdir(parents=True)
+        (egg / "PKG-INFO").write_text("Name: custom_dependency\nVersion: 1\n", encoding="utf-8")
+        (egg / "SOURCES.txt").write_text("dependency.py\n", encoding="utf-8")
+        (wheel / "METADATA").write_text("Name: Custom-Dependency\nVersion: 1\n", encoding="utf-8")
+        (wheel / "direct_url.json").write_text(json.dumps({"url": project.as_uri(), "dir_info": {"editable": True}}), encoding="utf-8")
+        (site / "custom_editable.pth").write_text("# editable import hook\n", encoding="utf-8")
+        (wheel / "RECORD").write_text("custom_editable.pth,,\ncustom_dependency-1.dist-info/METADATA,,\n"
+                                    "custom_dependency-1.dist-info/direct_url.json,,\n", encoding="utf-8")
+        return project, site, source, egg, wheel
+
+    def test_plain_script_and_safe_path_worker_agree_on_editable_project(self):
+        with tempfile.TemporaryDirectory() as folder:
+            project, site, _, egg, wheel = self._editable_project(Path(folder).resolve())
+            script = project / "snapshot.py"
+            script.write_text("import json, os, sys\nfrom importlib import metadata\nfrom cadgen.engine import runtime\n"
+                              "execution = runtime.describe()\n"
+                              "if not sys.flags.safe_path:\n"
+                              "    from cadgen.engine.daemon import Worker\n"
+                              "    worker = Worker(__file__, dict(os.environ), execution=execution)\n"
+                              "    worker.stop()\n"
+                              "print(json.dumps({'execution':execution, 'metadata': [str(d._path) "
+                              "for d in metadata.distributions() if d.name.lower().replace('_','-') == 'custom-dependency']}))\n",
+                              encoding="utf-8")
+            env = {name: value for name, value in os.environ.items() if name != "PYTHONSAFEPATH"}
+            paths = [str(site), str(Path(runtime.__file__).resolve().parents[2])]
+            paths.extend(os.path.abspath(path) for path in env.get("PYTHONPATH", "").split(os.pathsep) if path)
+            env.update(PYTHONPATH=os.pathsep.join(paths), PYTHONDONTWRITEBYTECODE="1",
+                       CADGEN_ENGINE_DIR=str(project.parent / "engine"), CADGEN_STATE_DIR=str(project.parent / "state"),
+                       CADGEN_CACHE_DIR=str(project.parent / "cache"))
+            plain, worker = [json.loads(subprocess.check_output([sys.executable, *flags, str(script)],
+                                                               cwd=project, env=env, text=True))
+                             for flags in ([], ["-P"])]
+            self.assertEqual(plain["metadata"], [str(egg), str(wheel)])
+            self.assertEqual(worker["metadata"], [str(wheel)])
+            self.assertEqual(plain["execution"], worker["execution"])
+
+    def test_editable_metadata_layouts_canonicalize_without_losing_live_mutations(self):
+        from importlib import metadata
+
+        self.addCleanup(runtime._records.clear)
+        for layout in ("", "src", "custom/python"):
+            with self.subTest(layout=layout), tempfile.TemporaryDirectory() as folder:
+                project, site, source, egg, wheel = self._editable_project(Path(folder).resolve(), layout)
+                (egg / "PKG-INFO").write_text("Name: Custom_.-Dependency\nVersion: 1\n", encoding="utf-8")
+                direct = {"url": (project / ".." / project.name).as_uri(), "dir_info": {"editable": True}}
+                (wheel / "direct_url.json").write_text(json.dumps(direct), encoding="utf-8")
+                source_dist, installed = metadata.Distribution.at(egg), metadata.Distribution.at(wheel)
+                with mock.patch.object(runtime.metadata, "distributions", return_value=[source_dist, installed]) as discover:
+                    first = runtime.dependencies()
+                    for distributions in ([installed], [installed, source_dist]):
+                        discover.return_value = distributions
+                        self.assertEqual(first, runtime.dependencies())
+                    discover.return_value = [source_dist, installed]
+                    for target in (source, source.with_suffix(".so"), site / "custom_editable.pth", wheel / "METADATA"):
+                        before = runtime.dependencies()
+                        stamp = target.stat() if target.exists() else None
+                        content = target.read_text(encoding="utf-8") + "Summary: changed\n" if target == wheel / "METADATA" else (
+                            "WIDTH=2\n" if target == source else "changed\n")
+                        target.write_text(content, encoding="utf-8")
+                        if stamp is not None:
+                            os.utime(target, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                        self.assertNotEqual(before, runtime.dependencies(), target)
+                    # A new RECORD entry is picked up even with a warm inventory cache.
+                    (site / "another.py").write_text("VALUE=1\n", encoding="utf-8")
+                    before = runtime.dependencies()
+                    with (wheel / "RECORD").open("a", encoding="utf-8") as record:
+                        record.write("another.py,,\n")
+                    self.assertNotEqual(before, runtime.dependencies())
+                    # Replacing an equivalent source record must keep its precedence over
+                    # other installations, rather than skipping it and promoting a later one.
+                    other_info = site / "other" / wheel.name
+                    other_info.mkdir(parents=True)
+                    (other_info / "METADATA").write_text("Name: custom-dependency\nVersion: 1\n", encoding="utf-8")
+                    other = metadata.Distribution.at(other_info)
+                    discover.return_value = [installed]
+                    canonical = runtime.dependencies()
+                    discover.return_value = [source_dist, other, installed]
+                    self.assertEqual(canonical, runtime.dependencies())
+                    discover.return_value = [other]
+                    distinct = runtime.dependencies()
+                    discover.return_value = [other, source_dist, installed]
+                    self.assertEqual(distinct, runtime.dependencies())
+                    self.assertNotEqual(distinct, canonical)
+
+    def test_distinct_or_installed_legacy_metadata_keeps_discovery_precedence(self):
+        from importlib import metadata
+
+        self.addCleanup(runtime._records.clear)
+        for difference in ("version", "root", "not-editable", "no-direct-url", "installed-egg", "no-sources", "nested-venv", "installed-site"):
+            with self.subTest(difference=difference), tempfile.TemporaryDirectory() as folder:
+                layout = {"nested-venv": ".venv/lib", "installed-site": "site-packages"}.get(difference, "")
+                project, _, _, egg, wheel = self._editable_project(
+                    Path(folder).resolve(), layout)
+                if difference == "version":
+                    (egg / "PKG-INFO").write_text("Name: custom-dependency\nVersion: 2\n", encoding="utf-8")
+                elif difference in ("root", "not-editable"):
+                    direct = {"url": (project.parent / "other" if difference == "root" else project).as_uri(),
+                              "dir_info": {"editable": difference == "root"}}
+                    (wheel / "direct_url.json").write_text(json.dumps(direct), encoding="utf-8")
+                elif difference == "no-direct-url":
+                    (wheel / "direct_url.json").unlink()
+                elif difference == "installed-egg":
+                    (egg / "installed-files.txt").write_text("../dependency.py\n", encoding="utf-8")
+                elif difference == "no-sources":
+                    (egg / "SOURCES.txt").unlink()
+                source_dist, installed = metadata.Distribution.at(egg), metadata.Distribution.at(wheel)
+                with mock.patch.object(runtime.metadata, "distributions", return_value=[source_dist, installed]) as discover:
+                    first = runtime.dependencies()
+                    discover.return_value = [source_dist]
+                    self.assertEqual(first, runtime.dependencies())
+                    discover.return_value = [installed, source_dist]
+                    self.assertNotEqual(first, runtime.dependencies())
+
     def test_actual_interpreter_is_lexical_and_not_virtual_env(self):
         prefix = str(Path(tempfile.gettempdir()) / "venv")
         python = str(Path(prefix) / "bin" / "python")

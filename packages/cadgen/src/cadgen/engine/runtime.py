@@ -15,6 +15,7 @@ import io
 import json
 import os
 import platform
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,7 @@ STARTUP = ("PYTHONPATH", "PYTHONHOME", "PYTHONSAFEPATH", "PYTHONNOUSERSITE", "PY
 _SOURCE = frozenset({".py", ".so", ".pyd", ".dll", ".dylib", ".pth"})
 _SKIP = frozenset({".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", "build", "dist"})
 _current: dict[str, Any] | None = None
-_records: dict[str, tuple[Any, str, str, list[str], Path | None]] = {}
+_records: dict[str, tuple[Any, str, str, list[str], Path | None, Path | None]] = {}
 
 
 def digest(value: Any) -> str:
@@ -114,7 +115,8 @@ def dependencies() -> str:
     # for the same imported code. Its actual source/release is authoritative in either layout.
     rows = [["cadgen", version(), sorted(_editable(Path(__file__).resolve().parent.parent))]]
     seen = set()
-    names = {"cadgen"}
+    records = []
+    editables: dict[tuple[str, str], list[Any]] = {}
     for dist in metadata.distributions():
         # Reading/parsing every RECORD repeatedly costs more than checking its files. Cache that
         # listing while the metadata's stat stands; package and editable source stats stay live.
@@ -123,10 +125,13 @@ def dependencies() -> str:
         if token in seen:
             continue
         seen.add(token)
-        changed = [_stamp(os.path.join(token, name)) for name in ("METADATA", "RECORD", "direct_url.json")] if location is not None else None
+        inventory = ("METADATA", "RECORD", "direct_url.json")
+        if token.endswith(".egg-info"):
+            inventory += ("PKG-INFO", "SOURCES.txt", "installed-files.txt")
+        changed = [_stamp(os.path.join(token, name)) for name in inventory] if location is not None else None
         held = _records.get(token)
         if held is None or held[0] != changed:
-            name = str(dist.metadata.get("Name") or "").lower().replace("_", "-")
+            name = re.sub(r"[-_.]+", "-", str(dist.metadata.get("Name") or "").lower())
             base = Path(dist.locate_file("")).resolve()
             record = dist.read_text("RECORD")
             # metadata.files stats every wheel entry before we can filter it. Read the same
@@ -146,8 +151,26 @@ def dependencies() -> str:
                 editable = Path(url2pathname(urlparse(direct["url"]).path)).resolve()
                 if name == "cadgen":
                     editable = Path(__file__).resolve().parent.parent
-            held = _records[token] = changed, name, dist.version, files, editable
-        _, name, version, files, editable = held
+            source = Path(token) if (token.endswith(".egg-info") and dist.read_text("SOURCES.txt") is not None
+                                    and dist.read_text("installed-files.txt") is None) else None
+            held = _records[token] = changed, name, dist.version, files, editable, source
+        records.append(held)
+        if held[4] is not None and token.endswith(".dist-info"):
+            editables.setdefault((held[1], held[2]), []).append(held)
+    names = {"cadgen"}
+    for held in records:
+        _, name, version, files, editable, source = held
+        if source is not None:
+            # A plain script sees its source egg-info before the installed editable wheel;
+            # a -P worker may see only the wheel. Use that same inventory for the equivalent
+            # project, in the egg's original precedence slot. Other installs keep their order.
+            for candidate in editables.get((name, version), ()):
+                root = candidate[4]
+                if source.is_relative_to(root) and not any(
+                        part in _SKIP or part in {"site-packages", "dist-packages"}
+                        for part in source.relative_to(root).parts[:-1]):
+                    _, name, version, files, editable, _ = candidate
+                    break
         if name in names:
             continue
         names.add(name)
