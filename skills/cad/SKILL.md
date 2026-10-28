@@ -34,62 +34,16 @@ Use the corresponding robot-description skill for URDF, SRDF or SDF.
 
 ## Setup and paths
 
-Use the project's Python environment for model scripts and the registered command for CLI verbs:
+- `cadgen` below means `~/.local/bin/cadgen +0.8.2`, the registered CLI.
+- `python` below means the project's Python interpreter, with the matching cadgen
+  release and the project's other dependencies installed. Run models with `python model.py`.
+- MCP starts or attaches to the engine; without MCP, run `cadgen server` and keep it running.
+  Use the port advertised by MCP, or 3245 by default; set `CADGEN_PORT` in the project
+  environment for another port. Server and project releases and ports must match;
+  clients never start an engine or fall back locally.
 
-- `cadgen` below means `~/.local/bin/cadgen +0.8.2`, the registered CLI proxy.
-  On Windows use `%USERPROFILE%\.local\bin\cadgen.cmd`; if `CADGEN_LAUNCHER_DIR` moved
-  the proxy, use that directory. Use its explicit path so an activated project environment
-  cannot shadow it with its own `cadgen` console script.
-- `python` below means the project's Python interpreter, from its virtual environment.
-  Install the matching release in that environment
-  with `python -m pip install cadgen==0.8.2`; keep the project's other dependencies there too.
-  If that interpreter has no pip, use
-  `uv pip install --python <project-python> cadgen==0.8.2` instead.
-
-The CAD app's MCP server starts or attaches to the engine. Without it, start the engine explicitly,
-outside a sandbox that cannot bind its listener:
-
-```bash
-uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.2 cadgen server
-```
-
-Keep that server running. Clients select port 3245 by default; set `CADGEN_PORT` in both the server
-and client environments to use another port (`cadgen server --port N` also selects it). Bootstrap reuses a compatible selected
-engine; a conflicting listener fails. Nothing chooses a different port or stops another engine.
-For GUI hosts, set `CADGEN_PORT` in the CAD MCP server's `env` settings too; a terminal export
-alone does not configure the GUI server. Project clients and workers
-must have exactly the server's cadgen release. A missing server or version mismatch fails before
-building; ordinary Python calls and CLI document operations never start a server or fall back locally.
-
-If the registered `cadgen` command is missing, run
-`uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.2 cadgen doctor` once
-outside the sandbox or with its permission. It registers the CLI installation and writes the
-command; it does not start the engine.
-
-`cadgen doctor <skill-dir>` reports the installation in use, whether it is the one
-this skill pins, whether the CAD kernel loads, and whether the selected engine is running. It never starts one. Each
-command's `--help` lists its flags. The first launch downloads cadgen and may outlast a
-host's server start timeout (Claude Code: 30 s by default, raised by setting `MCP_TIMEOUT` in
-milliseconds; Codex: the plugin asks for 300 s); a restart resumes the download.
-
-For a version or connection conflict, run
-`cadgen doctor --json --python <project-python> <skill-dir>` using the actual project
-interpreter and this skill's directory. This diagnostic report is read-only: it
-compares the skill, CLI, project and engine releases and reports discoverable
-provider configurations and registered installations. Discovery has a stated scope;
-do not treat it as a scan of every environment on the machine. Use the findings to
-align releases or configure a distinct port in both the provider and project.
-Do not silently switch releases or stop another provider's engine to make a build succeed.
-
-One engine serves the selected port. Model scripts and CLI document operations
-attach to it; project builds use warm workers in the calling Python environment.
-`cadgen status` lists its workers and documents; `cadgen stop` stops only that engine.
-A build cut off by the shell's time limit keeps running in the engine; run the same
-command again and it waits for that build and replays it (`cadgen status` shows it).
-Give a cold build of a large model the shell tool's longest timeout, or run it in the
-background. A refused folder is another case: if a command ends with 'the system denies
-cadgen's local engine', this shell's sandbox forbids the engine's folder itself: rerun it
-with the sandbox's permission (in Codex, escalated permissions) rather than retrying.
+For first-time setup, Windows or a relocated CLI, or an installation/connection error,
+read [Setup and troubleshooting](references/setup.md).
 
 Command-line paths, and the paths `read_step`, `read_xbf`, `read_mesh` and `export`
 take, are relative to the working directory, as are a model's own file reads. Anchor

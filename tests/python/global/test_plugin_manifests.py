@@ -409,10 +409,11 @@ class PluginManifestPolicyTest(unittest.TestCase):
         self.assertEqual([name for name in listed if not (SKILLS_ROOT / name / "SKILL.md").is_file()], [])
 
     def test_skill_handoffs_name_skills_that_ship(self) -> None:
-        # `$cad`, `$dxf`: one skill hands the agent to another by name (shell variables are upper case).
+        # `$cad`, `$dxf`: skill handoffs. PowerShell's `$env:NAME` is a scoped
+        # environment variable; other shell variables in these docs are upper case.
         dangling = []
         for document in sorted(SKILLS_ROOT.rglob("*.md")):
-            for name in sorted(set(re.findall(r"\$([a-z][a-z0-9-]*)\b", document.read_text(encoding="utf-8")))):
+            for name in sorted(set(re.findall(r"\$(?!env:)([a-z][a-z0-9-]*)\b", document.read_text(encoding="utf-8")))):
                 if not (SKILLS_ROOT / name / "SKILL.md").is_file():
                     dangling.append(f"{document.relative_to(REPO_ROOT)} -> ${name}")
         self.assertEqual(dangling, [])

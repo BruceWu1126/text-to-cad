@@ -189,14 +189,10 @@ def skill_rewrites(released: str, version: str, python: str | None = None, wheel
     proxy = Path(launcher_dir()).expanduser() / ("cadgen.cmd" if os.name == "nt" else "cadgen")
     rewrites = {launch("cadgen", released): f"{named}{command}",
                 f"~/.local/bin/cadgen +{released}": f"{quote(proxy)} +{version}",
+                f"cadgen.cmd +{released}": f"cadgen.cmd +{version}",
                 f"python -m pip install cadgen=={released}": f"python -m pip install {dependency}",
                 f"uv pip install --python <project-python> cadgen=={released}":
                     f"uv pip install --python <project-python> {dependency}"}
-    port = server_environment().get("CADGEN_PORT")
-    if port:
-        rewrites["Clients select port 3245 by default; set `CADGEN_PORT` in both the server\nand client environments to use another port (`cadgen server --port N` also selects it)."] = (
-            f"This development install selects port {port}. Set `CADGEN_PORT={port}` in the project\n"
-            "client environment too. Use that same port for an explicit server bootstrap.")
     if launcher_dir() != "~/.local/bin":
         rewrites["~/.local/bin"] = launcher_dir()
     return rewrites
@@ -214,11 +210,23 @@ def assemble(host: str, plugin_dir: Path, version: str, server: dict, root: Path
     if plugin_dir.exists():
         shutil.rmtree(plugin_dir)
     shutil.copytree(root / "skills", plugin_dir / "skills", ignore=IGNORED)
+    # Only current runtime instructions: a migration reference may intentionally name an old release.
     for skill in plugin_dir.glob("skills/*/SKILL.md"):
-        text = skill.read_text(encoding="utf-8")
-        for released, ours in (rewrites or {}).items():
-            text = text.replace(released, ours)
-        skill.write_text(text, encoding="utf-8")
+        for document in (skill, skill.parent / "references" / "setup.md"):
+            if not document.is_file():
+                continue
+            text = document.read_text(encoding="utf-8")
+            uses_runtime = "cadgen +" in text or "cadgen.cmd +" in text or "--from cadgen==" in text
+            for released, ours in (rewrites or {}).items():
+                text = text.replace(released, ours)
+            port = server.get("env", {}).get("CADGEN_PORT") if rewrites and uses_runtime else None
+            if port:
+                notice = (f"This development install selects port {port}. Set `CADGEN_PORT={port}` in the project "
+                          "client environment too; use the same port for any explicit server bootstrap.\n\n")
+                # Keep SKILL.md's YAML frontmatter first; no prose pattern is coupled to this override.
+                position = text.find("\n---\n", 4) + 5 if text.startswith("---\n") else 0
+                text = text[:position] + "\n" + notice + text[position:].lstrip("\n")
+            document.write_text(text, encoding="utf-8")
     if host == "gemini":
         manifest = json.loads((root / "gemini-extension.json").read_text(encoding="utf-8"))
         manifest["version"] = version

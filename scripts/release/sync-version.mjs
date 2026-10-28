@@ -33,9 +33,10 @@ function skillLaunchTargets() {
   }
   return readdirSync(skills, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => `skills/${entry.name}/SKILL.md`)
+    // Runtime setup has one dedicated guide; historical migration examples stay untouched.
+    .flatMap((entry) => ["SKILL.md", "references/setup.md"].map((file) => `skills/${entry.name}/${file}`))
     .filter((relative) => existsSync(path.join(repoRoot, relative)))
-    .filter((relative) => readFileSync(path.join(repoRoot, relative), "utf8").includes("--from cadgen=="))
+    .filter((relative) => /cadgen(?:\[[a-z0-9_,.-]+\])?==|cadgen(?:\.cmd)? \+\d/.test(readFileSync(path.join(repoRoot, relative), "utf8")))
     .sort();
 }
 
@@ -207,15 +208,15 @@ function syncTomlTarget(relativePath, version) {
 
 // A skill runs its version by the `cadgen` command (`cadgen +0.8.0`), and says it in the
 // command's refusal ("it says 0.8.0 is not installed").
-export const skillVersionPattern = /(cadgen \+|it says )(\d[^\s`"'\\)]*)/g;
+export const skillVersionPattern = /(cadgen(?:\.cmd)? \+|it says )(\d[^\s`"'\\)]*)/g;
 
 function syncPinTarget(relativePath, version, text = readRequiredText(relativePath)) {
   const pin = /(cadgen(?:\[[a-z0-9_,.-]+\])?==)([^"'`\s]+)/g;
   const matches = [...text.matchAll(pin)];
-  if (matches.length === 0) {
-    throw new Error(`${relativePath} must pin cadgen==<version>`);
-  }
   const named = [...text.matchAll(skillVersionPattern)];
+  if (matches.length === 0 && named.length === 0) {
+    throw new Error(`${relativePath} must pin cadgen==<version> or cadgen +<version>`);
+  }
   const labels = [];
   if (!matches.every((match) => match[2] === version)) {
     labels.push("cadgen pin");

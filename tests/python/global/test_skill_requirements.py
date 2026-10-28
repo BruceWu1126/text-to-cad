@@ -11,6 +11,11 @@ import re
 import unittest
 from pathlib import Path
 
+from tests.python.support.paths import add_repo_path
+
+add_repo_path("packages/cadgen/src")
+from cadgen.cli import read_skill_pin  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SKILLS = sorted(p for p in (REPO_ROOT / "skills").iterdir() if p.is_dir())
 
@@ -72,13 +77,20 @@ class SkillLaunchCommand(unittest.TestCase):
                     self.assertNotIn("--from cadgen==", text, "a skill that never runs cadgen downloads nothing")
                     continue
                 self.assertIn(f"`cadgen` below means `~/.local/bin/cadgen +{VERSION}`", text)
-                self.assertIn("`python` below means the project's Python interpreter", text)
-                self.assertIn(f"python -m pip install cadgen=={VERSION}", text)
-                self.assertIn(LAUNCH.format(version=VERSION, tool="cadgen server"), text)
-                self.assertIn(LAUNCH.format(version=VERSION, tool="cadgen doctor"), text)
+                self.assertEqual(read_skill_pin(skill / "SKILL.md"), VERSION)
+                setup = skill / "references" / "setup.md"
+                self.assertRegex(text, r"\]\(references/setup\.md(?:#[^)]*)?\)", "runtime setup must be reachable from the skill")
+                self.assertTrue(setup.is_file(), "the installed skill carries its own setup guide")
+                guide = setup.read_text(encoding="utf-8")
+                self.assertEqual(read_skill_pin(setup), VERSION)
+                self.assertIn(LAUNCH.format(version=VERSION, tool="cadgen server"), guide)
+                self.assertIn(LAUNCH.format(version=VERSION, tool="cadgen doctor"), guide)
+                if skill.name in {"cad", "dxf", "engineering-drawing"}:
+                    self.assertIn("`python` below means the project's Python interpreter", text)
+                    self.assertIn(f"python -m pip install cadgen=={VERSION}", guide)
+                    self.assertIn(f"uv pip install --python <project-python> cadgen=={VERSION}", guide)
                 self.assertNotRegex(text, r"`python` below means `cadgen[^`]*`")
-                self.assertIn("CADGEN_PORT", text)
-                self.assertIn("never start a server or fall back locally", text)
+                self.assertIn("CADGEN_PORT", text + guide)
 
     def test_the_launch_command_and_the_refusal_are_cadgens_own(self) -> None:
         import sys

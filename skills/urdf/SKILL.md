@@ -14,37 +14,14 @@ Use this skill for URDF robot-description outputs. Treat URDF work as constraine
 
 ## Setup
 
-Use the project's Python environment for model scripts and the registered command for CLI verbs:
+`cadgen` below means `~/.local/bin/cadgen +0.8.2`, the registered CLI.
+XML validation needs no running engine. Viewing and snapshots do: MCP starts or
+attaches to it; without MCP, run `cadgen server` and keep it running. Use the port
+advertised by MCP, or 3245 by default; set `CADGEN_PORT` in the client environment
+for another port. Client and server releases and ports must match.
 
-- `cadgen` below means `~/.local/bin/cadgen +0.8.2`, the registered CLI proxy.
-  On Windows use `%USERPROFILE%\.local\bin\cadgen.cmd`; if `CADGEN_LAUNCHER_DIR` moved
-  the proxy, use that directory. Use its explicit path so an activated project environment
-  cannot shadow it with its own `cadgen` console script.
-- `python` below means the project's Python interpreter, from its virtual environment.
-  Install the matching release in that environment
-  with `python -m pip install cadgen==0.8.2`; keep the project's other dependencies there too.
-  If that interpreter has no pip, use
-  `uv pip install --python <project-python> cadgen==0.8.2` instead.
-
-The CAD app's MCP server starts or attaches to the engine. Without it, start the engine explicitly,
-outside a sandbox that cannot bind its listener:
-
-```bash
-uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.2 cadgen server
-```
-
-Keep that server running. Clients select port 3245 by default; set `CADGEN_PORT` in both the server
-and client environments to use another port (`cadgen server --port N` also selects it). Bootstrap reuses a compatible selected
-engine; a conflicting listener fails. Nothing chooses a different port or stops another engine.
-For GUI hosts, set `CADGEN_PORT` in the CAD MCP server's `env` settings too; a terminal export
-alone does not configure the GUI server. Project clients and workers
-must have exactly the server's cadgen release. A missing server or version mismatch fails before
-building; ordinary Python calls and CLI document operations never start a server or fall back locally.
-
-If the registered `cadgen` command is missing, run
-`uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.2 cadgen doctor` once
-outside the sandbox or with its permission. It registers the CLI installation and writes the
-command; it does not start the engine.
+For first-time setup, Windows or a relocated CLI, or an installation/connection error,
+read [Setup and troubleshooting](references/setup.md).
 
 ## Core Rules
 
@@ -105,7 +82,7 @@ report any checks you could not perform.
 
 ## Commands
 
-Run `cadgen` as Setup defines it. `cadgen doctor <skill-dir>` reports the installation in use and checks that it is the one this skill pins — docs drift silently on another. Validation itself needs nothing beyond the Python standard library; a snapshot draws with the CAD kernel. Use `cadgen <verb> --help` for the complete current interface.
+Run `cadgen` as Setup defines it. Use `cadgen <verb> --help` for the complete current interface.
 
 The validator shape is:
 

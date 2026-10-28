@@ -57,18 +57,65 @@ class DevPluginTests(unittest.TestCase):
             plugin = Path(scratch) / "claude"
             dev_install.assemble("claude", plugin, "1.2.3-dev.1", {"command": "x"}, rewrites=rewrites)
             for skill in plugin.glob("skills/*/SKILL.md"):
-                text = skill.read_text(encoding="utf-8")
+                main = skill.read_text(encoding="utf-8")
+                setup = skill.parent / "references" / "setup.md"
+                text = main + (setup.read_text(encoding="utf-8") if setup.is_file() else "")
                 with self.subTest(skill=skill.parent.name):
                     self.assertNotIn("--from cadgen==", text)
                     self.assertNotIn(f"+{released}`", text)
                     if "below means" in text:
                         proxy = Path(dev_install.launcher_dir()).expanduser() / ("cadgen.cmd" if os.name == "nt" else "cadgen")
                         self.assertIn(f"`cadgen` below means `{proxy} +1.2.3-dev.1`", text)
-                        self.assertIn("`python` below means the project's Python interpreter", text)
-                        self.assertIn(f"python -m pip install -e {dev_install.REPO_ROOT / 'packages' / 'cadgen'}", text)
+                        if skill.parent.name in {"cad", "dxf", "engineering-drawing"}:
+                            self.assertIn("`python` below means the project's Python interpreter", main)
+                            self.assertIn(f"python -m pip install -e {dev_install.REPO_ROOT / 'packages' / 'cadgen'}", text)
+                            self.assertIn("uv pip install --python <project-python> -e ", text)
                         self.assertNotIn(f"cadgen=={released}", text)
-                        self.assertIn("uv pip install --python <project-python> -e ", text)
-                        self.assertIn("/w/.venv/bin/python -m cadgen.cli doctor`", text)
+                        self.assertIn("/w/.venv/bin/python -m cadgen.cli doctor", text)
+
+    def test_an_independent_copy_rewrites_setup_and_windows_pins_but_preserves_history(self) -> None:
+        released, named = "1.2.3", "1.2.3-dev.1"
+        with tempfile.TemporaryDirectory() as scratch, mock.patch.dict("os.environ", {"CADGEN_LAUNCHER_DIR": ""}):
+            root = Path(scratch) / "source"
+            skill = root / "skills/fixture"
+            (skill / "references").mkdir(parents=True)
+            (root / ".claude-plugin").mkdir()
+            (root / ".claude-plugin/plugin.json").write_text(json.dumps({"name": "text-to-cad", "version": released}), encoding="utf-8")
+            main = ("---\nname: fixture\ndescription: fixture\n---\n"
+                    f"`cadgen` below means `~/.local/bin/cadgen +{released}`.\n"
+                    "Use MCP's advertised port. [Setup](references/setup.md) [History](references/migrations.md).\n")
+            guide = (dev_install.launch("cadgen", released) + " doctor\n"
+                     + dev_install.launch("cadgen", released) + " server\n"
+                     + f"python -m pip install cadgen=={released}\n"
+                     + f"uv pip install --python <project-python> cadgen=={released}\n"
+                     + rf"%USERPROFILE%\.local\bin\cadgen.cmd +{released}" + "\n")
+            history = guide  # Even a historical example of this release is outside runtime rewriting.
+            (skill / "SKILL.md").write_text(main, encoding="utf-8")
+            (skill / "references/setup.md").write_text(guide, encoding="utf-8")
+            (skill / "references/migrations.md").write_text(history, encoding="utf-8")
+            for wheel in (None, Path("/w/cadgen.whl")):
+                with self.subTest(wheel=wheel):
+                    rewrites = dev_install.skill_rewrites(released, named, python="/w/python", wheel=wheel)
+                    plugin = Path(scratch) / ("wheel" if wheel else "editable")
+                    dev_install.assemble("claude", plugin, named,
+                                         {"command": "x", "env": {"CADGEN_PORT": "4567"}}, root=root, rewrites=rewrites)
+                    copied_main = (plugin / "skills/fixture/SKILL.md").read_text(encoding="utf-8")
+                    copied_guide = (plugin / "skills/fixture/references/setup.md").read_text(encoding="utf-8")
+                    self.assertTrue(copied_main.startswith("---\nname: fixture\n"))
+                    self.assertIn(f"+{named}`", copied_main)
+                    self.assertIn(f"cadgen.cmd +{named}", copied_guide)
+                    for copied in (copied_main, copied_guide):
+                        self.assertIn("CADGEN_PORT=4567", copied)
+                        self.assertNotIn(f"cadgen=={released}", copied)
+                    if wheel:
+                        self.assertIn(f"--from {wheel} cadgen doctor", copied_guide)
+                        self.assertIn(f"python -m pip install {wheel}", copied_guide)
+                    else:
+                        self.assertIn("/w/python -m cadgen.cli doctor", copied_guide)
+                        self.assertIn(f"python -m pip install -e {dev_install.REPO_ROOT / 'packages/cadgen'}", copied_guide)
+                    self.assertEqual((plugin / "skills/fixture/references/migrations.md").read_text(encoding="utf-8"), history)
+            self.assertEqual((skill / "SKILL.md").read_text(encoding="utf-8"), main)
+            self.assertEqual((skill / "references/setup.md").read_text(encoding="utf-8"), guide)
 
     def test_wheel_mode_registers_one_wheel_for_the_server_and_the_skills(self) -> None:
         import argparse
@@ -105,7 +152,11 @@ class DevPluginTests(unittest.TestCase):
             server = dev_install.server_entry("claude", "/venv/bin/python", Path("/pages"))
             self.assertEqual(server["env"]["CADGEN_PORT"], "4567")
             rewrites = dev_install.skill_rewrites(released, "dev", python="/venv/bin/python")
-            self.assertTrue(any("CADGEN_PORT=4567" in value for value in rewrites.values()))
+            with tempfile.TemporaryDirectory() as scratch:
+                plugin = Path(scratch) / "plugin"
+                dev_install.assemble("claude", plugin, "dev", server, rewrites=rewrites)
+                for document in (plugin / "skills/cad/SKILL.md", plugin / "skills/cad/references/setup.md"):
+                    self.assertIn("CADGEN_PORT=4567", document.read_text(encoding="utf-8"))
             with mock.patch.object(dev_install, "build_wheel", return_value=wheel), \
                     mock.patch.object(dev_install, "register"):
                 wheel_server, _, _ = dev_install.runtime("codex", argparse.Namespace(wheel=True, build=False), "dev")

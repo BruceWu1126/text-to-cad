@@ -10,7 +10,7 @@ Usage:
   scripts/release/check-version.sh [--incremented-from REF]
 
 Checks that VERSION contains a valid canonical release version and that every
-skill's SKILL.md names exactly that version in server bootstrap and project Python
+skill's SKILL.md and dedicated setup guide name exactly that version in bootstrap and project Python
 installation pins (`cadgen==<version>`) and CLI commands (`cadgen +<version>`). main is
 the source branch AND what installers clone, so a stale pin ships.
 With --incremented-from, also checks that the current version is greater than
@@ -80,8 +80,8 @@ while IFS= read -r skill; do
       echo "$skill runs cadgen +$named; expected +$version" >&2
       stale=1
     fi
-  done < <(grep -oE -- '(cadgen \+|it says )[0-9][^[:space:]`)]*' "$skill" | sed -E 's/^(cadgen \+|it says )//')
-done < <(find skills -mindepth 2 -maxdepth 2 -name SKILL.md -type f | sort)
+  done < <(grep -oE -- '(cadgen(\.cmd)? \+|it says )[0-9][^[:space:]`)]*' "$skill" | sed -E 's/^(cadgen(\.cmd)? \+|it says )//')
+done < <(find skills -mindepth 2 -maxdepth 3 -type f \( -name SKILL.md -o -path '*/references/setup.md' \) | sort)
 if [ "$stale" -ne 0 ]; then
   echo "Run node scripts/release/sync-version.mjs to stamp the pins from VERSION." >&2
   exit 1
