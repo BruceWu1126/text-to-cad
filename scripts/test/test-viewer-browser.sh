@@ -67,6 +67,23 @@ export CADGEN_PORT
 server_pid=""
 server_log="$project/server.log"
 cleanup() {
+  exit_status=$?
+  diagnostics="${out_dir:-${VIEWER_TEST_DIAGNOSTICS_DIR:-}}"
+  if [ "$exit_status" -ne 0 ] && [ -n "$diagnostics" ] && [ -f "$server_log" ]; then
+    mkdir -p "$diagnostics" && "$PYTHON" - "$server_log" "$diagnostics/server.log" <<'PY' || true
+import re, sys
+from pathlib import Path
+
+with Path(sys.argv[1]).open("rb") as log:
+    log.seek(0, 2)
+    log.seek(max(0, log.tell() - 256 * 1024))
+    text = log.read().decode("utf-8", errors="replace")
+text = re.sub(r"https?://[^\s<>\"']+", "<URL redacted>", text)
+text = re.sub(r"(?i)\bBearer\s+\S+", "Bearer <redacted>", text)
+text = re.sub(r"(?i)(\b[\w-]*(?:token|authorization|cookie|secret|password)[\w-]*[\"']?\s*[:=]\s*)[^\r\n]+", r"\1<redacted>", text)
+Path(sys.argv[2]).write_text(text, encoding="utf-8")
+PY
+  fi
   "$PYTHON" -m cadgen.engine stop >/dev/null 2>&1 || true
   if [ -n "$server_pid" ]; then
     kill "$server_pid" >/dev/null 2>&1 || true
