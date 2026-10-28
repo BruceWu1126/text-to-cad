@@ -227,6 +227,32 @@ class ContextTest(unittest.TestCase):
         self.assertEqual(found.shape, (2, 4, 3))
         self.assertFalse(found.any())
 
+    def test_an_opengl_older_than_2_1_is_no_canvas(self) -> None:
+        # Windows' GDI Generic 1.1 hands a window-sized picture over, but draws no still off-screen.
+        class Old:
+            def IsGlGreaterEqual(self, major, minor):
+                return False
+
+            def VersionMajor(self):
+                return 1
+
+            def VersionMinor(self):
+                return 1
+
+        class Canvas:
+            def __init__(self, width, height):
+                self.driver = mock.Mock(GetSharedContext=Old)
+
+            def pixmap(self):
+                return None
+
+            def close(self):
+                pass
+
+        with mock.patch.object(context, "_DRAWS", []), mock.patch.object(context, "Canvas", Canvas), \
+                mock.patch.object(context, "pixels"):
+            self.assertIn("OpenGL 1.1", context.available())
+
     def test_a_canvas_draws_at_the_size_asked_whatever_its_window(self) -> None:
         gl()
         canvas = context.Canvas(64, 48)
