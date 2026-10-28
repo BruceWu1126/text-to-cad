@@ -508,11 +508,14 @@ builds no script until a build takes it (``adopt``)."""
 
     def _stderr(self) -> None:
         assert self.process.stderr is not None
-        for line in iter(self.process.stderr.readline, b""):
-            text = line.decode("utf-8", "replace")
-            with self.stderr_lock:
-                self.stderr_tail = (self.stderr_tail + text)[-16384:]
-            self._tell({"log": text.rstrip("\n"), "stream": "model"})
+        try:
+            for line in iter(self.process.stderr.readline, b""):
+                text = line.decode("utf-8", "replace")
+                with self.stderr_lock:
+                    self.stderr_tail = (self.stderr_tail + text)[-16384:]
+                self._tell({"log": text.rstrip("\n"), "stream": "model"})
+        finally:
+            self.process.stderr.close()  # the reader owns its pipe; never close it from a waiting caller
 
     def _failure(self, message: str) -> WorkerGone:
         """A failed worker's bounded stderr tail. Its stdout can close before stderr is read;
@@ -568,6 +571,7 @@ builds no script until a build takes it (``adopt``)."""
         except (OSError, ValueError, EOFError):
             pass
         finally:
+            stream.close()
             self.answers.put(None)  # gone: every build it held settles
             for waiting in list(self.asked.values()):
                 waiting.put(None)

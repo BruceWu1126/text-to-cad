@@ -322,12 +322,13 @@ class ClientGoneTest(unittest.TestCase):
         self.assertIsNone(worker.answers.get_nowait(), "the worker's end, after its answer")
         self.assertIsNone(worker.sink, "the gone client's sink dropped")
         self.assertEqual(worker.progress, {"kind": "build", "stage": "names"})
+        self.assertTrue(worker.process.stdout.closed, "the reader closes its pipe at EOF")
 
     def test_its_stderr_is_read_to_the_end_when_its_client_is_gone(self) -> None:
         worker = self.worker(b"", b"a line the model printed\nanother\n")
         worker._stderr()
         self.assertIsNone(worker.sink)
-        self.assertEqual(worker.process.stderr.read(), b"", "read to its end")
+        self.assertTrue(worker.process.stderr.closed, "the reader closes its pipe at EOF")
 
 
 class WorkerFailureTest(unittest.TestCase):
