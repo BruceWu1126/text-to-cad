@@ -438,7 +438,7 @@ builds no script until a build takes it (``adopt``)."""
         env = {name: value for name, value in env.items() if name not in BYTECODE}
         env.update(own or bytecode({}))
         env["CADGEN_ENGINE_WORKER"] = "1"
-        self.process = subprocess.Popen([sys.executable, "-P", "-X", "faulthandler", "-m", "cadgen.engine.worker",
+        self.process = subprocess.Popen([sys.executable, "-X", "faulthandler", "-P", "-m", "cadgen.engine.worker",
                                          *(["--standby"] if standby else [])], stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
                                         cwd=cwd or str(Path(script).parent), **windowless())
