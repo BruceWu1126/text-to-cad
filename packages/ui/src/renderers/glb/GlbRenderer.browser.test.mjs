@@ -28,7 +28,7 @@ const HARNESS_SIZE = '<style>#root > div { width: 800px !important; height: 500p
 // (A browser's first WebGL page pays for compiling the viewer's shaders; later pages reuse them.)
 let server, browser;
 before(async () => {
-  const { bundle } = await harnessBundle({ mockPreview: true });
+  const { bundle } = await harnessBundle();
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
   server = createServer((request, response) => {
     const url = new URL(request.url, 'http://test');
@@ -280,7 +280,7 @@ test('a static GLB opens on its native scene in Select: its tools, its display m
   assert.deepEqual(errors, []);
 });
 
-test('an animated GLB opens at rest, its clips the file sidebar\'s Animation section; in the Preview workflow fixture, its playbar moves them without moving the camera or the floor, Orbit turns the camera, and leaving restores the tools routine\'s held frame', async (t) => {
+test('an animated GLB opens at rest, its clips the file sidebar\'s Animation section; in Preview, from its playbar, they play in Render without moving the camera or the floor, Orbit turns the camera, and leaving restores the tools routine\'s held frame', async (t) => {
   const { page, pane, errors } = await open(t, 'animated.glb');
   await ready(pane);
   await glbTools(pane);

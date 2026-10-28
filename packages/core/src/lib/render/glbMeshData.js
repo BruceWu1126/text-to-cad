@@ -589,22 +589,6 @@ function nativeCadRootMatrix(gltf) {
     .multiply(orientation);
 }
 
-// KHR_materials_volume separates mesh-local thickness from world-space attenuation.
-// The CAD root converts glTF metres to viewer millimetres: convert the latter once
-// with that same root, while node transforms continue to scale thickness themselves.
-// This operates on the newly parsed document, before sibling material copies exist.
-function placeMaterialWorldDistances(scene, cadRootMatrix) {
-  const scale = cadRootMatrix.getMaxScaleOnAxis();
-  const seen = new Set();
-  scene.traverse(object => {
-    for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
-      if (!material || seen.has(material)) continue;
-      seen.add(material);
-      if (Number.isFinite(material.attenuationDistance)) material.attenuationDistance *= scale;
-    }
-  });
-}
-
 function sampledAnimatedBounds(scene, clips, cadRootMatrix) {
   const root = new Group();
   root.matrix.copy(cadRootMatrix);
@@ -716,7 +700,6 @@ function markGlbNodes(gltf) {
  * Parse an interactive direct GLB once, as the document a viewer shows: the
  * native hierarchy (nodes, skins, morphs, authored materials), its playable
  * clips, the matrix that places it in CAD space, and two boxes in that space.
- * Material world-space distances use that same placement; mesh-local values stay native.
  * `restBounds` is the file as authored; `animatedBounds` (null without clips)
  * also covers every sampled pose, so a camera framed on it never clips a clip.
  * The document owns its geometry, materials and textures (`disposeGlbDocument`).
@@ -732,7 +715,6 @@ export async function buildGlbDocumentFromBuffer(buffer, options) {
     markGlbNodes(gltf);
     const clips = playableGlbAnimationClips(gltf);
     const cadRootMatrix = nativeCadRootMatrix(gltf);
-    placeMaterialWorldDistances(gltf.scene, cadRootMatrix);
     const restBounds = nativeRestBounds(gltf.scene, cadRootMatrix);
     const animatedBounds = clips.length ? sampledAnimatedBounds(gltf.scene, clips, cadRootMatrix) : null;
     return {

@@ -36,7 +36,7 @@ let server, browser;
 // Bumped by a test to publish a new revision of every description.
 let revision = 1;
 before(async () => {
-  const { bundle } = await harnessBundle({ mockPreview: true });
+  const { bundle } = await harnessBundle();
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
   server = createServer((request, response) => {
     const url = new URL(request.url, 'http://test');
@@ -658,7 +658,7 @@ test('a reload of the tab brings the pose and the hidden visuals back, and nothi
   assert.deepEqual(robot.errors, []);
 });
 
-test('the Preview workflow opens the robot at rest, and leaving it finds the tools view as it was: the pose, the hidden visual and the selection', async (t) => {
+test('Preview draws the robot as it opens, and leaving it finds the tools view as it was: the pose, the hidden visual and the selection', async (t) => {
   const robot = await open(t, 'arm.urdf');
   const { page, pane } = robot;
   const opening = await robot.links();

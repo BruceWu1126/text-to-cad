@@ -10,8 +10,6 @@ import {
 import { mergeBoundsList } from "@text-to-cad/core/lib/viewer/autoZoom.js";
 import { applyRuntimeModelBounds, resolveRuntimeModelFloorZ, sceneRadiusForBounds } from "@text-to-cad/core/lib/viewer/modelRuntime.js";
 import { defaultSceneGridRadius, getSceneScaleSettings, normalizeSceneScaleMode, VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
-import { previewStudioConfiguration } from "../viewport/previewConfiguration.js";
-import { capturePreview } from "../viewport/capturePreview.js";
 import { buildCompositeScreenshotBlob, resolveElementBackgroundColor } from "@text-to-cad/core/lib/viewer/screenshotCapture.js";
 import {
   applySceneBackground, BASE_VIEWER_THEME, disposeTexture, getViewerThemeValue, updateSpotLightTarget
@@ -103,7 +101,7 @@ const ShellViewport = forwardRef(function ShellViewport({
   appearance = "light",
   receiveShadows = false,
   renderMode = false,
-  renderConfiguration: requestedRenderConfiguration = null,
+  renderConfiguration = null,
   quality = null,
   // Preview's viewport (`PreviewView.jsx`): opened on the model at rest, framed afresh,
   // keeping no camera, no cube, no Annotate; its Orbit turns the camera at `orbitSpeed`.
@@ -127,8 +125,6 @@ const ShellViewport = forwardRef(function ShellViewport({
   annotationTouches = null,
   onPerspectiveChange = null,
   onPresentationChange = null,
-  onPreviewStatus = null,
-  previewMotionActive = false,
   onViewerAlertChange = null,
   // The camera came to rest on a new view: a preview camera that moved (preview's
   // orbit, which persists nothing and so emits no perspective), or a viewport whose size
@@ -155,14 +151,6 @@ const ShellViewport = forwardRef(function ShellViewport({
   if (scene && !isKitScene(scene)) {
     throw new Error("ShellViewport needs a kit scene: { object3D, bounds, dispose() } (kit/scene.js).");
   }
-  // Quality preference changes are worker commands, not new studio/scene settings.
-  const studioConfigurationRef = useRef(null);
-  const renderConfiguration = useMemo(() => (studioConfigurationRef.current = previewStudioConfiguration(
-    requestedRenderConfiguration, studioConfigurationRef.current
-  )), [requestedRenderConfiguration]);
-  const previewPerformance = preview ? requestedRenderConfiguration?.performance : undefined;
-  const previewPerformanceRef = useRef(previewPerformance);
-  previewPerformanceRef.current = previewPerformance;
   const normalizedSceneScaleMode = normalizeSceneScaleMode(sceneScaleMode);
   const normalizedProjection = normalizeCameraProjection(projection);
   const defaultGridRadius = defaultSceneGridRadius(normalizedSceneScaleMode);
@@ -296,10 +284,6 @@ const ShellViewport = forwardRef(function ShellViewport({
   renderConfigurationRef.current = renderConfiguration;
   const applyActivePhotographicStudio = useCallback((runtime, bounds = runtime?.modelBounds) => {
     const configuration = renderConfigurationRef.current;
-    if (runtime) {
-      runtime.previewConfiguration = configuration && { ...configuration,
-        ...(previewPerformanceRef.current ? { performance: previewPerformanceRef.current } : {}) };
-    }
     const studio = studioScene();
     if (!renderMode || !configuration || !runtime?.THREE || !studio) return;
     // The studio floor is sized and centred from the REST placement, as the grid is: a pose or a
@@ -318,13 +302,6 @@ const ShellViewport = forwardRef(function ShellViewport({
   useEffect(() => {
     applyActivePhotographicStudio(runtimeRef.current);
   }, [applyActivePhotographicStudio, renderConfiguration, viewerReadyTick]);
-
-  useEffect(() => {
-    const runtime = runtimeRef.current;
-    if (!preview || !runtime || !renderConfiguration) return;
-    runtime.previewConfiguration = { ...renderConfiguration, performance: previewPerformance };
-    runtime.requestPreviewPerformance?.();
-  }, [preview, previewPerformance, renderConfiguration, viewerReadyTick]);
 
   const updateActiveGridHelper = useCallback((runtime, activeViewerTheme, radius, floorZ = 0,
     scaleMode = VIEWER_SCENE_SCALE.CAD, floorMode = THEME_FLOOR_MODES.STAGE) => updateGridHelper(
@@ -469,7 +446,7 @@ const ShellViewport = forwardRef(function ShellViewport({
       await viewUpdateBindingRef.current?.whenReady();
       const runtime = runtimeRef.current;
       if (!runtime?.renderer || !runtime?.scene || !runtime?.camera) throw new Error("The viewer is not ready");
-      return await (preview ? capturePreview : buildCompositeScreenshotBlob)(runtime, {
+      return await buildCompositeScreenshotBlob(runtime, {
         backgroundColor: resolveElementBackgroundColor(runtime.renderer.domElement)
       });
     },
@@ -486,7 +463,6 @@ const ShellViewport = forwardRef(function ShellViewport({
     },
     activateViewPlaneFace,
     requestRender() { runtimeRef.current?.requestRender?.(); },
-    requestMotionFrame() { runtimeRef.current?.requestMotionFrame?.(); },
     // A frame that keeps the shadow maps: for a highlight, which moves and reshapes no caster.
     requestFrame() { requestSceneFrame(runtimeRef.current, false); },
     getPerspective() {
@@ -639,8 +615,7 @@ const ShellViewport = forwardRef(function ShellViewport({
         // How many planes cut the model just now (Clip).
         cut: (active.activeClipPlanes || []).length,
         // How far Render's picture has converged (`pictureProgress`).
-        studioFrame: active.photographicStudio?.frame ? { sample: active.photographicStudio.frame.sample, samples: active.photographicStudio.frame.samples } : null,
-        pathTracing: active.progressivePreview?.progress || null } : null;
+        studioFrame: active.photographicStudio?.frame ? { sample: active.photographicStudio.frame.sample, samples: active.photographicStudio.frame.samples } : null } : null;
     };
     // The view on screen answers: Preview's while it is open, and as it closes the view it
     // covered (the editor's) answers again.
@@ -701,7 +676,7 @@ const ShellViewport = forwardRef(function ShellViewport({
     IDLE_PIXEL_RATIO_CAP: Number(quality?.idlePixelRatioCap) > 0 ? Number(quality.idlePixelRatioCap) : IDLE_PIXEL_RATIO_CAP,
     INTERACTION_IDLE_DELAY_MS, TRACKPAD_PINCH_ZOOM_SPEED, COARSE_POINTER_PINCH_ZOOM_SPEED, ACCELERATED_WHEEL_ZOOM_SPEED,
     KEYBOARD_ORBIT_NUDGE_RAD, defaultGridRadius, sceneScaleMode: normalizedSceneScaleMode, floorMode: resolvedFloorMode,
-    renderMode, onInitializationError: handleRuntimeInitializationError, onFramePresented: handleFramePresented, onPreviewStatus, previewMotionActive,
+    renderMode, onInitializationError: handleRuntimeInitializationError, onFramePresented: handleFramePresented,
     presentationRequestRef, onContextLost: handleRuntimeContextLost, onContextRestored: handleRuntimeContextRestored,
     preserveInteractionPixelRatio, runtimeResetToken
   });

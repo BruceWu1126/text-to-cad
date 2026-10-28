@@ -80,13 +80,3 @@ test("transition colors follow the destination studio, including custom and tran
   assert.equal(viewerTransitionBackdrop({ renderMode: true, renderConfiguration: { backdrop: { color: "#e7e7e5" } } }).color, "#334155");
   assert.equal(viewerTransitionBackdrop({ renderMode: false, background: { solidColor: "#f1f5f9" } }).backgroundColor, "#f1f5f9");
 });
-
-test("Preview preparation cannot present an unfinished traced frame", () => {
-  const canvas = { style: {} }, presented = [];
-  const presentation = createFramePresentation({ canvas, renderMode: true, onPresent: key => presented.push(key) });
-  const runtime = { hasVisibleModel: true, environmentReady: true };
-  presentation.draw(runtime, () => false, { key: "preview", ready: true });
-  assert.equal(canvas.style.visibility, "hidden"); assert.deepEqual(presented, []);
-  presentation.draw(runtime, () => true, { key: "preview", ready: true });
-  assert.equal(canvas.style.visibility, "visible"); assert.deepEqual(presented, ["preview"]);
-});

@@ -1,13 +1,15 @@
 # Display modes
 
-The Viewer and snapshots share one strict sparse contract. Core's `common/viewSettings.js`
-validates it and resolves the mode, or Preview's Render, into renderer groups.
+The Viewer and native snapshots share the sparse display contract. Core's
+`common/viewSettings.js` validates it and resolves the mode, or Preview's Render,
+into renderer groups.
 `common/sceneSettings.js` translates those groups into the scene recipe. The binding
 controls are in [settings-ui.md](settings-ui.md#display-settings-and-section-primitives).
 
 A file's display is a mode and the Grid switch. A mode is a look at its own defaults, with
-nothing to set. Render is no display mode: it is the photographic look Preview asks for on its own, over the same display, with Preview's own
-settings (the viewer's alone, kept beside the display).
+nothing to set. Render is no display mode: it is the photographic look Preview asks for
+over the same display, with Preview's own settings (the viewer's alone, kept beside the
+display). Native snapshots remain technical images rendered by OCCT.
 
 | Mode | Surface / edge recipe |
 | --- | --- |
@@ -39,15 +41,14 @@ contains `colorMode` (`original`, `single`, `by-part`), `color` and `colors`; `l
 contains `quality`, `exposure`, `rotation`, `size`, `fill`; `background` contains `color`,
 `opacity`; `floor` contains `enabled`, `placement`, `color`, `opacity`, `finish`.
 
-Viewer appearance inherits the host; snapshots default to light. Lighting quality inherits
-Preview in a viewer and Final in a snapshot. There is no Custom state, legacy alias or
+Viewer appearance inherits the host; snapshots default to light. Preview's lighting quality
+defaults to Preview. There is no Custom state, legacy alias or
 migration. A stored display or Preview settings record is read setting by setting at the
 file-session read boundary (`readViewSettings`, `readPreviewSettings`): what this build
 cannot read (an older per-mode tree, a mode it no longer has) is left out, the rest kept.
 The same display shape powers live `setDisplaySettings` and snapshot `--display`; either
 refuses `mode: "render"` as it refuses any mode it does not know. A snapshot turns the grid
-on with `--grid` (`display.grid`) and asks for Preview's look with `--preview` (a job's
-`"preview": true`, the page's own flag), at Preview's defaults. `--camera` holds
+on with `--grid` (`display.grid`); it has no Preview rendering option. `--camera` holds
 pose/framing only. A Quick Edit's views carry the mode and the grid (`display.mode`,
 `display.grid`) with Clip and Explode, so a snapshot of them replays the view.
 
@@ -112,17 +113,7 @@ an M1 Max) and a still view converges in about half a second. A snapshot is OCCT
 the engine (`engine/render/occt.py`), not through this frame. Software WebGL has no frame: one
 draw, as before.
 
-Preview uses a WebGPU path tracer (`core/lib/preview-tracing/progressivePreview.js`)
-for both movement and still views. A cover stays up while the first traced image prepares;
-a failed or unsupported device or scene offers retry and exit. During motion, traced and
-spatially filtered views keep the admitted resolution and material and bounce settings; slower devices
-produce fewer completed views. At rest, the same tracer refines with Open Image Denoise
-(OIDN): Auto targets 128 samples, while manual quality can request up to 256. Settled
-OIDN denoising uses bundled weights; the spatial motion filter does not.
-Tracing is limited to one million interactive pixels and bounded scene resources. The
-existing raster convergence timings above do not describe path-tracing convergence.
-
-Each interactive viewport keeps its raster renderer (a view of the page's shared WebGL device:
+Each interactive viewport keeps its renderer (a view of the page's one GPU device:
 [the GPU device](cad-renderer.md#the-gpu-device)), canvas and camera controls
 across every mode and settings edit. It uses shadow-compatible conventional
 depth throughout, fitting near/far planes to the current model, closeup records

@@ -22,7 +22,6 @@ import { DEFAULT_STEP_CLIP_SETTINGS, normalizeStepClipSettings } from "../lib/vi
  * Preview's own settings, sparse: only what the person changed. Preview is no display mode: it is
  * the photographic look (Render) the viewer's Preview draws, kept apart from the display.
  * @typedef {{
- *   quality?: {mode?: "auto" | "manual", value?: number},
  *   parts?: ViewParts,
  *   lighting?: {quality?: "preview" | "final", exposure?: number, rotation?: number, size?: number, fill?: number},
  *   background?: {color?: string, opacity?: number},
@@ -43,7 +42,6 @@ import { DEFAULT_STEP_CLIP_SETTINGS, normalizeStepClipSettings } from "../lib/vi
  * @property {ViewCamera} camera
  * @property {ViewSurfaces} surfaces
  * @property {ViewEdges} edges
- * @property {{mode: "auto" | "manual", value: number}} [quality] Preview-only rendering preference
  * @property {ViewLighting} lighting
  * @property {ViewPaint} background
  * @property {ViewFloor} floor
@@ -62,9 +60,8 @@ export const VIEW_MODE_VALUES = Object.freeze(["solid", "shaded", "parts", "xray
 export const VIEW_SETTINGS_KEYS = Object.freeze(["mode", "grid", "appearance", "camera", "clip", "exploded"]);
 export const VIEW_CAMERA_KEYS = Object.freeze(["projection", "focalLength"]);
 // Preview's settings, in the order its panel lists them, and each group's fields.
-export const PREVIEW_SETTING_KEYS = Object.freeze(["quality", "parts", "lighting", "background", "floor"]);
+export const PREVIEW_SETTING_KEYS = Object.freeze(["parts", "lighting", "background", "floor"]);
 const PREVIEW_GROUP_FIELDS = {
-  quality: ["mode", "value"],
   parts: ["colorMode", "color", "colors"],
   lighting: ["quality", "exposure", "rotation", "size", "fill"],
   background: ["color", "opacity"],
@@ -104,14 +101,9 @@ function color(value, field) {
 }
 const CHOICES = {
   projection: ["orthographic", "perspective"], colorMode: VIEW_COLOR_MODE_VALUES, quality: VIEW_LIGHTING_QUALITY_VALUES,
-  mode: ["auto", "manual"], placement: VIEW_FLOOR_PLACEMENT_VALUES, finish: VIEW_FLOOR_FINISH_VALUES
+  placement: VIEW_FLOOR_PLACEMENT_VALUES, finish: VIEW_FLOOR_FINISH_VALUES
 };
 function field(key, entry, path) {
-  if (key === "value") {
-    const value = number(entry, 0, 100, path);
-    if (!Number.isInteger(value)) throw new Error(`${path} must be an integer`);
-    return value;
-  }
   if (key === "enabled") return boolean(entry, path);
   if (key === "color") return color(entry, path);
   if (key === "colors") {
@@ -218,7 +210,6 @@ export function viewGridDefaults(appearance = "light") {
 export function previewDefaults({ appearance = "light", lightingQuality = "final" } = {}) {
   const dark = appearance === "dark";
   return {
-    quality: { mode: "auto", value: 50 },
     parts: { colorMode: "original", color: DEFAULT_PART_COLOR_SETTINGS.color, colors: [...DEFAULT_PART_COLOR_SETTINGS.colors] },
     lighting: { quality: choice(lightingQuality, VIEW_LIGHTING_QUALITY_VALUES, "lightingQuality"), exposure: 0, rotation: 0, size: 1, fill: 0.25 },
     background: { color: dark ? "#202226" : "#ffffff", opacity: 1 },
@@ -353,7 +344,6 @@ export function resolveViewSettings(input = {}, {
     },
     surfaces: { enabled: true, style, ...parts, colors: [...parts.colors], opacity: mode === "xray" ? 0.22 : 1 },
     edges,
-    ...(lit ? { quality: { ...studio.quality } } : {}),
     lighting: { enabled: lit, ...studio.lighting },
     background: { enabled: lit, ...studio.background },
     floor: { ...studio.floor, enabled: lit && studio.floor.enabled },

@@ -11,8 +11,7 @@
 // over the editor's geometry, posed and played by Preview's own pose and routine. What drives
 // it from inside the viewport, if anything does (a renderer's own layers), is
 // `view.overlay(viewport, drawn)`, handed the Render scene Preview draws.
-import { useCallback, useMemo, useRef } from "react";
-import { previewStudioScene } from "../viewport/previewConfiguration.js";
+import { useCallback } from "react";
 import ShellViewport from "./ShellViewport.jsx";
 import { useAppliedViewSettings } from "../view-settings/useAppliedViewSettings.js";
 
@@ -20,20 +19,13 @@ import { useAppliedViewSettings } from "../view-settings/useAppliedViewSettings.
  * @param {{ view: { scene: object | null, overlay?: ((viewport: object, drawn: object) => import("react").ReactNode) | null,
  *   runtimeLifecycle?: object | null, onCameraSettled?: (() => void) | null },
  *   desired: object, modelKey: string, sceneScaleMode: string, viewRef: import("react").RefObject<object>,
- *   orbit?: boolean, orbitSpeed?: number, onPresented?: (presented: boolean) => void,
- *   onStatus?: ((status: {state: string, reason: string, phase?: "preparing" | "rendering" | "refining"}) => void) | null }} props
+ *   orbit?: boolean, orbitSpeed?: number, onPresented?: (presented: boolean) => void }} props
  */
-export default function PreviewView({ view, desired, modelKey, sceneScaleMode, viewRef, orbit = false, orbitSpeed = 1, onPresented = null, onStatus = null }) {
+export default function PreviewView({ view, desired, modelKey, sceneScaleMode, viewRef, orbit = false, orbitSpeed = 1, onPresented = null }) {
   const previewKey = `${modelKey}#preview`;
-  const stagedRef = useRef(null);
-  const staged = useMemo(() => (stagedRef.current = previewStudioScene(desired, stagedRef.current)), [desired]);
-  const update = useAppliedViewSettings(staged, previewKey, viewRef, null);
+  const update = useAppliedViewSettings(desired, previewKey, viewRef, null);
   // The file's Render as Preview draws it (`previewViewScene.js`), applied by its own coordinator.
   const drawn = update.scene;
-  // Performance has its own latest-only worker command, without holding or rebuilding the scene.
-  const performance = desired.render.configuration?.performance;
-  const renderConfiguration = useMemo(() => drawn.render.configuration
-    ? { ...drawn.render.configuration, performance } : null, [drawn.render.configuration, performance]);
   const overlay = view.overlay;
   const children = useCallback(viewport => overlay?.(viewport, drawn) ?? null, [overlay, drawn]);
   const presentationChange = useCallback(state => onPresented?.(state.key === previewKey && !state.preparing), [onPresented, previewKey]);
@@ -51,15 +43,13 @@ export default function PreviewView({ view, desired, modelKey, sceneScaleMode, v
     appearance={drawn.appearance}
     receiveShadows={drawn.view.lighting.enabled}
     renderMode={drawn.render.enabled}
-    renderConfiguration={renderConfiguration}
+    renderConfiguration={drawn.render.configuration}
     quality={drawn.quality}
     orbit={orbit}
     orbitSpeed={orbitSpeed}
     viewCube={false}
     viewUpdate={update}
     onPresentationChange={presentationChange}
-    onPreviewStatus={onStatus}
-    previewMotionActive={view.animation?.playing === true}
     onCameraSettled={view.onCameraSettled || null}
     runtimeLifecycle={view.runtimeLifecycle || null}
     preserveInteractionPixelRatio

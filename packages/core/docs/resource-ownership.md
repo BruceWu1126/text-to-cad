@@ -16,7 +16,6 @@ persistent cache identity or occurrence identity.**
 | [2](#2-the-demand-boundary) | Raycast accelerators built only when a ray needs one |
 | [3](#3-reuse-without-changing-geometry) | Recomposition and instancing |
 | [4](#4-decode-workers) | The GLB and STL workers, leased by render sessions |
-| [5](#5-preview-tracing) | Private path-tracing geometry, workers and GPU resources |
 
 ## 1. Shared ownership and disposal
 
@@ -79,57 +78,3 @@ it renders). Placement and appearance belong to the document's instances.
 The GLB and STL decode workers are one each, and render sessions lease them. Releasing
 one owner never cancels another owner's work; the final release retires the worker and
 its pending work.
-
-## 5. Preview tracing
-
-`lib/preview-tracing/progressivePreview.js` owns Preview's presentation canvas and dedicated
-worker session. `previewSnapshot.js` collects admitted topology in yielded batches and copies
-geometry in bounded chunks. Only private buffers and images are transferred: the editor's
-geometry, materials, textures and device remain its own. Shared prototype identities, material
-slots, UV channels and texture transforms survive reconstruction in the worker. Texture
-reduction creates private images; it never changes source geometry or source images.
-
-The worker owns scene reconstruction, BVH construction, packing, WebGPU tracing and OIDN.
-`scene.js` retains private prototype BVHs across pose changes and builds them synchronously
-inside that worker, where terminating the session can interrupt preparation. Exact repeated
-prototypes share one private geometry. BVH construction reuses the transferred worker-owned
-arrays; it does not copy them again. Reconstruction retains their single disposal owner.
-Generated environment, floor geometry/material/alpha
-map and GPU buffers belong to the worker. Private instance objects are disposed separately
-from their cached prototype geometry.
-The denoiser's guide scene expands those instances into ordinary meshes over the same
-geometry and material slots, preserving world transforms while sharing shader programs.
-Textured guide materials have private copies with UV-channel/color-space shader keys;
-their textures remain borrowed. Releasing a guide scene disposes its render objects and
-private material copies, never borrowed geometry, source materials or textures.
-
-One replaceable camera/pose input and one unacknowledged image bound the worker message queue.
-Pose matrices are copied together so a picture cannot combine different animation ticks.
-Motion retains the last completed traced picture while the next admitted-resolution traced frame is
-prepared in bounded batches; a held picture keeps its aspect ratio during resize. Rigid pose
-changes refit the private scene. Scene changes cancel the old generation.
-Exit aborts copying and terminates the worker without awaiting a GPU fence. Stale images are
-closed, and a generation token prevents late results from attaching to a closed view.
-
-`resourcePolicy.js` estimates peak allocation before copies and again against device limits:
-source/editor reserve, private copies and BVH scratch, CPU/GPU packed scene, textures and atlas,
-ray queues, render targets, denoiser networks and intermediate outputs, and presentation.
-Preparation reserves the build-stage peak; rendering is admitted separately using the actual
-BVH sizes, before packing and render-target allocation. Preview sessions in the same page
-reserve against one policy budget. A session retains its highest reservation through quality
-changes and carries forward the largest denoiser shapes, image targets and ray pools when
-planning a resize, so retained buffers remain accounted for alongside the new viewport.
-Exit, cancellation or failure releases the reservation. This is conservative admission, not a measurement of free VRAM;
-other tabs, applications and driver allocations remain outside its knowledge. Oversized
-geometry is refused rather than simplified. A worker stall, allocation error or device loss
-ends the session and reaches Preview's retry/exit presentation. Terminating a worker does not
-isolate the browser from a shared GPU driver failure.
-
-The denoiser owns its auxiliary targets, fast-filter output, inference weights and intermediate GPU buffers,
-and the current and previous completed output textures. It publishes a result only when
-every tile is complete. Motion, resize, scene changes and disposal cancel in-flight
-inference; a request token rejects late callbacks. A queue fence separates an already
-submitted inference tile from subsequent tracing. Both raw and denoised work stop while
-the document is hidden. The weights are bundled data, never a remote runtime download.
-An unchanged view reuses its guide targets and one MRT identity across refinement passes;
-camera, scene and viewport changes invalidate the guides.

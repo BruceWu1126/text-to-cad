@@ -6,7 +6,7 @@ import { useLayoutEffect, useState } from "react";
  * Preview opens and disposed as it closes, before the scene it shares geometry with. Null while
  * Preview is closed, or for a scene that has no sibling to give.
  *
- * @param {import("../scene.js").KitScene & { createSibling?: () => object } | null} scene  The editor's.
+ * @param {import("../scene.js").KitScene & { createSibling?: (options?: {preview?: boolean}) => object } | null} scene  The editor's.
  * @param {boolean} open  `shell.previewing`.
  */
 export function usePreviewScene(scene, open) {
@@ -16,7 +16,7 @@ export function usePreviewScene(scene, open) {
       setSibling(null);
       return undefined;
     }
-    const next = scene.createSibling();
+    const next = scene.createSibling({ preview: true });
     setSibling(next);
     return () => next.dispose();
   }, [scene, open]);

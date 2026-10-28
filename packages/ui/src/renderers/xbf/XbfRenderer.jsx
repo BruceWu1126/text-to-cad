@@ -356,7 +356,7 @@ function XbfSurface({ view, data }) {
   previewSceneRef.current = previewScene;
   const previewFrame = useCallback((values) => {
     previewSceneRef.current?.setPose(values);
-    shellRef.current?.frame.previewViewRef.current?.requestMotionFrame?.();
+    shellRef.current?.frame.previewViewRef.current?.requestRender?.();
   }, []);
   const previewMotion = useXbfMotion(previewScene?.kinematics || null, previewFrame);
   const previewView = useMemo(() => ({ scene: previewScene, animation: previewMotion }), [previewScene, previewMotion]);

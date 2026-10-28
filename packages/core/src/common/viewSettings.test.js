@@ -52,28 +52,6 @@ test("Preview's settings are sparse, canonical and its own", () => {
   assert.equal(previewSettingsChanged({ floor: { finish: "glossy" } }), true);
 });
 
-test("Preview quality is bounded and sparse, and never changes the display renderer or authored look", () => {
-  const preference = { mode: "manual", value: 80 };
-  assert.deepEqual(normalizePreviewSettings({ quality: preference }), { quality: preference });
-  for (const quality of [{ mode: "fast" }, { value: -1 }, { value: 101 }, { value: 0.5 }, { value: NaN }, { value: "50" }]) {
-    assert.throws(() => normalizePreviewSettings({ quality }));
-  }
-  const base = resolveViewSceneSettings({ preview: true });
-  assert.deepEqual(base.render.configuration.performance, { mode: "auto", value: 50 });
-  const manual = resolveViewSceneSettings({ preview: true, previewSettings: { quality: preference } });
-  const { performance, ...look } = manual.render.configuration;
-  const { performance: ignored, ...defaultLook } = base.render.configuration;
-  assert.deepEqual(performance, preference);
-  assert.deepEqual(look, defaultLook, "quality changes no lights, materials, backdrop, floor or camera");
-  assert.deepEqual(manual.quality, base.quality, "the shared scene-quality ladder is unchanged");
-  for (const mode of VIEW_MODE_VALUES) {
-    assert.deepEqual(resolveViewSceneSettings({ display: { mode }, previewSettings: { quality: preference } }),
-      resolveViewSceneSettings({ display: { mode } }), "Preview quality has no effect on the tools view");
-  }
-  assert.deepEqual(readPreviewSettings({ quality: { mode: "manual", value: 999 }, floor: { finish: "glossy" } }),
-    { floor: { finish: "glossy" } });
-});
-
 test("each mode is its own look at its defaults; Preview, asked for on its own, alone is in perspective, whatever the camera says", () => {
   assert.deepEqual(VIEW_MODE_VALUES, ["solid", "shaded", "parts", "xray", "hidden-line", "wireframe"]);
   for (const mode of VIEW_MODE_VALUES) {

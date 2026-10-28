@@ -63,8 +63,8 @@ The stages keep ownership narrow:
   as the other: three sorts each object back to front and draws a two-sided one back faces first,
   OCCT draws them as they were displayed, which is most of what still differs.
 - `captureModel` draws the scene headless and returns its pictures, with no filesystem
-  writes. cadgen's stills are OCCT's (`cadgen snapshot`); this headless scene is used by
-  the renderer parity measurement beside OCCT (`scripts/bench/occt_parity.py`).
+  writes. cadgen's stills are OCCT's (`cadgen snapshot`); this headless scene is what the
+  renderer parity measurement drives beside OCCT (`scripts/bench/occt_parity.py`).
 
 ## Modules
 
@@ -84,10 +84,11 @@ anything else (a per-mode tree, a style group) fails validation.
 
 Preview's photographic look (Render) is no mode: it is asked for on its own, by the
 viewer's Preview and the parity page, over the same display. Its own settings
-(`PreviewSettings`: `quality`, `parts`, `lighting`, `background`, `floor`) are the viewer's,
+(`PreviewSettings`: `parts`, `lighting`, `background`, `floor`) are the viewer's,
 kept beside the display, never in it (`normalizePreviewSettings`,
-`resolvePreviewSettings`, `previewSettingsChanged`). `readViewSettings` and `readPreviewSettings` read a stored record setting
-by setting, leaving out what this build cannot read, without rewriting it.
+`resolvePreviewSettings`, `previewSettingsChanged`). `readViewSettings` and
+`readPreviewSettings` read a stored record setting by setting, leaving out what this
+build cannot read, without rewriting it.
 
 `resolveViewSettings` returns the established renderer groups. Solid is shaded with
 the model's visible CAD edges where the view offers them (`edges`); Shaded is the same
@@ -156,8 +157,7 @@ orthographic views can use a signed near plane when the floor crosses the eye.
 
 Lighting quality is `preview` or `final`, mapping to standard/high scene policy.
 The viewer defaults to `lightingQuality: "preview"`; an explicit Preview
-`lighting.quality` selects `final`. Browser path-tracing performance has its own
-Preview-only quality preference; changing it does not change this lighting recipe.
+`lighting.quality` selects `final`.
 Final is the High scene preset: 4096px spotlight shadows, a 512px procedural environment
 and 2x snapshot capture, and a still view in the viewer converges over 64 samples of the
 studio's frame (Preview: 32). `output.renderScale` is an explicit raster override; every
@@ -186,77 +186,6 @@ every source keeps a soft fill. Environment radiance and direct illumination
 share a calibrated zero-EV lighting budget. Khronos PBR Neutral tone mapping is
 fixed; `toneMappingExposure` is `2 ** exposure`. Light and dark differ only in
 default backdrop color.
-
-#### Progressive viewer Preview
-
-`lib/preview-tracing/progressivePreview.js` presents interactive Preview from one WebGPU
-path tracer in a dedicated worker. The worker owns scene reconstruction, BVHs, packing,
-tracing and denoising; the page owns input, the displayed image and Exit. Source geometry
-copies yield in bounded chunks before transfer and never detach the editor's buffers.
-The view stays covered while the first usable traced image prepares. Motion
-traces each latched view at the admitted image resolution with the same light transport and
-bounce limits. It waits for every pixel to complete two samples, then applies a small
-edge-aware colour and coverage filter before presentation;
-new input is picked up after that pass. On release, the latest camera gets a complete
-small-sample filtered view before it refines with OIDN to the settled sample budget. Camera, pose, material,
-lighting and viewport changes invalidate accumulation. An unsupported scene or device
-shows an error with retry and exit; a late preparation cannot attach to a closed view.
-Preview ignores subpixel camera drift against the last sent view, so idle control updates
-cannot keep restarting refinement. Explicit camera edits still invalidate immediately.
-
-`scene.js` adapts the visible PBR meshes, preserving material arrays, face groups, vertex
-colours and world transforms. BVHs are prepared in a worker over private prototype copies;
-occurrences share those copies. Lightweight Preview geometry wrappers are deduplicated
-only when they share the exact attributes, index and groups. Safe placements use private
-instances so repeated CAD parts reference a prototype's BVH rather than expanding its
-triangles into the top-level acceleration structure. Mirrored, sheared and normal-mapped
-placements retain individual meshes for correct guide buffers.
-
-Scene admission rejects unsupported geometry or materials and checks packed buffer sizes
-against the device before upload. `resourcePolicy.js` estimates peak allocation across the
-source/editor reserve, private geometry and BVH scratch, packed CPU/GPU buffers, textures,
-ray pools, render targets, OIDN working memory and presentation. Sessions in the same page
-share a 1 GiB policy budget; each storage binding is also bounded by the device and 256 MiB.
-These estimates do not reveal free VRAM or guarantee that a driver allocation succeeds.
-Decoded textures can be reduced into private copies while keeping their mapping and colour
-space. Geometry is never simplified. Actual BVH sizes and top-level primitive counts are
-checked before packing. A scene that cannot fit after image-quality reductions reports an
-error. The tracer uses the
-same procedural studio cards and sweep, sampled into an owned equirectangular HDR texture
-by `common/environmentMap.js`; it needs no downloaded lighting asset. The environment
-supplies both direct illumination and reflections, without duplicating the raster shadow
-light. The private floor uses its configured albedo without the raster material's emission.
-The raster backdrop's screen-space gradient is reconstructed by `backdrop.js` behind the transparent trace, and
-the floor's radial fade is represented as an alpha map. Screenshot capture composites both.
-
-Preview's **Auto** quality aims for a settled image of up to one million pixels and 128
-samples when its memory budget permits. Manual quality requests a resolution and refinement
-budget through the 0–100 slider, up to 256 samples. Memory admission may reduce that request.
-Completed GPU-work timings adjust the ray budget, not the image dimensions. A latched motion
-view spans as many bounded batches as it needs; slower devices present fewer views per second.
-The settled target
-stays fixed while it refines, so adaptation cannot keep restarting convergence. Quality never
-changes the light sources, authored material parameters or the 12 surface/5 transparent
-bounce limits. The tracer queues pixels beyond its ray pool for later batches and verifies full
-pixel coverage before presenting a moving image.
-
-`previewDenoiser.js` runs
-Open Image Denoise on linear HDR color and coverage in sequential passes with clean albedo and
-normal guides. Separate network instances keep each pass's input shader and output buffer
-independent; the additional alpha output uses 16 bytes per pixel, plus its bounded tile
-working memory. It keeps the previous completed picture visible while filtering the next one,
-and lets the tracer's presentation pass apply tone mapping once. The pinned model and its
-license ship with both page bundles; inference needs no external request. A denoising error is reported in Preview.
-
-Only one GPU batch and one unacknowledged output image are in flight. Camera and pose input
-is coalesced to the latest request. A watchdog follows completed work, not input events, and
-terminates a worker that stops progressing. Exit never waits for that deadline or a GPU fence.
-Hidden documents pause work and suspend the watchdog until visible again. Retry starts a
-fresh session; no failure switches Preview to a raster picture. Quality-only edits bypass
-studio preparation and update the worker's rendering policy, leaving the default model
-renderer and native snapshots unchanged.
-Hardware convergence is separate from the raster measurements below. See
-[resource ownership](resource-ownership.md#5-preview-tracing) for lifetime and reuse.
 
 #### The studio's frame
 
@@ -402,11 +331,15 @@ Materials reaching that scene stay authored. An engine document's parts wear the
 colour the structure gives them (`lib/xbf/xbfLook.js`); a part with none wears the studio's
 surface (`PHOTOGRAPHIC_STUDIO_MATERIAL_SETTINGS`).
 A GLB, a mesh file and a robot reach the studio as the scene their viewer renderer
-builds. The GLB loader converts world-space volume attenuation distances with the same
-metre-to-millimetre root placement as the geometry, once per material; mesh-local
-thickness continues to follow node transforms. A GLB is its native glTF hierarchy, so its textures and PBR channels stay
-attached and Render wears them exactly as authored; an STL, a 3MF and a robot author no
-finish, so they wear the studio's surface over their colours (a 3MF's object colours, a
+builds. A GLB is its native glTF hierarchy, so its textures and PBR channels stay
+attached and Render wears them as authored. Preview converts a GLB's world-space
+attenuation distance from glTF metres into its millimetre scene coordinates on its
+private materials; the source and editor materials remain unchanged. The native XBF
+renderer currently uses the part's bounding-box extent for transmission thickness;
+this can overestimate attenuation and refraction for a hollow shell. Three's raster
+transmission buffer includes opaque geometry, not other transmissive layers, so a
+transmissive liquid inside glass cannot be composed correctly through the outer shell.
+An STL, a 3MF and a robot author no finish, so they wear the studio's surface over their colours (a 3MF's object colours, a
 robot description's colour, else its link mesh's own).
 
 Snapshots use the same grouped display contract. Photographic lighting supports
@@ -602,7 +535,7 @@ that rest box.
 
 It does not write files: its caller does. Consumers use compiled `@text-to-cad/core`
 exports; the OCCT parity bench bundles this entrypoint into a snapshot page of its own, built
-on demand outside the wheel, and loads it in headless Chromium to compare with OCCT's stills.
+on demand outside the wheel, and loads it in a headless Chromium to compare with OCCT's stills.
 cadgen's own snapshots are drawn by OCCT and never load it.
 
 ### `common/headlessScene.js`

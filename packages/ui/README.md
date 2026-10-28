@@ -266,16 +266,11 @@ sidebar, Quick Edit at the top-right and the cube at the bottom-right. Preview (
 mode) is the shell's own, the one place Render is drawn — whatever the file's display mode,
 which has no Render — and takes the whole page, the navbar and the strip with it, in every
 host; in the navbar's place its own bar, on no surface, names the file and holds Preview settings
-(Orbit, off at every entry, and its speed, then Preview quality and Render's settings, sliding in from the right
+(Orbit, off at every entry, and its speed, then Render's settings, sliding in from the right
 edge) and Exit preview, fading with the playbar while the pointer rests; for a file with
 routines, Preview's own playbar sits under the model. Routines play from the sidebar's
 Animation section in the tools view and from that playbar in Preview. Preview and the tools view are two views,
-each with its own viewport, scene, camera, pose and routine over the page's shared WebGL device.
-Preview draws and refines through its own WebGPU path tracer, released on exit.
-Its Auto quality default adapts rendering to the scene and device; a manual 0–100
-Faster–Sharper preference remains bounded by device safety. This preference changes
-Preview rendering work, never lighting, materials or the tools view:
-
+each with its own viewport, scene, camera, pose and routine over the page's one GPU device:
 Preview starts from the model as authored and leaves the tools view's state untouched, and
 leaving it throws Preview's away and gives the tools view back exactly as it was
 ([Preview](docs/settings-ui.md#camera-animation-and-preview); its mechanism,

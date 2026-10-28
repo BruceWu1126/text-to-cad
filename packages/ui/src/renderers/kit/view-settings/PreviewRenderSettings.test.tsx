@@ -91,37 +91,3 @@ it('edits the full By-part palette, and nested popups own Escape and give the fo
   expect(store.getSnapshot().preview.parts.colors.length).toBe(initial);
   expect(store.getSnapshot().display.mode).toBe('xray');
 });
-
-
-it('starts with Auto quality, keeps manual quality across Auto, and leaves display and lighting unchanged', async () => {
-  const user = userEvent.setup({ skipHover: true });
-  render(<Harness />);
-  const automatic = screen.getByRole('checkbox', { name: 'Auto quality' });
-  const slider = screen.getByRole('slider', { name: 'Quality', exact: true });
-  const number = screen.getByRole('textbox', { name: 'Quality value', exact: true });
-  expect(automatic.getAttribute('aria-checked')).toBe('true');
-  expect(slider.hasAttribute('data-disabled')).toBe(true);
-  expect(number.hasAttribute('disabled')).toBe(true);
-  expect(document.getElementById(slider.getAttribute('aria-describedby')!)?.textContent).toContain('Faster');
-  expect(screen.queryByRole('combobox', { name: 'Quality', exact: true })).toBeNull();
-  const originalScene = store.getSnapshot().scene;
-  const originalLighting = store.renderScene().render.configuration.lighting;
-  await user.click(automatic);
-  act(() => slider.focus());
-  await user.keyboard('{ArrowRight}');
-  expect(store.getSnapshot().preview.quality).toEqual({ mode: 'manual', value: 51 });
-  await user.click(number);
-  await user.keyboard('200{Enter}');
-  expect(store.getSnapshot().preview.quality.value).toBe(100);
-  await user.click(automatic);
-  expect(store.getSnapshot().preview.quality).toEqual({ mode: 'auto', value: 100 });
-  await user.click(automatic);
-  expect(store.getSnapshot().preview.quality).toEqual({ mode: 'manual', value: 100 });
-  expect(store.getSnapshot().scene).toBe(originalScene);
-  expect(store.renderScene().render.configuration.lighting).toEqual(originalLighting);
-  expect(store.renderScene().render.configuration.performance).toEqual({ mode: 'manual', value: 100 });
-  await user.click(screen.getByRole('button', { name: 'Reset to default' }));
-  expect(store.getSnapshot().preview).toEqual({});
-  expect(automatic.getAttribute('aria-checked')).toBe('true');
-  expect(number.getAttribute('value')).toBe('50');
-});

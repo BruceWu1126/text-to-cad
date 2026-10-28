@@ -16,8 +16,6 @@ step; nothing else belongs here (one-off helpers go in `tmp/`).
 | Check the shipping contract | `scripts/github-workflows/check-builds.sh` |
 | Install this checkout into an agent app to test it | `scripts/install/dev_install.py <host>` |
 
-| Compare photographic Preview on authored CAD materials | [`bench/preview_render.mjs` and `preview_report.py`](bench/README.md#photographic-preview-material-review) |
-
 ## Index
 
 `bundle/` — cadgen's packaged runtime (`packages/cadgen/src/cadgen/_runtime`).

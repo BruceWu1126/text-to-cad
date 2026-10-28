@@ -524,9 +524,6 @@ async function cameraMoved(page, from, what) {
 async function modeCameraGate() {
   const { context, page, errors } = await newPage();
   try {
-    // Linux CI uses a software adapter; exercise the explicit unavailable
-    // state instead of waiting for an optional hardware path tracer.
-    if (angle === "swiftshader") await page.addInitScript(() => Object.defineProperty(navigator, "gpu", { value: undefined }));
     await openFile(page, "smoke.step");
     await settledCameraFrame(page, { projection: "orthographic", stage: "initial Inspect frame" });
     const inspectFit = await cameraState(page);
@@ -536,30 +533,21 @@ async function modeCameraGate() {
 
     // Preview converts the camera to its projection, keeping what it looks at, and leaving it
     // is exact.
-    let renderFit = null;
-    if (angle === "swiftshader") {
-      await page.getByRole("button", { name: "Preview", exact: true }).click();
-      const error = page.locator("[data-preview-cover]").getByRole("alert");
-      await error.waitFor();
-      await error.getByRole("button", { name: "Exit preview", exact: true }).click();
-      await settledCameraFrame(page, { projection: "orthographic", stage: "leaving unavailable Preview" });
-      await cameraHeld(page, inspectFit, "leaving unavailable Preview");
-    } else {
-      await switchMode(page, "Inspect", "Render");
-      renderFit = await cameraState(page);
-      if (!renderFit) failures.push("mode camera: the camera seam published nothing in Render");
-      else if (renderFit.target.some((value, axis) => Math.abs(value - inspectFit.target[axis]) > 1e-6)) {
-        failures.push(`mode camera: Render re-aimed the view — ${describeCamera(renderFit)}`);
-      }
-      await switchMode(page, "Render", "Inspect");
-      await cameraHeld(page, inspectFit, "returning to Inspect");
+    await switchMode(page, "Inspect", "Render");
+    const renderFit = await cameraState(page);
+    if (!renderFit) failures.push("mode camera: the camera seam published nothing in Render");
+    else if (renderFit.target.some((value, axis) => Math.abs(value - inspectFit.target[axis]) > 1e-6)) {
+      failures.push(`mode camera: Render re-aimed the view — ${describeCamera(renderFit)}`);
     }
+
+    await switchMode(page, "Render", "Inspect");
+    await cameraHeld(page, inspectFit, "returning to Inspect");
 
     // A view taken by hand survives a visit to Preview, and what is done to the camera in
     // Preview is Preview's: the tools view gets its own back.
     await orbitAndZoom(page);
     const handFramed = await cameraMoved(page, inspectFit, "orbit and zoom in Inspect");
-    if (handFramed && angle !== "swiftshader") {
+    if (handFramed) {
       await switchMode(page, "Inspect", "Render");
       await switchMode(page, "Render", "Inspect");
       await cameraHeld(page, handFramed, "Inspect after a round trip through Render");
@@ -580,20 +568,17 @@ async function modeCameraGate() {
     }
     await resetView(page);
     await cameraHeld(page, assemblyFit, "a newly opened model");
-    if (angle !== "swiftshader") {
-      await switchMode(page, "Inspect", "Render");
-      const assemblyRenderFit = await cameraState(page);
-      if (cameraDrift(assemblyRenderFit, renderFit) <= 1e-3) {
-        failures.push(`mode camera: Render reopened at the previous model's photographic frame — `
-          + `${describeCamera(assemblyRenderFit)}`);
-      }
+    await switchMode(page, "Inspect", "Render");
+    const assemblyRenderFit = await cameraState(page);
+    if (cameraDrift(assemblyRenderFit, renderFit) <= 1e-3) {
+      failures.push(`mode camera: Render reopened at the previous model's photographic frame — `
+        + `${describeCamera(assemblyRenderFit)}`);
     }
     if (errors.length) failures.push(`mode camera: ${errors.join(" | ")}`);
     console.log(`  mode camera: Inspect ${describeCamera(inspectFit)}`);
-    if (renderFit) console.log(`  mode camera: Render  ${describeCamera(renderFit)}`);
-    console.log(renderFit ? "  mode camera: Preview converts the view without re-aiming it, leaving it returns "
-      + "the tools view's camera, and a new model is framed against its own box"
-      : "  mode camera: unavailable Preview reports an error and returns the unchanged tools camera");
+    console.log(`  mode camera: Render  ${describeCamera(renderFit)}`);
+    console.log("  mode camera: Preview converts the view without re-aiming it, leaving it returns "
+      + "the tools view's camera, and a new model is framed against its own box");
   } finally {
     await context.close();
   }

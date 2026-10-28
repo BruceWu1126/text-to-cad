@@ -26,9 +26,8 @@ review does not justify rebuilding an hour-long source model. Their generated
 exports and pictures remain ignored outputs, and native XBF Preview is verified
 separately from GLB Preview.
 
-Matched production Preview images, raw/reference comparisons and contact sheets
-are made by the manual renderer benchmark. Pixel review must consider noise,
-highlight shape, cavity lighting, thickness/refraction, silhouette and fine edges;
-a completed sample count is not a visual-quality verdict.
-
-See [the benchmark commands](../../../scripts/bench/README.md#photographic-preview-material-review).
+Compare production Preview against a baseline at the same camera, viewport, device
+pixel ratio and studio settings. Review full images and native-resolution crops for
+highlight shape, cavity lighting, glass thickness/refraction, silhouette and fine
+edges, both at rest and during orbit. A completed render is not a visual-quality
+verdict. Save captures and measurements under ignored `tmp/`.

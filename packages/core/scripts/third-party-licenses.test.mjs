@@ -36,34 +36,6 @@ test('a bundled module is named by its package folder, and this repository\'s ow
   assert.equal(packageDirOf('\0vite/preload-helper'), null);
 });
 
-test('a bundled denoising model carries its upstream license in both page builds', () => {
-  for (const tree of ['src', 'dist']) {
-    const entries = bundledPackages([`/repo/packages/core/${tree}/lib/preview-tracing/weights/index.js`]);
-    assert.equal(entries.length, 1);
-    assert.equal(entries[0].license, 'Apache-2.0');
-    assert.match(entries[0].text, /Apache License/);
-    assert.match(entries[0].text, /Copyright/);
-  }
-  assert.deepEqual(bundledPackages(['/repo/packages/core/dist/common/environmentMap.js']), []);
-});
-
-test('the prebundled OIDN entry includes its embedded float16 dependency notice', (t) => {
-  const root = tree(t);
-  const writePackage = (name, main, license) => {
-    const dir = path.join(root, 'node_modules', name);
-    fs.mkdirSync(path.dirname(path.join(dir, main)), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name, version: '1.0.0', main, license: 'MIT' }));
-    fs.writeFileSync(path.join(dir, main), '');
-    fs.writeFileSync(path.join(dir, 'LICENSE'), license);
-    return path.join(dir, main);
-  };
-  const entry = writePackage('oidn-webgpu', 'dist/oidn.js', 'OIDN license');
-  writePackage('@petamoriken/float16', 'index.js', 'float16 license');
-  const found = bundledPackages([entry]);
-  assert.deepEqual(found.map(item => item.name), ['@petamoriken/float16', 'oidn-webgpu']);
-  assert.equal(found[0].text, 'float16 license');
-});
-
 test('each bundled package once, with its declared licence and the text it ships, or where its text is kept', (t) => {
   const root = tree(t);
   const found = bundledPackages([

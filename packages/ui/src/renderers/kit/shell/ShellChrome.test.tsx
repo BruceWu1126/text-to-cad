@@ -1,4 +1,4 @@
-import React, { forwardRef, useEffect } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -11,11 +11,14 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 // The editor's viewport and, while it is open, Preview's (`PreviewView.jsx`, a viewport of its own).
 const viewportProps: { current: any } = { current: null };
 const previewProps: { current: any } = { current: null };
+// What the viewport's handle answers, where a test gives it one (Preview's picture, `pictureProgress`).
+const viewportHandle: { current: any } = { current: null };
 vi.mock('../../../../dist/renderers/kit/shell/ShellViewport.js', () => ({
   default: forwardRef(function MockViewport(props: any, ref) {
     const record = props.preview ? previewProps : viewportProps;
     record.current = props;
     useEffect(() => () => { if (props.preview) previewProps.current = null; }, []);
+    useImperativeHandle(ref, () => viewportHandle.current, []);
     const update = props.viewUpdate;
     useEffect(() => { if (update?.revision) update.binding.complete(update.revision); }, [update?.revision, update?.binding]);
     // Its first frame drawn, as the real one reports it.
@@ -64,7 +67,7 @@ beforeEach(() => {
   override(Element.prototype, 'hasPointerCapture', { value: () => true });
   override(Element.prototype, 'scrollIntoView', { value() {} });
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); while (restores.length) restores.pop()!(); viewportProps.current = null; previewProps.current = null; });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); while (restores.length) restores.pop()!(); viewportProps.current = null; previewProps.current = null; viewportHandle.current = null; });
 // Preview is up: its own view mounted over the editor's, which draws nothing under it.
 const inPreview = () => previewProps.current !== null && viewportProps.current.suspended === true;
 
@@ -451,7 +454,6 @@ it("Projection, Display and Preview end the strip; Render is no mode of Display'
 // Preview, entered as its tile enters it: the view covered first, then Preview under the cover.
 async function enterPreview(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'Preview' }));
-  await waitFor(() => expect(document.querySelector('[data-preview-cover]')).toBeNull());
   await screen.findByRole('button', { name: 'Exit preview' });
 }
 const previewSettings = () => screen.queryByRole('region', { name: 'Preview settings' });
@@ -530,35 +532,34 @@ it("Preview is in Render: the strip, the view's controls, the stack and the file
   // What was set in Preview is the file's Render settings: the next visit has it.
   act(() => { fireEvent.click(document.querySelector('[data-harness-ask-preview]')!); });
   expect(inPreview()).toBe(true);
-  await waitFor(() => expect(document.querySelector('[data-preview-cover]')).toBeNull());
   await user.click(within(previewBar()!).getByRole('button', { name: 'Preview settings' }));
   expect(floor().getAttribute('aria-checked')).toBe('false');
   await user.click(within(previewBar()!).getByRole('button', { name: 'Exit preview' }));
   expect([displayMenu(), displayLit()]).toEqual([null, false]);
 });
 
-it("Preview answers the press with a cover and reveals the first traced frame", async () => {
+it("Preview is covered from the press until its picture has converged, then shows the finished picture", async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
   try {
+    // The studio frame's progress, as the viewport reports it: samples drawn of those it accumulates.
+    const picture = { sample: 0, samples: 16 };
+    viewportHandle.current = { pictureProgress: () => ({ ...picture }) };
     frame();
     const cover = () => document.querySelector('[data-preview-cover]');
+    const wait = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
     // The press is answered at once, before Preview itself is entered under it.
-    expect(cover()?.textContent).toContain('Preparing preview…');
-    // The cover reports broad progress while its first frame is still held.
-    for (let step = 0; !inPreview() && step < 20; step++) {
-      await act(async () => { await vi.advanceTimersToNextTimerAsync(); });
-    }
-    act(() => previewProps.current.onPreviewStatus({ state: 'loading', phase: 'rendering' }));
-    expect(cover()?.textContent).toContain('Rendering preview…');
-    act(() => previewProps.current.onPreviewStatus({ state: 'loading', phase: 'refining' }));
-    expect(cover()?.textContent).toContain('Refining preview…');
-    expect(within(cover() as HTMLElement).getByRole('button', { name: 'Exit preview' })).toBeTruthy();
-    // The mock viewport reports its first presentable traced frame on mount.
-    for (let step = 0; cover() && step < 20; step++) {
-      await act(async () => { await vi.advanceTimersToNextTimerAsync(); });
-    }
-    expect([inPreview(), previewProps.current.renderMode, cover()]).toEqual([true, true, null]);
+    expect(cover()?.textContent).toBe('Preparing preview…');
+    await wait(100);
+    expect([inPreview(), cover() !== null]).toEqual([true, true]);
+    // In Render, and still converging well past the shortest cover: it holds.
+    picture.sample = 9;
+    await wait(2000);
+    expect([previewProps.current.renderMode, cover() !== null]).toEqual([true, true]);
+    // Every sample drawn: it lifts.
+    picture.sample = 16;
+    await wait(100);
+    expect(cover()).toBeNull();
   } finally {
     vi.useRealTimers();
   }

@@ -1,5 +1,5 @@
 import { VIEWPORT_INSET_PX, VIEWPORT_STACK_BOTTOM, VIEWPORT_TOP_BAR_PX } from "./viewportLayout.js";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle, Play, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "@text-to-cad/ui/primitives/button";
 import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
@@ -52,9 +52,13 @@ const TOOLBAR_POSITION_PHONE_SIDEBAR = Object.freeze({ ...TOOLBAR_POSITION, left
 // (`--cad-file-sidebar-max-width`).
 // What stands in the top-right corner: the host's notice and Quick Edit's box (not its column).
 const CORNER_BOXES = "[data-viewport-top-right] :is([data-viewport-notice], [data-quick-edit-box])";
-// Check first-raster readiness while publication arrives. At MAX, show the published
-// portion; FINISH is the final cap if the viewport never acknowledges a frame.
-const PREVIEW_COVER_QUIET_MS = 50;
+// The sidebar sections Preview offers: posing the model and playing its routines.
+// Preview's cover: at least this long, then until publication and the picture are ready.
+// The picture is checked this often until it has converged.
+// The cover waits at least MIN; at MAX it stops waiting for more components, and lets the picture on
+// screen finish converging for at most FINISH more.
+const PREVIEW_COVER_MIN_MS = 700, PREVIEW_COVER_QUIET_MS = 400, PREVIEW_COVER_MAX_MS = 5000, PREVIEW_COVER_FINISH_MS = 1000,
+  PREVIEW_COVER_CONVERGE_MS = 50;
 const SIDEBAR_POSITION = Object.freeze({ top: INSET, left: INSET, bottom: INSET });
 // On a phone the sidebar is one tile at the top-left, on the strip's line, and its panel (the open
 // section, under tabs) runs down from under it to the view's bottom inset, clear of Quick Edit's
@@ -184,24 +188,18 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   // Preview is a view of its own, mounted over the editor's as it opens (`PreviewView.jsx`), and
   // its first picture takes a moment on a large model — its scene built from the published mesh
   // and remaining components arriving — so it is covered ("Preparing preview…") until
-  // its first traced frame is presented (`previewPresented`) and the publication is complete.
-  // Refinement happens in view. Leaving needs no cover: the
+  // its first frame is presented (`previewPresented`), the publication is complete,
+  // and its picture converged (every sample of its frame drawn: the view's `pictureProgress`) — unless
+  // it starts over, the view moving (a routine playing), when there is nothing to wait for — or at most
+  // a few seconds. Then the cover fades away from the finished picture. Leaving needs no cover: the
   // Preview's view goes, and under it is the editor's, as it was.
   const previewViewRef = frame.previewViewRef;
   const [previewPresented, setPreviewPresented] = useState(false);
-  const [previewFailure, setPreviewFailure] = useState("");
-  const [previewPhase, setPreviewPhase] = useState("preparing");
-  const [previewAttempt, setPreviewAttempt] = useState(0);
-  const handlePreviewStatus = useCallback(status => {
-    if (["preparing", "rendering", "refining"].includes(status.phase)) setPreviewPhase(status.phase);
-    else if (status.state === "loading") setPreviewPhase("preparing");
-    if (status.state === "failed") setPreviewFailure(status.reason || "Preview tracing unavailable");
-    else if (status.state === "ready") setPreviewFailure("");
-  }, []);
+  const previewPresentedRef = useRef(false);
+  previewPresentedRef.current = previewing && previewPresented;
   // A press covers the view first, in its own frame, and preview is entered under it: preview's
   // first render can take a moment on a large model, and the cover answers the press at once.
   const [coverRequested, setCoverRequested] = useState(false);
-  const previewEntryRef = useRef(0);
   // The cover is preview's from the render that enters it, so not one frame of preview shows
   // before it: settled is reset there, and set once preview has come together. Each crossing is
   // taken in the render that makes it, never in an effect after it (another commit): entering also
@@ -212,18 +210,35 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     setCoverFor(previewing);
     setPreviewSettled(false);
     setPreviewPresented(false);
-    setPreviewFailure("");
-    setPreviewPhase("preparing");
     if (previewing) { setCoverRequested(false); setPreviewPanelOpen(false); }
   }
-  const previewCovered = coverRequested || (previewing && (!previewSettled || Boolean(previewFailure)));
+  const previewCovered = coverRequested || (previewing && !previewSettled);
+  // What moves Preview's picture on purpose: its Orbit, or its routine playing (`previewCover.js`).
+  const previewMovingRef = useRef(false);
+  previewMovingRef.current = shell.orbiting || previewView?.animation?.playing === true;
   const previewLoadingRef = useRef(false);
   previewLoadingRef.current = previewView?.complete === false;
   useEffect(() => {
-    if (!previewing || previewFailure || previewCoverStep({ presented: previewPresented, loading: previewLoadingRef.current }) !== "lift") return undefined;
-    const quiet = setTimeout(() => setPreviewSettled(true), PREVIEW_COVER_QUIET_MS);
-    return () => clearTimeout(quiet);
-  }, [previewing, previewPresented, previewView?.complete, previewFailure]);
+    if (!previewing) return undefined;
+    let quiet = 0, done = false, capped = false;
+    const finish = () => { if (done) return; done = true; setPreviewSettled(true); };
+    // Published components still streaming (a model opened cold) is waited for this long, no longer; then the
+    // picture on screen converges, and the cover lifts on it, or at the last at FINISH more.
+    const cap = setTimeout(() => { capped = true; settle(0); }, PREVIEW_COVER_MAX_MS);
+    const last = setTimeout(finish, PREVIEW_COVER_MAX_MS + PREVIEW_COVER_FINISH_MS);
+    const settle = (delay = PREVIEW_COVER_QUIET_MS) => {
+      clearTimeout(quiet);
+      quiet = setTimeout(() => {
+        const step = previewCoverStep({ presented: previewPresentedRef.current, loading: previewLoadingRef.current && !capped, moving: previewMovingRef.current,
+          progress: previewViewRef.current?.pictureProgress?.() ?? null });
+        if (step === "wait") settle();
+        else if (step === "converge") settle(PREVIEW_COVER_CONVERGE_MS);
+        else finish();
+      }, delay);
+    };
+    settle(PREVIEW_COVER_MIN_MS);
+    return () => { done = true; clearTimeout(cap); clearTimeout(last); clearTimeout(quiet); };
+  }, [previewing]);
   // The routine the Animation section plays: the tools view's, or in Preview its own.
   const animation = previewing ? previewView?.animation ?? null : frame.animation;
   const hasAnimation = animationControlsHaveContent(animation);
@@ -298,24 +313,18 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     // Over a mark or a measurement the part under it hears nothing of the pointer.
     if (over) event.stopPropagation();
   };
-  useEffect(() => {
-    previewEntryRef.current++; setCoverRequested(false); setPreviewing(false);
-  }, [frame.modelKey, setPreviewing]);
-  useEffect(() => {
-    if (!shell.previewable) { previewEntryRef.current++; setCoverRequested(false); setPreviewing(false); }
-  }, [shell.previewable, setPreviewing]);
+  useEffect(() => { setPreviewing(false); }, [frame.modelKey, setPreviewing]);
   // Preview is a view of its own (`PreviewView.jsx`): it opens on the model as authored, in Render,
   // still, its routine at rest and started only by Autoplay, and leaving it takes it away.
   const enterPreview = () => {
     setCoverRequested(true);
     // After the frame the cover is painted in (a hidden page paints none: a timer stands in).
     let entered = false;
-    const token = ++previewEntryRef.current;
-    const enter = () => { if (!entered && token === previewEntryRef.current) { entered = true; setPreviewing(true); } };
+    const enter = () => { if (!entered) { entered = true; setPreviewing(true); } };
     requestAnimationFrame(() => setTimeout(enter, 0));
     setTimeout(enter, 100);
   };
-  const leavePreview = () => { previewEntryRef.current++; setCoverRequested(false); setPreviewing(false); };
+  const leavePreview = () => setPreviewing(false);
   // Preview's bar names what it shows: the file's name, or its path's last part.
   const previewName = view.file?.name || String(view.file?.path ?? "").split("/").pop() || "";
   // While Preview is up the host's chrome steps aside (FileViewer's navbar): said as it opens, and as
@@ -560,8 +569,8 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
               </div>
               {/* Preview: a view of its own over the editor's, mounted while it is open. */}
               {previewing && previewView ? <div className="pointer-events-auto absolute inset-0 z-[1]" data-preview-view="">
-                <PreviewView key={previewAttempt} view={previewView} desired={frame.previewDesiredScene} modelKey={frame.modelKey}
-                  sceneScaleMode={frame.sceneScaleMode} viewRef={previewViewRef} onPresented={setPreviewPresented} onStatus={handlePreviewStatus}
+                <PreviewView view={previewView} desired={frame.previewDesiredScene} modelKey={frame.modelKey}
+                  sceneScaleMode={frame.sceneScaleMode} viewRef={previewViewRef} onPresented={setPreviewPresented}
                   orbit={orbitPlaying} orbitSpeed={frame.previewOrbitSpeed ?? 1} />
               </div> : null}
 
@@ -572,7 +581,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                   file's name, and at its right its settings (a toggle, the panel docked under it at the
                   view's right edge: Orbit, Render's own), closed as it opens, and the way out. The same in
                   every host. A file with routines has its playbar under the model; there is no sidebar. */}
-              <PreviewChrome active={previewing} covered={previewCovered} name={previewName} idle={previewIdle} panelOpen={previewPanelOpen}
+              <PreviewChrome active={previewing} name={previewName} idle={previewIdle} panelOpen={previewPanelOpen}
                 controls={<>
                   <BarControl label={t("preview.settings")} active={previewPanelOpen} disabled={shell.idle}
                     onClick={() => { if (!previewPanelOpen) controls.used("preview_settings"); setPreviewPanelOpen(open => !open); }} data-preview-settings=""><SlidersHorizontal className="size-3.5" aria-hidden="true" /></BarControl>
@@ -640,16 +649,9 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                   // At once over the press, so nothing of preview shows first; it fades only as it lifts.
                   previewCovered ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0 transition-opacity duration-300 motion-reduce:transition-none")}
                 style={{ backgroundColor: frame.sceneBackdrop }}>
-                {previewCovered ? previewFailure ? <div role="alert" className="flex max-w-md flex-col items-center gap-3 p-4 text-center text-tiny text-muted-foreground">
-                  <span>{t("alert.lighting.summary")}: {previewFailure}</span>
-                  <div className="flex gap-3">
-                    <button type="button" onClick={() => { setPreviewFailure(""); setPreviewPhase("preparing"); setPreviewPresented(false); setPreviewSettled(false); setPreviewAttempt(value => value + 1); }}>{t("alert.retry")}</button>
-                    <button type="button" onClick={leavePreview}>{t("preview.exit")}</button>
-                  </div>
-                </div> : <div className="flex flex-col items-center gap-3 text-tiny text-muted-foreground">
-                  <span role="status" className="flex items-center gap-2"><LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />{t(previewPhase === "rendering" ? "preview.rendering" : previewPhase === "refining" ? "preview.refining" : "preview.preparing")}</span>
-                  <button type="button" onClick={leavePreview}>{t("preview.exit")}</button>
-                </div> : null}
+                {previewCovered ? <span role="status" className="flex items-center gap-2 text-tiny text-muted-foreground">
+                  <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />{t("preview.preparing")}
+                </span> : null}
               </div>
 
               {/* The view catching up (`updateStatus`), at the top centre while there is no strip. */}

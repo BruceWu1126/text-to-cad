@@ -222,8 +222,11 @@ export function createGlbScene(THREE, document, { sibling = false } = {}) {
      * `document` is the same document around its own copy, so a routine plays on it alone. This
      * scene stays the owner of the geometry and textures, so the sibling is disposed first.
      */
-    createSibling() {
+    createSibling({ preview = false } = {}) {
       const copy = cloneSkinned(document.scene);
+      // glTF attenuation distance is in metres; Preview's world is in CAD
+      // millimetres. Only Preview's private materials use the placement scale.
+      const distanceScale = preview ? new THREE.Matrix4().fromArray(document.cadRootMatrix).getMaxScaleOnAxis() : 1;
       // Pair the current source and clone hierarchies first. Runtime overlays can have
       // appeared since the baseline; remove their copies without shifting authored nodes.
       const sources = [], copies = [];
@@ -244,6 +247,11 @@ export function createGlbScene(THREE, document, { sibling = false } = {}) {
         if (!object.isMesh) return;
         object.geometry = shareGeometry(THREE, source.geometry);
         const materials = (authored.get(source) || materialList(source)).map(material => material && copyMaterial(material));
+        if (preview && distanceScale !== 1) {
+          for (const material of materials) {
+            if (Number.isFinite(material?.attenuationDistance)) material.attenuationDistance *= distanceScale;
+          }
+        }
         object.material = Array.isArray(source.material) ? materials : materials[0];
       });
       copy.updateMatrixWorld(true);
