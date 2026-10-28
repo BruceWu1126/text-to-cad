@@ -1255,9 +1255,10 @@ of the irradiance). A part without a material,
 and every fill (Parts), wears a plain dielectric finish (roughness 0.5) over its colour, linear,
 squared, which keeps the saturated colours of OCCT's old Phong look. A part with a material wears
 its finish in Solid and Shaded on both renderers, its colour as authored, reflecting that
-environment; X-ray draws it in the plain finish. What OCCT's raster has no term for it
+environment; the snapshot keeps faces of the same colour but different materials apart for XBF,
+STEP, GLB and 3MF. X-ray draws a material in the plain finish. What OCCT's raster has no term for it
 approximates (`render/finish.py`): a clear coat eases the base's roughness toward the coat's,
-anisotropy is dropped (and the viewer drops it too), transmission is opacity over the colour tinted
+OCCT drops anisotropy, and transmission is opacity over the colour tinted
 by the transmission colour.
 Edges are unlit in their class's ink, 1 px; X-ray's faces are lit at 0.22 opacity, Hidden line's
 are the backdrop's colour. The engine serves the record as `GET /api/look` and its image as

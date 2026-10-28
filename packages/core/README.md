@@ -34,6 +34,8 @@ protocol relationship never imports Python or discovers an interpreter.
   the regular modes (Inspect) and Render honor
   authored color, finish and opacity, with scene settings supplying fallbacks.
   There are no session material overlays.
+  Face finishes are independent of face colours: a material-only face assignment
+  keeps its inherited instance/part colour while using its own finish.
   Authored finishes use a small fixed reflection fill in Inspect so metals
   remain legible. [inspectEnvironment.js](src/common/inspectEnvironment.js) owns
   its procedural texture; it loads no studio or external HDR asset.
