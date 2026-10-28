@@ -214,22 +214,19 @@ class PackageScriptTest(unittest.TestCase):
 
 class SourceFinderTest(unittest.TestCase):
     def test_source_hash_and_same_run_guard_detect_restored_timestamps(self) -> None:
-        import types
-        from cadgen.engine import runtime, sources
+        from cadgen.engine import sources
 
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / "helper.py"
             source.write_text("VALUE=1\n", encoding="utf-8")
             stamp = source.stat()
-            first, guard = sources.digest(source), engine_build._stat(source)
-            source.write_text("VALUE=2\n", encoding="utf-8")
-            os.utime(source, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
-            self.assertNotEqual(first, sources.digest(source))
-            self.assertNotEqual(guard, engine_build._stat(source))
-            with mock.patch.object(sources, "os", types.SimpleNamespace(name="nt")), \
-                    mock.patch.object(runtime, "_windows_change", side_effect=[11, 12]) as changed:
-                self.assertNotEqual(sources._version(source, stamp), sources._version(source, stamp))
-            self.assertEqual(changed.call_args_list, [mock.call(source), mock.call(source)])
+            # Even file identity and every timestamp can remain identical within one clock tick.
+            with mock.patch.object(os, "stat", return_value=stamp):
+                first, guard = sources.digest(source), engine_build._stat(source)
+                source.write_text("VALUE=2\n", encoding="utf-8")
+                os.utime(source, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                self.assertNotEqual(first, sources.digest(source))
+                self.assertNotEqual(guard, engine_build._stat(source))
 
     def test_source_resolution_handles_namespaces_and_editable_packages_without_execution(self) -> None:
         import zipfile

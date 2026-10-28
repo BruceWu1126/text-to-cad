@@ -24,8 +24,8 @@ first-party module and package they name, as the module search path finds it. A 
 is first-party as the trace counts a frame (not the standard library, not an installed
 package, not cadgen).
 
-Files are read by their bytes, hashed once per version of the file (its stat); their
-imports and dynamic spots are parsed once per digest; a code object is read once per
+Reached source files are hashed from their bytes; their imports and dynamic spots are
+parsed once per digest; a code object is read once per
 value of it. All in this process's memory.
 """
 
@@ -52,32 +52,13 @@ from typing import Any
 __all__ = ["Symbols", "assigned", "closure", "closure_files", "digest", "returning", "skeleton"]
 
 _HELD = 4096
-# Source stat including mutation time -> its digest; digest -> its imports.
-_DIGESTS: "OrderedDict[tuple, str]" = OrderedDict()
+# Source digest -> its imports.
 _IMPORTS: "OrderedDict[str, tuple]" = OrderedDict()
 
 
-def _version(path: Path, stat: os.stat_result) -> tuple:
-    """Source/load guards share a mutation stamp even when last-write time is restored."""
-    if os.name == "nt":
-        from cadgen.engine.runtime import _windows_change
-
-        # FILETIME's 1601 epoch -> Unix ns, so a load can compare this with its start time.
-        changed = _windows_change(path) - 11_644_473_600_000_000_000
-    else:
-        changed = stat.st_ctime_ns
-    return (stat.st_mtime_ns, stat.st_size, stat.st_dev, stat.st_ino, changed)
-
-
 def digest(path: Path) -> str:
-    """A file's bytes, hashed once per version of the file."""
-    version = _version(path, os.stat(path))
-    found = _DIGESTS.get(version)
-    if found is None:
-        found = _DIGESTS[version] = hashlib.sha256(Path(path).read_bytes()).hexdigest()
-        while len(_DIGESTS) > _HELD:
-            _DIGESTS.popitem(last=False)
-    return found
+    """The bytes now: filesystem timestamps can collide even after an in-place source edit."""
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def _imports(path: Path, file_digest: str) -> tuple:

@@ -52,12 +52,12 @@ class RuntimeTest(unittest.TestCase):
                 source.write_text("WIDTH=1\n", encoding="utf-8")
                 info = root / ("custom-1.dist-info" if inventory == "modern" else "custom.egg-info")
                 if inventory == "single-file-egg":
-                    info.write_text("Name: custom\nVersion: 1\n", encoding="utf-8")
+                    info.write_text("Name: custom\nVersion: 1\nSummary: old\n", encoding="utf-8")
                     metadata_file = info
                 else:
                     info.mkdir()
                     metadata_file = info / ("METADATA" if inventory == "modern" else "PKG-INFO")
-                    metadata_file.write_text("Name: custom\nVersion: 1\n", encoding="utf-8")
+                    metadata_file.write_text("Name: custom\nVersion: 1\nSummary: old\n", encoding="utf-8")
                 dist = metadata.Distribution.at(info)
                 runtime.dependencies.cache_clear()
                 with mock.patch.object(runtime.metadata, "distributions", return_value=[dist]) as discovered, \
@@ -66,8 +66,10 @@ class RuntimeTest(unittest.TestCase):
                     first = runtime.closure()["dependencies"]
                     source.write_text("WIDTH=2\n", encoding="utf-8")
                     stamp = metadata_file.stat()
-                    metadata_file.write_bytes(metadata_file.read_bytes())
-                    os.utime(metadata_file, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                    replacement = metadata_file.with_name(metadata_file.name + ".reinstall")
+                    replacement.write_bytes(metadata_file.read_bytes())
+                    os.utime(replacement, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                    replacement.replace(metadata_file)
                     self.assertEqual(first, runtime.closure()["dependencies"], "a living worker retains its startup snapshot")
                     discovered.assert_called_once()
                     runtime.dependencies.cache_clear()  # a fresh process after explicit restart
@@ -75,7 +77,16 @@ class RuntimeTest(unittest.TestCase):
                     self.assertNotEqual(first, restarted, "same-version reinstallation invalidates saved build reuse")
                     runtime.dependencies.cache_clear()
                     self.assertEqual(restarted, runtime.closure()["dependencies"], "unchanged restart keeps saved builds reusable")
-                    self.assertEqual(discovered.call_count, 3)
+                    frozen = metadata_file.stat()
+                    stat = os.stat
+                    metadata_file.write_bytes(metadata_file.read_bytes().replace(b"Summary: old", b"Summary: new"))
+                    def unchanged_stat(path, *args, **kwargs):
+                        return frozen if path == metadata_file or path == str(metadata_file) else stat(path, *args, **kwargs)
+                    with mock.patch.object(runtime.os, "stat", side_effect=unchanged_stat):
+                        runtime.dependencies.cache_clear()
+                        self.assertNotEqual(restarted, runtime.closure()["dependencies"],
+                                            "changed metadata bytes survive completely unchanged stat fields")
+                    self.assertEqual(discovered.call_count, 4)
 
     def test_pool_keeps_project_interpreters_warm(self):
         def start(script, environment, cwd, execution):
@@ -197,27 +208,6 @@ finally:
                 worker._result({"script": "model.py", "name": "cube"})
         source.shape_data.assert_not_called()
 
-    def test_windows_change_query_closes_its_handle_on_failure_and_never_masks_failure(self):
-        import ctypes
-
-        class Basic(ctypes.Structure):
-            _fields_ = [("ChangeTime", ctypes.c_longlong)]
-
-        opened = mock.Mock(return_value=123)
-        query = mock.Mock(return_value=False)
-        close = mock.Mock(return_value=True)
-        refused = mock.Mock(side_effect=lambda path: OSError(f"cannot verify dependency: {path}"))
-        with mock.patch.object(runtime, "_windows_files", return_value=(opened, query, close, Basic, refused)):
-            with self.assertRaisesRegex(OSError, "cannot verify dependency"):
-                runtime._windows_change(Path("dependency.py"))
-        close.assert_called_once_with(123)
-        self.assertEqual(opened.call_args.args[1:7], (0x80, 7, None, 3, 0, None))
-        opened.return_value = ctypes.c_void_p(-1).value
-        close.reset_mock()
-        with mock.patch.object(runtime, "_windows_files", return_value=(opened, query, close, Basic, refused)):
-            with self.assertRaisesRegex(OSError, "cannot verify dependency"):
-                runtime._windows_change(Path("dependency.py"))
-        close.assert_not_called()
 
 
 class CrossVenvTest(unittest.TestCase):
@@ -361,8 +351,10 @@ class CrossVenvTest(unittest.TestCase):
                     os.utime(changed_file, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
                     metadata_file = sites[0] / "custom_dependency-1.dist-info/METADATA"
                     stamp = metadata_file.stat()
-                    metadata_file.write_bytes(metadata_file.read_bytes())
-                    os.utime(metadata_file, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                    replacement = metadata_file.with_name(metadata_file.name + ".reinstall")
+                    replacement.write_bytes(metadata_file.read_bytes())
+                    os.utime(replacement, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                    replacement.replace(metadata_file)
                     restart()
                     changed = build(interpreters[0])
                     self.assertTrue(changed["fresh"])

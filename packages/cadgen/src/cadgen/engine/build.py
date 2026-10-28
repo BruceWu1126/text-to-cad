@@ -43,6 +43,7 @@ import traceback
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
+from stat import S_ISREG
 from typing import Any, Callable
 
 from cadgen.engine.ids import canonical, file_id
@@ -479,7 +480,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
                 stats = {path: _stat(Path(path)) for path in _loaded_files(script, heard)}
                 sources = [stats.get(getattr(sys.modules.get(name), "__file__", None) or "") for name in context.loaded]
                 # A module edited while it loaded: the load may hold either version, so it is not kept.
-                if all(stat is None or max(stat[0], stat[-1]) < began for stat in sources):
+                if all(stat is None or max(stat[0], stat[4]) < began for stat in sources):
                     fresh = _Load(load_key, stats, environment, module, dict(_MODELS), context.loaded)
         loaded = time.perf_counter()
         context.base = script.parent
@@ -1213,11 +1214,14 @@ def _signature(tree: Any) -> tuple:
 
 
 def _stat(path: Path) -> tuple | None:
-    from cadgen.engine.sources import _version
-
     try:
         stat = os.stat(path)
-        return _version(path, stat)
+        source = None
+        if path.suffix == ".py" and S_ISREG(stat.st_mode):
+            from cadgen.engine.sources import digest
+
+            source = digest(path)
+        return (stat.st_mtime_ns, stat.st_size, stat.st_dev, stat.st_ino, stat.st_ctime_ns, source)
     except OSError:
         return None
 
