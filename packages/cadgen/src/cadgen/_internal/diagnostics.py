@@ -147,7 +147,8 @@ def _probe_port(port: int) -> dict:
             sock.settimeout(0.5)
             stream = sock.makefile("rwb")
             connection = door.Connection(stream, stream, stream, sock)
-            message["token"] = data[1]
+            # Windows authenticates the token prefix before reading the rest of the line.
+            message = {"token": data[1], **message}
         else:
             if not stat.S_ISFIFO(address.stat().st_mode):
                 return {"status": "invalid_endpoint"}

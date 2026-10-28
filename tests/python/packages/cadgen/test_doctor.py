@@ -801,6 +801,51 @@ class DiagnosticTests(unittest.TestCase):
         self.assertIn(b'"op": "hello"', writer.getvalue())
         connection.close.assert_called_once()
 
+    def test_windows_diagnostic_hello_obeys_authentication_prefix_and_release_checks(self):
+        import socket
+        import threading
+        from types import SimpleNamespace
+        from cadgen.engine import daemon
+
+        token = "a" * 32
+        for advertised_release, supplied_token, expected in (
+            (cadgen.__version__, token, "compatible"),
+            ("0.0.0", token, "incompatible"),
+            (cadgen.__version__, "b" * 32, "unknown_protocol"),
+        ):
+            with self.subTest(release=advertised_release, authenticated=supplied_token == token), socket.socket() as listener:
+                listener.bind(("127.0.0.1", 0))
+                listener.listen(1)
+                listener.settimeout(5)
+                transport_port = listener.getsockname()[1]
+                # The Windows private TCP transport is distinct from the selected HTTP port.
+                self.write("engine/" + daemon._tag(port=3245) + ".port", f"{transport_port} {supplied_token}")
+                server = SimpleNamespace(token=token, release_version=advertised_release, port=3245,
+                                         instance="diagnostic-test-instance", handle=mock.Mock())
+                errors = []
+
+                def serve():
+                    try:
+                        connection, _ = listener.accept()
+                        daemon._serve_connection(server, connection)
+                    except BaseException as error:
+                        errors.append(error)
+
+                # Exercise the real Windows admission/parser path on every platform.
+                with mock.patch.object(daemon, "WINDOWS", True):
+                    thread = threading.Thread(target=serve, daemon=True)
+                    thread.start()
+                    found = self.diagnostics._probe_port(3245)
+                    thread.join(5)
+                self.assertFalse(thread.is_alive(), "hello-only diagnostics close the connection")
+                self.assertEqual(errors, [])
+                self.assertEqual(found["status"], expected, found)
+                self.assertNotIn("token", found)
+                self.assertNotIn("instance", found)
+                if supplied_token == token:
+                    self.assertEqual(found["release"], advertised_release)
+                server.handle.assert_not_called()
+
     def test_development_alias_does_not_replace_the_explicit_runtime_release(self):
         data = self.hosts._server({"args": ["--from", "cadgen==0.8.2", "cadgen", "mcp"],
                                    "env": {"CADGEN_INSTALLATION_VERSION": "99.0.0"}})
