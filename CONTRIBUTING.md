@@ -149,19 +149,18 @@ locally. `Model.build(daemon=False)`, `export(..., daemon=False)` and
 process, with no live document or page.
 
 Project/helper source changes are loaded on the next model run, including editable
-project packages, while the worker keeps its kernel. Worker identity tracks installed
-distribution metadata rather than recursively scanning dependency source. When editing
-cadgen itself or files inside installed libraries, reinstall that distribution and restart
-your own engine: a restart alone does not invalidate unchanged installation metadata in
-a saved build's key.
+project packages, while the worker keeps its kernel. After installing, upgrading or
+reinstalling dependencies, restart your own selected engine (`cadgen stop`, then
+`cadgen server`) and any long-lived calling Python process before running the model again.
+Installed packages are not watched. Direct edits inside cadgen or installed libraries
+require reinstalling that distribution before restarting.
 
 The engine is selected by port: `--port` where the CLI accepts it, else
 `CADGEN_PORT`, else 3245. A port must be 1–65535. Bootstrap reuses a compatible
 selected engine; a conflicting listener fails. There is no rollover or retirement
 of another engine. Give worktrees and tests distinct ports
 when they need distinct engines. `cadgen status` and `cadgen stop` address only the
-selected engine; never stop an instance you did not start. A server retains the
-code it started with: restart your own engine after editing it.
+selected engine; never stop an instance you did not start.
 
 The private door (a named pipe; on Windows a port file) and lock live in
 `cadgen-engine` in `$XDG_RUNTIME_DIR`, else in the per-user temporary folder

@@ -1,7 +1,8 @@
 """The Python environment a model asks the shared engine to execute in.
 
 Executable paths stay lexical: resolving a venv's Python symlink would silently run its base
-interpreter. Installation metadata is checked on every call. Project Python source is
+interpreter. Installed dependencies are captured once at worker startup for saved build reuse;
+installing or upgrading them requires an explicit engine restart. Project Python source is
 reloaded and keyed by the build loader, independently of the environment's identity.
 """
 from __future__ import annotations
@@ -13,20 +14,14 @@ import importlib.util
 import json
 import os
 import platform
-import re
 import sys
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
-from urllib.request import url2pathname
 
 STARTUP = ("PYTHONPATH", "PYTHONHOME", "PYTHONSAFEPATH", "PYTHONNOUSERSITE", "PYTHONUSERBASE", "PYTHONPLATLIBDIR")
-_SKIP = frozenset({".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", "build", "dist"})
 _METADATA = ("METADATA", "RECORD", "direct_url.json")
 _LEGACY_METADATA = ("PKG-INFO", "SOURCES.txt", "installed-files.txt", "requires.txt",
                     "entry_points.txt", "top_level.txt", "dependency_links.txt")
-_current: dict[str, Any] | None = None
-_records: dict[str, tuple[Any, str, str, Path | None, Path | None, Path | None]] = {}
 
 
 def digest(value: Any) -> str:
@@ -96,72 +91,31 @@ def _stamp(path: Path | str) -> list[Any]:
     return [path, found.st_size, found.st_mtime_ns, changed]
 
 
+@functools.cache
 def dependencies() -> str:
-    """Effective installation records, never a traversal of installed or editable code.
+    """One process-local installation snapshot, taken before a worker imports its kernel.
 
-    A managed install changes its metadata even when the version stays fixed. Manual edits
-    inside installed libraries/hooks require reinstalling and restarting affected processes.
+    Only build-closure reuse needs this snapshot; client identity and requests never inspect
+    package inventories. Install or upgrade dependencies, then restart the selected engine.
     """
     from cadgen.engine.previous import version
 
-    actual = Path(__file__).resolve().parent.parent
-    rows = [["cadgen", version(), str(actual)]]
+    rows = [["cadgen", version(), str(Path(__file__).resolve().parent.parent)]]
     seen = set()
-    records = []
-    editables: dict[tuple[str, str], list[Any]] = {}
     for dist in metadata.distributions():
         location = getattr(dist, "_path", None)
-        token = str(Path(location).resolve()) if location is not None else str(dist.locate_file("")) + dist.name
+        if location is None:
+            rows.append(["installation", str(dist.locate_file("")),
+                         [[entry, dist.read_text(entry)] for entry in _METADATA]])
+            continue
+        path = Path(location).resolve()
+        token = str(path)
         if token in seen:
             continue
         seen.add(token)
-        # Missing records matter too: adding/removing metadata is an installation change.
-        # Legacy single-file egg-info uses its own stat, not a directory inventory.
         inventory = _LEGACY_METADATA if token.endswith(".egg-info") else _METADATA
-        if location is not None:
-            changed = [_stamp(token)] if Path(token).is_file() else [
-                _stamp(os.path.join(token, name)) for name in inventory]
-        else:
-            changed = [[name, dist.read_text(name)] for name in _METADATA]
-        held = _records.get(token)
-        if held is None or held[0] != changed:
-            name = re.sub(r"[-_.]+", "-", str(dist.metadata.get("Name") or "").lower())
-            try:
-                direct = json.loads(dist.read_text("direct_url.json") or "{}")
-            except (ValueError, TypeError):
-                direct = {}
-            editable = None
-            if direct.get("dir_info", {}).get("editable") and urlparse(direct.get("url", "")).scheme == "file":
-                editable = Path(url2pathname(urlparse(direct["url"]).path)).resolve()
-            source = Path(token) if (token.endswith(".egg-info") and dist.read_text("SOURCES.txt") is not None
-                                    and dist.read_text("installed-files.txt") is None) else None
-            # direct_url.json's live metadata stamp covers editable-root/routing changes.
-            code = Path(dist.locate_file("cadgen/__init__.py")).resolve() if name == "cadgen" else None
-            held = _records[token] = changed, name, dist.version, editable, source, code
-        records.append(held)
-        if held[3] is not None and token.endswith(".dist-info"):
-            editables.setdefault((held[1], held[2]), []).append(held)
-    names = set()
-    for held in records:
-        changed, name, installed, editable, source, code = held
-        if source is not None:
-            # A plain script sees its source egg-info before the installed editable wheel;
-            # a -P worker may see only the wheel. Use that same inventory for the equivalent
-            # project, in the egg's original precedence slot. Other installs keep their order.
-            for candidate in editables.get((name, installed), ()):
-                root = candidate[3]
-                if source.is_relative_to(root) and not any(
-                        part in _SKIP or part in {"site-packages", "dist-packages"}
-                        for part in source.relative_to(root).parts[:-1]):
-                    changed, name, installed, editable, _, code = candidate
-                    break
-        if name == "cadgen" and not (code == actual / "__init__.py" or
-                                      editable is not None and actual.is_relative_to(editable)):
-            continue  # Unrelated metadata cannot identify the code this process imported.
-        if name in names:
-            continue
-        names.add(name)
-        rows.append([name + "-installation", installed, changed])
+        installed = [_stamp(path)] if path.is_file() else [_stamp(path / entry) for entry in inventory]
+        rows.append(["installation", token, installed])
     return digest(sorted(rows))
 
 
@@ -207,7 +161,7 @@ def describe(environment: dict[str, str] | None = None) -> dict[str, Any]:
     found = {"python": os.path.abspath(sys.executable), "prefix": os.path.abspath(sys.prefix),
              "root": str(Path(__file__).resolve().parents[2]), "release": version(),
              "checkout": (Path(__file__).resolve().parents[3] / "pyproject.toml").is_file(),
-             "startup": startup, "dependencies": dependencies(), "compatibility": compatibility()}
+             "startup": startup, "compatibility": compatibility()}
     found["fingerprint"] = digest(found)
     return found
 
@@ -216,7 +170,7 @@ def validate(found: Any, *, server: bool = True) -> dict[str, Any]:
     from cadgen.engine.previous import version
 
     if not isinstance(found, dict) or set(found) != {
-            "python", "prefix", "root", "release", "checkout", "startup", "dependencies", "compatibility", "fingerprint"}:
+            "python", "prefix", "root", "release", "checkout", "startup", "compatibility", "fingerprint"}:
         raise ValueError("a build requires its Python execution environment")
     if any(not isinstance(found[name], str) or not os.path.isabs(found[name]) for name in ("python", "prefix", "root")):
         raise ValueError("the model's Python, prefix and cadgen import root must be absolute paths")
@@ -229,21 +183,11 @@ def validate(found: Any, *, server: bool = True) -> dict[str, Any]:
     return found
 
 
-def family(found: dict[str, Any]) -> str:
-    """One interpreter/import setup, independently of mutable installed dependencies."""
-    return digest({name: found[name] for name in ("python", "prefix", "root")})
-
-
 def key(script: str, execution: dict[str, Any] | None) -> str:
     return os.path.normcase(script) + ("::" + execution["fingerprint"] if execution is not None else "")
 
 
-def activate(found: dict[str, Any]) -> None:
-    global _current
-    _current = found
-
 
 def closure() -> dict[str, Any]:
-    """The current build's environment in its closure, also for explicit offline builds."""
-    found = _current or describe()
-    return {"dependencies": found["dependencies"], "python": platform.python_version()}
+    """The worker's startup snapshot, also captured once for explicit offline builds."""
+    return {"dependencies": dependencies(), "python": platform.python_version()}

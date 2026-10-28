@@ -62,7 +62,9 @@ if __name__ == "__main__":
   `python -m proj.parts.block` alike. An edit to a project module it imports is read on
   the next run, including source in an editable project (`pip install -e .`). No manual
   reload or engine restart is needed; the worker keeps its kernel and rebuilds affected
-  work. Installing or upgrading dependencies can replace that worker.
+  work. After installing, upgrading or reinstalling dependencies, restart your own
+  selected engine (`cadgen stop`, then `cadgen server`) and any long-lived calling
+  Python process before running the model again. Keep the same `CADGEN_PORT`.
 - **`import build123d as bd` costs nothing until it is used.** cadgen makes the import of
   `build123d` (and `OCP`) lazy: the module binds at once and the kernel loads on the
   first attribute anything reads from it, in the worker that builds the model. `from

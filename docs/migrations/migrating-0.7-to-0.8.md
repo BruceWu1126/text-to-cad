@@ -70,8 +70,10 @@ are gone.
 
    Project/helper Python edits, including an editable project (`pip install -e .`),
    take effect on the next model run without reinstalling or restarting the engine.
-   The worker keeps its kernel and rebuilds affected work. Package installations and
-   upgrades can replace the worker for that environment.
+   The worker keeps its kernel and rebuilds affected work. After installing, upgrading
+   or reinstalling dependencies, restart your own selected engine (`cadgen stop`, then
+   `cadgen server`) and any long-lived calling Python process, then run the model again.
+   Keep the same `CADGEN_PORT`; installed packages are not watched.
 
 2. **Start the engine explicitly.** The plugin's MCP bootstrap starts or attaches
    to it. Without the plugin, leave this running in another terminal, outside a
@@ -909,7 +911,7 @@ XBF-to-XBF translation remains refused. Unsupported formats or failed conversion
 the original bytes and cache record and report a clear error.
 
 Native materials and their libraries entered the key in `xbf/9`. The current `xbf/10`
-adds the project's dependency fingerprint and Python version alongside the format, native
+adds the worker's startup dependency fingerprint and Python version alongside the format, native
 toolchain, code and inputs.
 Startup never invents a missing runtime identity or runs the script. The next explicit
 `python model.py` rebuilds a runtime-less model in the project's actual environment;

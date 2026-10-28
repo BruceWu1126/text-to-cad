@@ -384,8 +384,6 @@ def _built(script: Path, functions: list[str] | None, *, verify: bool = False, p
     started = time.perf_counter()
     try:
         if not daemon:
-            from cadgen.engine import runtime
-            runtime.activate(runtime.describe())
             from cadgen.engine import build as engine_build
 
             said = progressing.Progress(frames or (lambda _frame: None), script=script, cwd=cwd)

@@ -549,6 +549,14 @@ def main() -> int:
     # process stands in cannot be renamed or deleted) and never stands in a folder others write.
     home, neutral = os.getcwd(), _neutral_folder()
     os.chdir(neutral)
+    from cadgen.engine import runtime
+
+    snapshot = runtime.dependencies()
+    if sys.pycache_prefix is not None:
+        # Reinstallation can preserve source size/mtime. A restarted worker uses the new
+        # installation's bytecode folder before importing its kernel or project dependencies.
+        sys.pycache_prefix = str(Path(sys.pycache_prefix) / "workers" / snapshot[:24])
+        os.environ["PYTHONPYCACHEPREFIX"] = sys.pycache_prefix
     own = kept()
 
     def leave() -> None:
@@ -560,8 +568,6 @@ def main() -> int:
     if "--standby" in sys.argv[1:]:
         load_kernel()
     resident = resident_mb()
-    from cadgen.engine import runtime
-
     execution = runtime.describe()
     send({"ready": os.getpid(), "rssMb": None if resident is None else round(resident), "execution": execution})
     gc.disable()
@@ -636,8 +642,7 @@ def main() -> int:
         try:
             requested = runtime.validate(request.get("execution"))
             if requested != execution or runtime.describe() != execution:
-                raise ValueError("the worker's Python environment changed; run the model again")
-            runtime.activate(execution)
+                raise ValueError("the worker's Python environment changed; restart the selected engine before building again")
             adopt(request.get("env"), own)
             cwd = request.get("cwd")
             os.chdir(cwd or home)

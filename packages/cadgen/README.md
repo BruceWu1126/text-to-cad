@@ -86,7 +86,7 @@ Laws 1 to 13 and 19 to 23 are the engine's; 14 to 18 hold for the whole package.
    declared or exported xbf (the same bytes), kept until a person deletes it -- nothing evicts it
    -- and made again by a run of its script (a shape's by the program that handed it over), so a
    restart opens that server's saved documents; and under `pycache/` the bytecode its own processes compile of the libraries they load
-   (`PYTHONPYCACHEPREFIX`, with worker bytecode separated by execution fingerprint), regenerable too, so nothing is written
+   (`PYTHONPYCACHEPREFIX`, with worker bytecode separated by its startup dependency snapshot), regenerable too, so nothing is written
    beside a library or a model. The code stays the only source of truth: a document is what its
    last run made, the engine never checks the code on disk against it, and nothing reruns -- when
    to run the code again is the agent's call. It writes no

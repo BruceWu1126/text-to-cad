@@ -406,11 +406,6 @@ builds no script until a build takes it (``adopt``)."""
         own = {name: os.environ[name] for name in BYTECODE if name in os.environ}
         env = {name: value for name, value in env.items() if name not in BYTECODE}
         env.update(own or bytecode({}))
-        if execution is not None and env.get("PYTHONPYCACHEPREFIX"):
-            # Python's timestamp-based pyc can survive a same-size, same-second source edit.
-            # A changed dependency snapshot must import fresh code even in a fresh process.
-            env["PYTHONPYCACHEPREFIX"] = str(Path(env["PYTHONPYCACHEPREFIX"]) / "workers" /
-                                             execution["fingerprint"][:24])
         env["CADGEN_ENGINE_WORKER"] = "1"
         command = [self.execution["python"], "-P"]
         if self.execution["checkout"]:
@@ -1026,21 +1021,6 @@ class Pool:
                     taken.add(id(worker))
                     granted = True
                 continue
-            if ticket.execution is not None:
-                stale = next((held for held in self.live.values()
-                              if os.path.normcase(held.script) == os.path.normcase(ticket.key.rsplit("::", 1)[0])
-                              and getattr(held, "execution", None) is not None
-                              and runtime.family(held.execution) == runtime.family(ticket.execution)), None)
-                if stale is not None:
-                    # The same Python had its dependencies changed. Never send a new build to
-                    # imports from before that change; wait for its previous build before draining.
-                    if not stale.leased and id(stale) not in taken:
-                        del self.live[stale.key]
-                        self._note(stale, "environment")
-                        self._slot(ticket, stale)
-                        taken.add(id(stale))
-                        granted = True
-                    continue
             if blocked:
                 continue
             same = interpreter(ticket.environment)

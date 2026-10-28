@@ -640,19 +640,15 @@ symlink to its base interpreter. It imports cadgen and dependencies from that
 environment. The server does not inject its own package directory into the worker's
 `PYTHONPATH`. The worker reports its actual cadgen release before a build; an
 unequal release fails before model code runs. The worker independently checks its
-package root, interpreter prefix and effective dependency snapshot against the request.
+package root and interpreter prefix against the request.
 Native interchange also requires the same document format, operating system,
 architecture and effective OCP provider version as the server.
 
 A warm worker is keyed by its script, requested interpreter, virtual-environment
-prefix, import setup and dependency snapshot. Different environments keep separate
-warm workers behind the same server and viewer. Each call checks installed distribution
-metadata, including installation records and editable source-root identities. A package
-manager's install, upgrade or reinstall changes that snapshot and retires the affected
-worker before reuse. It does not enumerate installed runtime files or walk editable
-source trees. cadgen's actual imported root and release remain authoritative; unrelated
-or duplicate metadata cannot select another installation. A standby follows the requested
-execution environment too.
+prefix and import setup. Different environments keep separate warm workers behind the
+same server and viewer. Calls check that identity and runtime compatibility; installed
+packages are not watched. cadgen's actual imported root and release remain authoritative.
+A standby follows the requested execution environment too.
 
 Project Python modules, including editable packages whose source lives outside the
 interpreter and library folders, use the existing source loader and build closure.
@@ -662,12 +658,16 @@ The existing build-closure rules decide which bodies can be reused: symbol-based
 ignore comments and unrelated bindings; conservative source-byte fallbacks can rebuild
 even for a comment change.
 
-Directly modifying installed library, native-extension or import-hook files without a
-package-manager operation is outside this installation check. Reinstall the affected
-distribution to invalidate its dependency snapshot, and restart processes that already
-imported it; changing cadgen or the server's native libraries requires restarting an
-engine you own. Restart alone can still reuse a saved build when its installation
-metadata has not changed. Ordinary project/helper edits need neither reinstall nor restart.
+After installing, upgrading or reinstalling dependencies, restart your own selected
+engine (`cadgen stop`, then `cadgen server`) and any long-lived calling Python process,
+then run the model again. Use the same selected port. Direct edits inside cadgen,
+installed libraries, native extensions or import hooks require reinstalling that
+distribution before restarting. Ordinary project/helper edits need neither step.
+
+The worker captures an installed-dependency snapshot once at startup; an offline process
+captures it on its first execution. It identifies cached builds and worker bytecode, so a new
+worker does not reuse a document built with a different installation. It is not refreshed
+on each model call and does not monitor package changes.
 
 The import setup (`daemon.RESTARTS`) includes `PYTHONPATH`, `PYTHONHOME`, `PYTHONSAFEPATH`,
 `PYTHONNOUSERSITE`, `PYTHONUSERBASE` and `PYTHONPLATLIBDIR`. Relative `PYTHONPATH`
@@ -1075,9 +1075,9 @@ Asked of the server, a document it does not hold is a refusal (`serve.NotHeld`):
 its type, state and command with its words (`daemon.refused`) and the caller raises it as that
 type (`api._failed`), so `cadgen inspect`, `export`, `snapshot` and `serve` of such an id exit 2.
 
-`cadgen stop` stops every server of the installation, whatever protocol it speaks: the door and
-lock names carry the protocol (`daemon._tag`), and `daemon.endpoints()` lists this one's and each
-older one's, so a cadgen that bumps `PROTOCOL` still stops the server an earlier one started (from
+`cadgen stop` stops the selected engine, including its older-protocol endpoints: the door and
+lock names carry the selected port and protocol (`daemon._tag`), and `daemon.endpoints()` lists
+that port's endpoints, so a cadgen that bumps `PROTOCOL` still stops the server an earlier one started (from
 protocol 3, the first with a door: an earlier one listened on a Unix socket, which nothing reaches
 now, and leaves on that older cadgen's own idle timeout). Both `stop` and `status` remove the door and lock of a dead
 server (nothing reads the door and nobody holds its lock) and say so on stderr; `status` names an
@@ -2650,7 +2650,7 @@ libs      {"build123d": "0.13.0", "OCP": "8.0.1.1.0",                   geometry
 platform  {"python": "3.13.13", "system": "Darwin", "arch": "arm64"}  the system and architecture (keyed),
                                                                      Python (information only):
                                                                      platform.python_version(), .system(), .machine()
-runtime   {"dependencies": "<digest>", "python": "3.13.13"}          the project's dependency snapshot and Python (keyed)
+runtime   {"dependencies": "<digest>", "python": "3.13.13"}          the startup dependency snapshot and Python (keyed)
 source    {"kind": "script", "path": "../src/tom.py", "function": "tom"}
 modules   [["../src/lib/arm_parts.py", "9f3c..."], ...]
 inputs    [["file", "../STEP/gripper.step", "c0de..."], ["read", "../src/lib/ids.json", "77ab..."], ...]
@@ -2669,7 +2669,7 @@ functions' code objects with no line tables or docstrings, its classes, the valu
 hold (a path value inside the script's folder relative to it), and, for a module that falls back
 to its bytes (**Body retention**), each file of its import closure by its bytes. A comment or a
 blank line changes no digest; a module the model loads and does not reach holds the empty one.
-`runtime` holds only the effective dependency fingerprint and Python version. It carries
+`runtime` holds only the startup dependency fingerprint and Python version. It carries
 no interpreter path, virtual-environment prefix or import-routing settings into the artifact.
 `inputs` lists every file a body read -- through the engine (`file`: `read_step`, `read_xbf`,
 `read_mesh`, build123d's importers), itself (`read`, a `null` digest for one it found missing;
@@ -2682,11 +2682,11 @@ null (**Body retention**). `cadgen inspect DOC` prints the closure, `cadgen.insp
 bd_materials and threejs_materials), the operating system and architecture, the project's
 runtime dependency fingerprint and Python version, along with the model's code and inputs.
 An arm64 kernel and an x86-64 one write other bytes of one model; a system, architecture,
-library, dependency or Python change rebuilds it, saying what moved. The `engine.release`
-and engine-code digest fields are descriptive; the runtime dependency snapshot covers
-the actual cadgen import root and release and matching installation metadata. A managed
-installation change invalidates a cached build even when the format stays the same;
-direct in-place library edits require the reinstall/restart procedure above. Exact release
+library, dependency or Python change captured at startup rebuilds it, saying what moved.
+The `engine.release` and engine-code digest fields are descriptive. The startup dependency
+snapshot prevents persisted reuse after an installation change and explicit restart, even
+when the format stays the same; it does not detect changes during a worker's life.
+Use the install/restart procedure above after changing installed packages. Exact release
 equality is a separate connection requirement. `FORMAT` is bumped deliberately when the
 stored representation changes. A new format or build key can invalidate reuse for a new
 build; keeping a saved document readable is a separate obligation (**Document compatibility**
