@@ -589,7 +589,7 @@ class StepTest(unittest.TestCase):
         blue = bd.Pos(12, 0, 0) * bd.Box(8, 8, 8)
         blue.color, blue.material, blue.label = bd.Color(0.1, 0.2, 0.8), rough, "same"
         path = self.write(bd.Compound(children=[red, blue], label="kit"), "kit")
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         self.assertIn("SURFACE_STYLE_REFLECTANCE_AMBIENT_DIFFUSE_SPECULAR", text)
         self.assertNotIn("= ?();", text)
         loaded = document.Loaded(path)
@@ -632,12 +632,12 @@ class StepTest(unittest.TestCase):
         part.material = metals.aluminum()
         part.color = bd.Color(.2, .4, .6)
         path = self.write(part, "foreign")
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         edited, count = re.subn(
             r"(SURFACE_STYLE_REFLECTANCE_AMBIENT_DIFFUSE_SPECULAR\(\s*)[^,]+",
             r"\g<1>-1.0", text)
         self.assertGreater(count, 0)
-        path.write_text(edited)
+        path.write_text(edited, encoding="utf-8")
         prototype = document.Loaded(path).prototypes[0]
         self.assertAlmostEqual(prototype.color[0], part.color.wrapped.GetRGB().Red(), places=5)
         self.assertEqual(prototype.material.pbr.values.metalness, 0.0)
