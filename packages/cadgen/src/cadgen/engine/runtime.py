@@ -184,7 +184,9 @@ def validate(found: Any, *, server: bool = True) -> dict[str, Any]:
 
 
 def key(script: str, execution: dict[str, Any] | None) -> str:
-    return os.path.normcase(script) + ("::" + execution["fingerprint"] if execution is not None else "")
+    """One slot per script/interpreter; the pool replaces changed startup environments."""
+    identity = {name: execution[name] for name in ("python", "prefix", "root")} if execution is not None else None
+    return os.path.normcase(script) + ("::" + digest(identity) if identity is not None else "")
 
 
 

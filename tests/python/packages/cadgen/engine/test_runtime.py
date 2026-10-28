@@ -97,6 +97,13 @@ class RuntimeTest(unittest.TestCase):
         pool.release(b)
         self.assertFalse(a.stopped)
         self.assertFalse(b.stopped)
+        changed = {**first, "startup": {**first["startup"], "PYTHONPATH": "/changed"}}
+        changed["fingerprint"] = runtime.digest({name: value for name, value in changed.items() if name != "fingerprint"})
+        replacement = pool.lease("a.py", {"PYTHONPATH": "/changed"}, execution=changed)
+        pool.release(replacement)
+        self.assertIsNot(replacement, a, "startup changes replace the same interpreter's worker")
+        self.assertTrue(a.stopped)
+        self.assertFalse(b.stopped, "another project interpreter remains warm")
         self.assertEqual(len(pool.workers()), 2)
 
     def test_worker_checks_actual_import_before_model_execution_and_never_injects_server_code(self):
