@@ -44,7 +44,9 @@ is to re-install it in place, which re-records the version.
 Read-only multi-version diagnostics are separate from setup: ``--json [--python PATH] [skill]``
 reports schema-1 JSON, while ``--python PATH [skill]`` prints the same report for a person. These
 modes perform no setup or pruning, import no CAD kernel, and never start or stop an engine.
-Their exit codes are 0 (no required failures; warnings remain visible), 3 (release mismatch),
+Older private engine endpoints are identified through bounded read-only status requests;
+their identity is diagnostic evidence, never permission to run work on an older protocol.
+Their exit codes are 0 (no required failures; warnings remain visible), 3 (release or protocol mismatch),
 5 (a required interpreter, selected engine, skill or port is unavailable/invalid), and argparse's
 2 for invalid arguments. ``cadgen._internal.diagnostics`` owns that report.
 

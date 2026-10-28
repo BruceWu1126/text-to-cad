@@ -762,6 +762,13 @@ without trying another transport or running locally. Start the server outside an
 sandbox that refuses its listener or private directory. The private directory and
 its authentication rules apply independently of the public port selector.
 
+**Diagnosing older engines.** `cadgen doctor --json` identifies current engines
+through their handshake and inventories older endpoints in the same private
+directory through bounded, read-only status requests. It reports only their
+identity and serving port, marking the older protocol incompatible. This discovery
+never admits builds, starts or stops an engine, or changes its records. A refused
+current handshake remains refused; diagnostics do not follow it with a status request.
+
 **A hold.** `cadgen mcp` holds its selected engine through `client.hold` for the host's
 lifetime. The hold names the host (`host`, as `cadgen.mcp.host.family` spells it),
 and `cadgen status --json` reports the holder counts and host families. The engine

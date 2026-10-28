@@ -600,6 +600,7 @@ class DiagnosticTests(unittest.TestCase):
         })
         patch.start()
         self.addCleanup(patch.stop)
+        self.engine_probe = diagnostics.engine
         probe = mock.patch.object(diagnostics, "engine", side_effect=lambda port: {
             "port": port, "status": "compatible", "release": cadgen.__version__, "protocol": 4})
         self.probe = probe.start()
@@ -795,7 +796,8 @@ class DiagnosticTests(unittest.TestCase):
         connection = SimpleNamespace(reader=io.BytesIO(b'{"failed":"SECRET_ERROR"}\n'), writer=writer, close=mock.Mock())
         with mock.patch.object(door, "answering", return_value=True), mock.patch.object(door, "dial", return_value=connection):
             found = self.diagnostics._probe_port(3245)
-        self.assertEqual(found, {"status": "unknown_protocol"})
+        self.assertEqual(found["status"], "unknown_protocol")
+        self.assertEqual(found["discovery"], "port_endpoint")
         self.assertNotIn("SECRET", str(found))
         self.assertEqual(len(writer.getvalue().splitlines()), 1)
         self.assertIn(b'"op": "hello"', writer.getvalue())
@@ -845,6 +847,290 @@ class DiagnosticTests(unittest.TestCase):
                 if supplied_token == token:
                     self.assertEqual(found["release"], advertised_release)
                 server.handle.assert_not_called()
+
+    def legacy_peer(self, name, answer, ready=None):
+        """A real FIFO peer for the old single-request status protocol."""
+        from cadgen.engine import door
+        import json
+
+        folder = self.root / "engine"
+        folder.mkdir(exist_ok=True, mode=0o700)
+        requests, errors = [], []
+
+        def serve(reader, writer):
+            try:
+                requests.append(json.loads(reader.readline()))
+                if ready is not None:
+                    ready.set()
+                if answer is not None:
+                    data = answer if isinstance(answer, bytes) else (json.dumps(answer) + "\n").encode()
+                    writer.write(data)
+                    writer.flush()
+                extra = reader.read()
+                if extra:
+                    requests.append(extra)
+            except BaseException as error:
+                errors.append(error)
+
+        peer = door.Door(folder / name, lambda ident: door.answer(folder / "clients", ident, serve))
+        self.addCleanup(peer.close)
+        return requests, errors
+
+    @unittest.skipIf(os.name == "nt", "real POSIX legacy FIFO transport")
+    def test_live_legacy_endpoints_supply_identity_ports_and_aliases_without_mutation_or_status_leaks(self):
+        import json
+
+        first, first_errors = self.legacy_peer("111111111111.door", {
+            "ok": True, "version": cadgen.__version__, "pid": 1234, "installation": "0.8.2-dev.1",
+            "serving": {"port": 3245, "url": "SECRET_URL", "documents": ["SECRET_DOCUMENT"]},
+            "workers": [{"script": "SECRET_SCRIPT"}], "models": ["SECRET_MODEL"], "token": "SECRET_TOKEN"})
+        second, second_errors = self.legacy_peer("222222222222.door", {
+            "ok": True, "version": "0.8.1", "pid": 2345, "installation": "0.8.1",
+            "serving": {"port": 3248}})
+        self.write("state/engines/stale.json", '{"schema":2,"port":40001,"token":"SECRET_RECORD_TOKEN"}')
+        folder = self.root / "engine"
+        before = {path.name: path.lstat().st_mode for path in folder.iterdir()}
+        with mock.patch.object(self.diagnostics, "engine", side_effect=lambda port: {"port": port, "status": "conflicting_listener"}), \
+                mock.patch.object(self.diagnostics, "legacy_endpoints", wraps=self.diagnostics.legacy_endpoints) as scan:
+            data = self.data()
+        scan.assert_called_once()
+        by_port = {item["port"]: item for item in data["engines"]}
+        self.assertEqual(data["exit_code"], 3)
+        self.assertEqual(by_port[3245]["status"], "incompatible", "a matching release still has the legacy protocol")
+        self.assertEqual(by_port[3245]["protocol"], "legacy-status")
+        self.assertEqual(by_port[3245]["installation"], "0.8.2-dev.1")
+        self.assertEqual(by_port[3248]["release"], "0.8.1")
+        self.assertNotIn("release", by_port[40001], "a stale record cannot supply a legacy endpoint's port")
+        self.assertEqual(first, [{"op": "status"}])
+        self.assertEqual(second, [{"op": "status"}])
+        self.assertEqual(first_errors + second_errors, [])
+        self.assertEqual({path.name: path.lstat().st_mode for path in folder.iterdir()}, before)
+        self.assertNotIn("SECRET", json.dumps(data))
+        self.assertIn("0.8.2-dev.1", self.diagnostics.human(data))
+        self.assertIn("legacy-status", self.diagnostics.human(data))
+
+    def test_legacy_claims_cannot_replace_current_hello_refusal_timeout_or_compatible_identity(self):
+        from cadgen.engine import daemon
+
+        self.write("engine/" + daemon._tag(port=3245) + (".port" if daemon.WINDOWS else ".door"), "")
+        identity = {"path": str(self.root / "engine/111111111111.door"), "status": "incompatible",
+                    "protocol": "legacy-status", "discovery": "legacy_private_endpoint", "port": 3245,
+                    "release": "0.8.1", "pid": 1234, "installation": "0.8.1"}
+        for current in ({"status": "compatible", "release": cadgen.__version__, "protocol": daemon.PROTOCOL},
+                        {"status": "incompatible", "release": "0.8.0", "protocol": daemon.PROTOCOL,
+                         "discovery": "port_endpoint"},
+                        {"status": "unknown_protocol", "discovery": "port_endpoint"}, {"status": "timeout"}):
+            with self.subTest(current=current), mock.patch.object(self.diagnostics, "legacy_endpoints", return_value={
+                    "path": str(self.root / "engine"), "status": "ok", "records": [identity], "current_ports": [3245]}), \
+                    mock.patch.object(self.diagnostics, "engine", return_value={"port": 3245, **current}):
+                data = self.data()
+            found = data["engines"][0]
+            self.assertEqual(found["status"], current["status"])
+            self.assertEqual(found.get("release"), current.get("release"))
+            self.assertEqual(found["legacy_endpoints"], [identity])
+            self.assertEqual(found["discovery"], "port_endpoint")
+            self.assertIn("endpoint_port_conflict", {issue["code"] for issue in data["issues"]})
+
+    def test_current_endpoint_provenance_survives_a_child_timeout_outside_the_scan(self):
+        from cadgen.engine import daemon
+
+        path = self.write("engine/" + daemon._tag(port=3245) + (".port" if daemon.WINDOWS else ".door"), "")
+        with mock.patch.object(self.diagnostics, "_child", return_value={"status": "timeout"}):
+            found = self.engine_probe(3245)
+        self.assertEqual(found["status"], "timeout")
+        self.assertEqual(found["discovery"], "port_endpoint")
+        self.assertEqual(found["endpoint"], str(path.resolve()))
+        record = {"path": str(self.root / "engine/111111111111.door"), "status": "incompatible", "port": 3245,
+                  "release": "0.8.1", "pid": 1234, "protocol": "legacy-status", "discovery": "legacy_private_endpoint"}
+        with mock.patch.object(self.diagnostics, "engine", return_value=found), \
+                mock.patch.object(self.diagnostics, "legacy_endpoints", return_value={
+                    "path": str(self.root / "engine"), "status": "limited", "records": [record], "current_ports": []}):
+            data = self.data()
+        self.assertEqual(data["engines"][0]["status"], "timeout")
+        self.assertEqual(data["engines"][0]["legacy_endpoints"], [record])
+
+    def test_uncertain_current_probes_are_not_promoted_even_without_a_scanned_current_tag(self):
+        record = {"path": str(self.root / "engine/111111111111.door"), "status": "incompatible", "port": 3245,
+                  "release": "0.8.1", "pid": 1234, "protocol": "legacy-status", "discovery": "legacy_private_endpoint"}
+        for status in ("timeout", "unusable", "unknown_protocol", "invalid_endpoint", "unreadable"):
+            with self.subTest(status=status), mock.patch.object(self.diagnostics, "engine", return_value={"port": 3245, "status": status}), \
+                    mock.patch.object(self.diagnostics, "legacy_endpoints", return_value={
+                        "path": str(self.root / "engine"), "status": "ok", "records": [record], "current_ports": []}):
+                found = self.data()["engines"][0]
+            self.assertEqual(found["status"], status)
+            self.assertNotIn("release", found)
+            self.assertEqual(found["legacy_endpoints"], [record])
+
+    def test_legacy_duplicate_port_claims_remain_ambiguous(self):
+        records = [{"path": str(self.root / f"engine/{at:012x}.door"), "status": "incompatible",
+                    "protocol": "legacy-status", "discovery": "legacy_private_endpoint", "port": 3245,
+                    "release": version, "pid": at + 1} for at, version in enumerate(("0.8.0", "0.8.1"))]
+        with mock.patch.object(self.diagnostics, "legacy_endpoints", return_value={
+                "path": str(self.root / "engine"), "status": "ok", "records": records, "current_ports": []}), \
+                mock.patch.object(self.diagnostics, "engine", return_value={"port": 3245, "status": "conflicting_listener"}):
+            data = self.data()
+        found = data["engines"][0]
+        self.assertEqual(found["status"], "incompatible")
+        self.assertNotIn("release", found)
+        self.assertNotIn("installation", found)
+        self.assertEqual(found["legacy_endpoints"], records)
+        self.assertIn("legacy_port_ambiguous", {issue["code"] for issue in data["issues"]})
+
+    def test_legacy_directory_scan_is_bounded_and_unrecorded_current_tags_are_not_status_probed(self):
+        from cadgen.engine import daemon
+
+        suffix = ".port" if daemon.WINDOWS else ".door"
+        self.write("engine/" + daemon._tag(port=40009) + suffix, "")
+        for at in (1, 2, 3):
+            self.write("engine/" + f"{at:012x}" + suffix, "")
+        with mock.patch.object(self.diagnostics, "_child", return_value={"status": "unknown_protocol"}) as child, \
+                mock.patch.object(self.diagnostics.os, "scandir", wraps=os.scandir) as scan, \
+                mock.patch.object(self.diagnostics, "MAX_ENGINES", 2):
+            found = self.diagnostics.legacy_endpoints()
+        scan.assert_called_once()
+        self.assertEqual(found["current_ports"], [40009])
+        self.assertEqual(found["status"], "limited")
+        self.assertEqual(child.call_count, 2)
+        self.assertTrue(all(daemon._tag(port=40009) not in call.args[0][-1] for call in child.call_args_list))
+        with mock.patch.object(self.diagnostics, "legacy_endpoints", return_value=found):
+            data = self.data()
+        self.assertIn(40009, {item["port"] for item in data["engines"]})
+        self.assertIn("endpoint_inventory_incomplete", {issue["code"] for issue in data["issues"]})
+        with mock.patch.object(self.diagnostics, "MAX_RECORDS", 1), \
+                mock.patch.object(self.diagnostics, "_child", return_value={"status": "unusable"}):
+            self.assertEqual(self.diagnostics.legacy_endpoints()["status"], "limited")
+        with mock.patch.object(self.diagnostics.os, "scandir", side_effect=PermissionError("SECRET_ERROR")):
+            unknown = self.diagnostics.legacy_endpoints()
+        self.assertEqual(unknown["status"], "unreadable")
+        self.assertNotIn("SECRET", str(unknown))
+
+    @unittest.skipIf(os.name == "nt", "POSIX endpoint kinds and ownership")
+    def test_legacy_discovery_refuses_links_regular_files_foreign_owners_and_dead_fifos(self):
+        from cadgen.engine import daemon
+        from types import SimpleNamespace
+        import stat
+
+        folder = self.root / "engine"
+        folder.mkdir(mode=0o700)
+        target = folder / "target"
+        os.mkfifo(target, 0o600)
+        (folder / "111111111111.door").symlink_to(target)
+        self.write("engine/222222222222.door", "SECRET_REGULAR_FILE")
+        os.mkfifo(folder / "333333333333.door", 0o600)
+        before = {path.name: path.lstat().st_mode for path in folder.iterdir()}
+        result = self.diagnostics.legacy_endpoints()
+        states = {Path(item["path"]).name: item["status"] for item in result["records"]}
+        self.assertEqual(states, {"111111111111.door": "invalid_endpoint", "222222222222.door": "invalid_endpoint",
+                                  "333333333333.door": "stale_endpoint"})
+        self.assertEqual({path.name: path.lstat().st_mode for path in folder.iterdir()}, before)
+        foreign = SimpleNamespace(st_mode=stat.S_IFIFO | 0o600, st_uid=os.getuid() + 1)
+        with mock.patch.object(Path, "lstat", return_value=foreign):
+            self.assertEqual(self.diagnostics._open_endpoint(target)[2], "invalid_endpoint")
+
+    def test_legacy_status_is_bounded_and_malformed_identity_is_unknown(self):
+        from types import SimpleNamespace
+        import json
+
+        self.root.joinpath("engine").mkdir(mode=0o700)
+        good = {"ok": True, "version": "0.8.1", "pid": 1234, "serving": {"port": 3245}}
+        answers = [b"", b"[]\n", b"{bad SECRET\n", json.dumps({**good, "serving": {"port": 0}}).encode(),
+                   json.dumps({**good, "pid": True}).encode(), json.dumps({**good, "ok": 1}).encode()]
+        for answer in answers:
+            writer = io.BytesIO()
+            connection = SimpleNamespace(reader=io.BytesIO(answer), writer=writer, close=mock.Mock())
+            with self.subTest(answer=answer), mock.patch.object(self.diagnostics, "_open_endpoint", return_value=(connection, None, "ok")):
+                found = self.diagnostics._probe_legacy_endpoint("111111111111" + (".port" if os.name == "nt" else ".door"))
+            self.assertEqual(found, {"status": "unknown_protocol"})
+            self.assertEqual(json.loads(writer.getvalue()), {"op": "status"})
+            connection.close.assert_called_once()
+        oversized = SimpleNamespace(reader=io.BytesIO(b"x" * 33), writer=io.BytesIO(), close=mock.Mock())
+        with mock.patch.object(self.diagnostics.doctor_files, "MAX_BYTES", 32), \
+                mock.patch.object(self.diagnostics, "_open_endpoint", return_value=(oversized, None, "ok")):
+            self.assertEqual(self.diagnostics._probe_legacy_endpoint("111111111111" + (".port" if os.name == "nt" else ".door")),
+                             {"status": "too_large"})
+
+    @unittest.skipIf(os.name == "nt", "real POSIX legacy FIFO transport")
+    def test_hanging_legacy_peer_is_bounded_by_its_child_and_leaves_no_ipc_files(self):
+        import subprocess
+        import threading
+
+        ready = threading.Event()
+        requests, errors = self.legacy_peer("111111111111.door", None, ready)
+        folder = self.root / "engine"
+        before = {path.name: path.lstat().st_mode for path in folder.iterdir()}
+
+        def run_ready_child(command, **options):
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                       encoding=options["encoding"], errors=options["errors"], env=options["env"])
+            try:
+                self.assertTrue(ready.wait(10), "wait for the real status request before testing its blocked response")
+                out, err = process.communicate(timeout=0.05)
+                return subprocess.CompletedProcess(command, process.returncode, out, err)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.communicate()
+
+        with mock.patch.object(self.diagnostics.subprocess, "run", side_effect=run_ready_child):
+            found = self.diagnostics.legacy_endpoints()
+        self.assertEqual(found["records"][0]["status"], "timeout")
+        self.assertEqual(requests, [{"op": "status"}])
+        self.assertEqual(errors, [])
+        self.assertEqual({path.name: path.lstat().st_mode for path in folder.iterdir()}, before)
+
+    def test_windows_legacy_status_uses_token_prefix_and_validates_private_port_file(self):
+        import socket
+        import threading
+        import json
+        from types import SimpleNamespace
+        from cadgen.engine import daemon
+
+        token = "a" * 32
+        status = {"ok": True, "version": "0.8.1", "installation": "0.8.1-dev.1", "pid": 1234,
+                  "serving": {"port": 3248, "documents": ["SECRET_DOCUMENT"]}, "token": "SECRET_TOKEN"}
+        requests, errors = [], []
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(1)
+            listener.settimeout(5)
+            address = self.write("engine/111111111111.port", f"{listener.getsockname()[1]} {token}")
+
+            def serve():
+                try:
+                    connection, _ = listener.accept()
+                    with connection, connection.makefile("rwb") as stream:
+                        prefix = daemon._admitted(SimpleNamespace(token=token), connection, stream)
+                        if prefix is not None:
+                            requests.append(json.loads(prefix + stream.readline()))
+                            stream.write((json.dumps(status) + "\n").encode())
+                            stream.flush()
+                            extra = stream.read()
+                            if extra:
+                                requests.append(extra)
+                except BaseException as error:
+                    errors.append(error)
+
+            with mock.patch.object(daemon, "WINDOWS", True):
+                thread = threading.Thread(target=serve, daemon=True)
+                thread.start()
+                found = self.diagnostics._probe_legacy_endpoint(address.name)
+                thread.join(5)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(requests, [{"token": token, "op": "status"}])
+        self.assertEqual(found, {"status": "incompatible", "port": 3248, "release": "0.8.1", "pid": 1234,
+                                 "installation": "0.8.1-dev.1"})
+        self.assertNotIn("SECRET", str(found))
+        for invalid in ("0 " + token, "65536 " + token, "1234 not-a-token", "1234 " + token + " extra", "x" * 1025):
+            address.write_text(invalid, encoding="utf-8")
+            with self.subTest(invalid=invalid), mock.patch.object(daemon, "WINDOWS", True), \
+                    mock.patch.object(self.diagnostics.socket, "create_connection") as connect:
+                self.assertEqual(self.diagnostics._probe_legacy_endpoint(address.name)["status"], "invalid_endpoint")
+                connect.assert_not_called()
+        other = self.write("other-port-file", "1234 " + token)
+        descriptor = os.open(other, os.O_RDONLY)
+        with mock.patch.object(self.diagnostics.os, "open", return_value=descriptor):
+            self.assertIsNone(self.diagnostics._read_port_file(address, address.lstat()))
 
     def test_development_alias_does_not_replace_the_explicit_runtime_release(self):
         data = self.hosts._server({"args": ["--from", "cadgen==0.8.2", "cadgen", "mcp"],

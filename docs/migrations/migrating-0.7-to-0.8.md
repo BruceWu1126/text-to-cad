@@ -126,6 +126,10 @@ are gone.
    installations, known engines and supported provider configuration without
    changing setup or starting or stopping servers. It states what it could discover;
    unregistered environments and unsupported provider configurations may be absent.
+   Older engines in the private engine directory are identified through their
+   read-only status interface, including their release, installation and serving
+   port. They are reported as incompatible with the current connection protocol;
+   discovering their identity does not permit builds against them.
    Different providers can share an engine only when their cadgen releases match.
    Otherwise align their releases or explicitly configure separate ports in their
    MCP settings and project environments. A port change does not upgrade a project.

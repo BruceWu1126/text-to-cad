@@ -189,6 +189,9 @@ Laws 1 to 13 and 19 to 23 are the engine's; 14 to 18 hold for the whole package.
     *Pressure-test*: use a removed spelling; the error must read exactly as it would for a name
     that never existed.
 
+    Read-only diagnostics may identify an older engine through its status protocol.
+    This restores no authoring API and never admits builds against that engine.
+
     **Persisted-document exception.** Saved documents have a separate compatibility contract:
     opening, viewing, importing and exporting supported formats must not require their source or
     a rebuild just because cadgen was upgraded. The engine reads `xbf/8`, `xbf/9` and `xbf/10`; it converts
