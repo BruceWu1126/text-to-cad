@@ -184,10 +184,9 @@ opened file (`documents/<uuid>/document.json`: the script and function that buil
 the file's path; never geometry). In the cache folder (`CADGEN_CACHE_DIR`, else the platform's:
 `~/.cache/cadgen`) it keeps each model document's bytes as last built,
 `documents/<uuid>/document.xbf`, regenerable and wiped at no loss, so a restart reopens
-that server's documents without a build. The default 3245 retains these paths;
-other ports use `servers/<port>` below the state and cache roots for document records,
-Recents/thumbnails and document bytes. Preferences, token and installation records
-remain global. Under `pycache/` it keeps the bytecode the daemon and its
+saved documents without a build. Document records, Recents, thumbnails and cached
+document bytes are shared across ports. Preferences, token and installation records
+are shared too. Under `pycache/` it keeps the bytecode the daemon and its
 workers compile of the libraries they load (`PYTHONPYCACHEPREFIX`); it touches nothing else in
 that folder, which a 0.7 install's store may share. Tests point both folders at temporary ones
 (`scripts/test/unittest_files.py` does).

@@ -49,10 +49,8 @@ folder becomes the folder the home shows, replacing the last. Always use the pri
 including its token query; the browser exchanges the token for a same-site HTTP-only cookie.
 
 `cadgen stop` stops the selected engine, including its workers and
-MCP sessions. Its document registry, cached last-built documents, Recents and thumbnails
-belong to that port; other ports have independent copies, including after restarts.
-The default 3245 retains old storage paths; nondefault ports use `servers/<port>` under
-the common state/cache roots. Preferences and the user token remain global.
+MCP sessions. The document registry, cached last-built documents, Recents and thumbnails
+are shared across ports, as are preferences and the user token.
 Closing a page, a Vite process or a host's stdio shim does not stop it.
 Python source edits require restarting your own test engine. There is no viewer
 server process, source re-exec, detached launch log or per-port shutdown route.

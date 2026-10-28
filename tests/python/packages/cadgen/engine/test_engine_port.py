@@ -163,7 +163,7 @@ class EnginePortTest(unittest.TestCase):
             with socket.create_connection(('127.0.0.1', self.port), timeout=5):
                 pass
 
-    def test_shared_storage_keeps_each_ports_last_document_across_restarts_and_delete(self):
+    def test_ports_share_the_latest_saved_document_across_restarts_and_delete(self):
         import build123d as bd
         from cadgen.engine import api
 
@@ -180,7 +180,7 @@ class EnginePortTest(unittest.TestCase):
         self.stop()
         self.start()
         restored = api.Document(first.name, first.script, first.report, first.cwd)
-        self.assertAlmostEqual(restored.shape.volume, 1)
+        self.assertAlmostEqual(restored.shape.volume, 8)
         with mock.patch.dict(os.environ, {'CADGEN_PORT': str(second_port)}):
             try:
                 self.start()
@@ -193,9 +193,9 @@ class EnginePortTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {'CADGEN_PORT': str(second_port)}):
             try:
                 self.start()
-                self.assertIsNotNone(registry.current().get(second.id))
-                restored = api.Document(second.name, second.script, second.report, second.cwd)
-                self.assertAlmostEqual(restored.shape.volume, 8)
+                self.assertIsNone(registry.current().get(second.id))
+                self.assertNotIn(second.id, [row['id'] for row in client.request({'op': 'status'})['models']])
+                self.assertFalse(registry.current().cache.path(f'documents/{second.id}/document.xbf').exists())
             finally:
                 self.stop()
 

@@ -380,7 +380,7 @@ class HandleTest(unittest.TestCase):
         self.assertEqual([clip["name"] for clip in _glb_json(project / "crate.glb").get("animations") or []],
                          ["lift"], "the animations passed are baked into its GLB")
         self.assertTrue((project / "crate.step").is_file())
-        record = Registry.for_port(self.state, port=int(self.env["CADGEN_PORT"])).get(ident)
+        record = Registry(self.state).get(ident)
         self.assertEqual((record["kind"], record["entry"], record["program"]), ("shape", "crate", "hand.py"))
         self.assertEqual(set(record) - {"cache"}, {"schema", "id", "kind", "root", "home", "entry", "program",
                                                    "revision", "built", "created", "namespace", "name"}, "a model's shape, and the program that showed it")
@@ -401,7 +401,7 @@ class HandleTest(unittest.TestCase):
         self.assertEqual(self.cli("export", ident, str(project / "restarted.stl")).returncode, 0)
         # With its cache file gone, nothing builds it again, and the words say so.
         self.assertEqual(self.cli("stop").returncode, 0)
-        stored = Registry.for_port(self.state, self.cache, port=int(self.env["CADGEN_PORT"]))
+        stored = Registry(self.state, self.cache)
         shutil.rmtree(stored.cache.root / "documents" / ident)
         engine_daemon.bootstrap(self.env)
         refused = self.cli("export", ident, str(project / "gone.stl"))

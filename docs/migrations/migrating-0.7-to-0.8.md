@@ -634,12 +634,9 @@ with their own dependencies, and client, worker and engine cadgen releases must 
 exactly. Changing the project interpreter or its import environment starts a fresh
 worker; ordinary repeated runs keep its memo.
 
-Each port keeps independent saved documents, Recents and thumbnails. Port 3245
-retains the existing unscoped state/cache data; other ports keep theirs under
-`servers/<port>` in those roots. Switching ports does not copy the old library:
-explicitly run or open a model on the intended server. Restarting one restores
-only its own last-built document, even when another port built the same id.
-Preferences, installation records and the user's page token remain shared.
+Saved documents, cached bytes, Recents and thumbnails are shared across ports,
+as are preferences, installation records and the user's page token. Changing ports
+selects another live engine and its workers while keeping the same saved library.
 
 - Run `python src/assembly.py` from the project's environment. It executes normal
   Python control flow; importing or decorating a model never builds it.

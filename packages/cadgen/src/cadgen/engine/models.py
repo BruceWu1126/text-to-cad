@@ -238,36 +238,37 @@ class Models:
             return {}
         ident, source = report["id"], report["source"]
         script = Path(source["script"])
-        old = held.get(ident) or {}
-        root = str(script.parent)
-        # What a restart needs of it and no more: what it is (``id``, ``kind``, ``key``), where its
-        # code is (``root``, ``home``, ``entry``: the command that builds it again is ``python``
-        # of its home, always), the revision the cache and the delta compare, when it was built (the
-        # home's order) and when it was first built (``created``, the home's Created: kept from the
-        # record it had; a record from before the time was kept stays without one). The closure is
-        # its document's own (``previous``); which files it declared is no one's: they are exports.
-        found: dict[str, Any] = {
-            "id": ident, "kind": "model", "root": root, "home": registering.relative(script, root),
-            "entry": source["name"], "namespace": root, "name": source.get("explicit_name") or source["name"],
-            "revision": recorded, "fingerprint": source.get("fingerprint"), "module": source.get("module"),
-            "built": old["built"] if old.get("revision") == recorded and old.get("built") else time.time()}
-        if not old:
-            found["created"] = found["built"]
-        elif "created" in old:
-            found["created"] = old["created"]
-        if source.get("explicit_name") is not None:
-            found["line"] = source["line"]  # its claim of the name in its folder (``identity.claimed``)
-        if isinstance(source.get("declares"), list):
-            found["declares"] = source["declares"]  # the explicit names its script declared at this run
-        if facts is not None:
-            found["facts"] = facts
-        for key in ("opened", "pinned", "preview", "cache", "relocated"):  # the home's and the cache's, kept across builds
-            if key in old:
-                found[key] = old[key]
-        if not (report.get("cache") or {}).get("used"):
-            found.pop("relocated", None)  # a fresh document has paths at its new home
-        held.put(found)
-        return old
+        with held._lock(ident):
+            old = held.get(ident) or {}
+            root = str(script.parent)
+            # What a restart needs of it and no more: what it is (``id``, ``kind``, ``key``), where its
+            # code is (``root``, ``home``, ``entry``: the command that builds it again is ``python``
+            # of its home, always), the revision the cache and the delta compare, when it was built (the
+            # home's order) and when it was first built (``created``, the home's Created: kept from the
+            # record it had; a record from before the time was kept stays without one). The closure is
+            # its document's own (``previous``); which files it declared is no one's: they are exports.
+            found: dict[str, Any] = {
+                "id": ident, "kind": "model", "root": root, "home": registering.relative(script, root),
+                "entry": source["name"], "namespace": root, "name": source.get("explicit_name") or source["name"],
+                "revision": recorded, "fingerprint": source.get("fingerprint"), "module": source.get("module"),
+                "built": old["built"] if old.get("revision") == recorded and old.get("built") else time.time()}
+            if not old:
+                found["created"] = found["built"]
+            elif "created" in old:
+                found["created"] = old["created"]
+            if source.get("explicit_name") is not None:
+                found["line"] = source["line"]  # its claim of the name in its folder (``identity.claimed``)
+            if isinstance(source.get("declares"), list):
+                found["declares"] = source["declares"]  # the explicit names its script declared at this run
+            if facts is not None:
+                found["facts"] = facts
+            for key in ("opened", "pinned", "preview", "cache", "relocated"):  # the home's and the cache's, kept across builds
+                if key in old:
+                    found[key] = old[key]
+            if not (report.get("cache") or {}).get("used"):
+                found.pop("relocated", None)  # a fresh document has paths at its new home
+            held.put(found)
+            return old
 
     def hand_over(self, request: dict[str, Any]) -> dict[str, Any]:
         """A shape a program handed over (``api.hand_over``): its document's bytes read through the
@@ -321,23 +322,24 @@ class Models:
         held = self.registry()
         if held is not None:
             root = scope if os.path.isdir(scope) else str(Path(scope).parent)
-            previous = held.get(ident) or {}
-            found: dict[str, Any] = {
-                "id": ident, "kind": "shape", "root": root,
-                "home": registering.relative(scope, root), "entry": name, "namespace": root, "name": name,
-                "revision": recorded,
-                "built": previous["built"] if previous.get("revision") == recorded and previous.get("built")
-                else time.time()}
-            if not previous:  # first handed over now; an older record keeps what it has (``record``)
-                found["created"] = found["built"]
-            elif "created" in previous:
-                found["created"] = previous["created"]
-            if program:
-                found["program"] = registering.relative(program, root)  # what its words name (``shown``)
-            for key in ("opened", "pinned", "preview", "cache"):
-                if key in previous:
-                    found[key] = previous[key]
-            held.put(found)
+            with held._lock(ident):
+                previous = held.get(ident) or {}
+                found: dict[str, Any] = {
+                    "id": ident, "kind": "shape", "root": root,
+                    "home": registering.relative(scope, root), "entry": name, "namespace": root, "name": name,
+                    "revision": recorded,
+                    "built": previous["built"] if previous.get("revision") == recorded and previous.get("built")
+                    else time.time()}
+                if not previous:  # first handed over now; an older record keeps what it has (``record``)
+                    found["created"] = found["built"]
+                elif "created" in previous:
+                    found["created"] = previous["created"]
+                if program:
+                    found["program"] = registering.relative(program, root)  # what its words name (``shown``)
+                for key in ("opened", "pinned", "preview", "cache"):
+                    if key in previous:
+                        found[key] = previous[key]
+                held.put(found)
         server = self.register_page(ident)
         server.keep(ident, structure, shapes, version, data)
         self.cache.keep(ident, recorded, data)
@@ -671,14 +673,23 @@ class Models:
         if not is_id(ident):
             return
         with self.lock:
-            if ident in self.records:
+            before = self.records.get(ident)
+        if before is not None:
+            if self._working(before["worker"]):
                 return
+            server = self.daemon.server
+            if server is not None:
+                with server.load_lock:
+                    if ident in server.served and server.model_versions.get(ident) == before["version"]:
+                        return
         found = self.cache.found(ident)
         if found is None:
             return
         from cadgen.engine import registry as registering
 
         record, meta = found
+        if before is not None and before["revision"] == meta["revision"]:
+            return
         held = self.registry()
         program = registering.program(held, record)
         row = {"id": ident, "source": {"script": str(registering.home(held, record)), "name": record["entry"]},
@@ -686,7 +697,7 @@ class Models:
                "builtAt": record.get("built"), "version": secrets.token_hex(8),
                "files": [], "revision": meta["revision"]}
         with self.lock:
-            if ident in self.records:
+            if self.records.get(ident) is not before:
                 return
             self.records[ident] = row
         if self.daemon.server is not None:
@@ -718,7 +729,7 @@ class Models:
             record = self.records.get(ident)
         if record is None or not self.cache.current(ident, record.get("revision")):
             return None
-        data = self.cache.read(ident)
+        data = self.cache.read(ident, record.get("revision"))
         if data is not None:
             self.cache.touch(ident)
         return data

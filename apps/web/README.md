@@ -124,11 +124,9 @@ the engine's bind address. There are no page sessions: every launch reuses the
 page and its folder resolves its relative files. `--dist DIR` (or
 `CADGEN_VIEWER_DIST`) selects the built client.
 
-Each port has its own persistent document catalog, Recents and thumbnails. A restart
-restores that port's last-built documents, even if another port built the same model id.
-Port 3245 retains existing unscoped document storage; other ports use `servers/<port>`
-under the state and cache roots. Preferences, installation records and the page token
-remain shared across this user's servers.
+The persistent document catalog, cached bytes, Recents and thumbnails are shared across
+ports, as are preferences, installation records and the page token. Port selection
+still chooses the live engine and its workers.
 
 The JSON record includes `url`, `apiUrl`, `token`, `port`, `pid`, `start` (the folder the home
 shows), `documents` (`{id, file, url}` for each FILE) and `action` (`started` or `reused`,
@@ -422,7 +420,7 @@ screen says it was opened once the catalog has it (`{action: "open"}`: a file jo
 library, a model's record notes the time), and its picture
 once it has settled — the model framed whole from the default direction, whatever the
 camera (`{action: "thumbnail"}`). `cadgen.viewer.recents` keeps the library in the
-selected server's state root, shared with CAD app clients of that same port.
+shared state root, used by CAD app and browser clients across ports.
 
 ### Usage stats (telemetry)
 

@@ -167,7 +167,7 @@ class CacheTest(unittest.TestCase):
         from cadgen.engine import api
 
         with mock.patch.dict(os.environ, self.env, clear=True):
-            left = [row["id"] for row in Registry.for_port(self.state, port=int(self.env["CADGEN_PORT"])).list()]
+            left = [row["id"] for row in Registry(self.state).list()]
             if left:
                 api.delete(left)
 
@@ -179,11 +179,11 @@ class CacheTest(unittest.TestCase):
 
     @property
     def document_state(self) -> Path:
-        return Registry.for_port(self.state, port=int(self.env["CADGEN_PORT"])).state.root
+        return Registry(self.state).state.root
 
     @property
     def document_cache(self) -> Path:
-        return Registry.for_port(self.state, self.cache, port=int(self.env["CADGEN_PORT"])).cache.root
+        return Registry(self.state, self.cache).cache.root
 
     def cli(self, *args: str, env: dict | None = None):
         return engine_daemon.run([sys.executable, "-m", "cadgen.engine", *args], cwd=self.project, env=env or self.env)
@@ -204,7 +204,7 @@ class CacheTest(unittest.TestCase):
             return request(message, start=False) or {}
 
     def record(self, ident: str) -> dict:
-        return Registry.for_port(self.state, port=int(self.env["CADGEN_PORT"])).get(ident) or {}
+        return Registry(self.state).get(ident) or {}
 
     def file(self, ident: str) -> Path:
         return self.document_cache / "documents" / ident / "document.xbf"
@@ -357,6 +357,70 @@ class CacheTest(unittest.TestCase):
             self.assertIsNone(_say_not_held(ident))
         self.assertFalse(self.ran("cube"), "nothing reran it")
 
+    def test_running_engines_share_saved_models_and_a_stale_shutdown_preserves_the_newer_save(self) -> None:
+        self.use(self.folder / "state", self.folder / "cache", CADGEN_ENGINE_CACHE_IDLE="600")
+        first = self.env
+        second = self.environment(self.state, self.cache, self.addCleanup, PYTHONPYCACHEPREFIX=self.bytecode)
+        self.assertNotEqual(first["CADGEN_PORT"], second["CADGEN_PORT"])
+        self.env = second
+        self.assertEqual(self.ask({"op": "status"})["cache"]["documents"], 0)
+
+        self.env = first
+        ident = self.write("cube")
+        script = self.project / "cube.py"
+        self.run_script("cube")
+        self.assertEqual(self.cli("stop").returncode, 0)  # flush without an idle-window race
+        original_cache = self.cached(ident)
+        script.unlink()
+        (self.project / "cube.ran").unlink()
+
+        # The other engine was already running with an empty cache index. Its shared home
+        # discovers the saved model, and opening it needs neither its source nor a model worker.
+        self.env = second
+        listed = self.ask({"op": "status"})
+        self.assertIn(ident, [row["id"] for row in listed["models"]])
+        serving = listed["serving"]
+        status, home = get(f"{serving['url']}/__cad/recents", self.ask({"op": "http"})["token"])
+        self.assertEqual(status, 200, home)
+        self.assertIn(ident, [entry.get("id") for entry in home["recents"]])
+        opened = self.cli("inspect", ident, "--json")
+        self.assertEqual(opened.returncode, 0, opened.stderr)
+        self.assertEqual(json.loads(opened.stdout)["summary"]["bounds"]["size"], [3.0, 2.0, 1.0])
+        self.assertFalse(self.ran("cube"), "opening saved bytes did not run the missing script")
+        self.assertNotIn(str(script), [worker["script"] for worker in self.ask({"op": "status"})["workers"]])
+
+        # Keep an unsaved older build live in the first engine while the second saves a
+        # newer build of the same model. Live workers remain local to their engine.
+        self.env = first
+        engine_daemon.bootstrap(first)
+        self.write("cube", width=4.0)
+        self.run_script("cube")
+        stale_revision = self.record(ident)["revision"]
+        self.assertNotEqual(stale_revision, original_cache["revision"])
+        self.assertEqual(self.record(ident)["cache"], original_cache, "the long idle window leaves this build unsaved")
+        (first_worker,) = [worker for worker in self.ask({"op": "status"})["workers"] if worker["script"] == str(script)]
+        self.env = second
+        self.write("cube", width=5.0)
+        self.run_script("cube")
+        (second_worker,) = [worker for worker in self.ask({"op": "status"})["workers"] if worker["script"] == str(script)]
+        self.assertNotEqual(first_worker["pid"], second_worker["pid"])
+        revision = self.record(ident)["revision"]
+        self.assertNotEqual(revision, stale_revision)
+        self.cached(ident, revision)
+        newest_record, newest_bytes = self.record(ident), self.file(ident).read_bytes()
+
+        self.assertEqual(self.cli("stop", env=first).returncode, 0)
+        self.assertEqual(self.record(ident), newest_record, "the stale engine cannot replace the newer record")
+        self.assertEqual(self.file(ident).read_bytes(), newest_bytes, "the stale shutdown cannot replace the newer bytes")
+        script.unlink()
+        (self.project / "cube.ran").unlink()
+        saved = self.cli("inspect", str(self.file(ident)), "--json")
+        self.assertEqual(saved.returncode, 0, saved.stderr)
+        summary = json.loads(saved.stdout)["summary"]
+        self.assertEqual(summary["bounds"]["size"], [5.0, 2.0, 1.0])
+        self.assertAlmostEqual(summary["volume"], 10.0)
+        self.assertFalse(self.ran("cube"), "reading the newer saved bytes did not rebuild")
+
     def said(self, body: str = GOOD, width: float = 3.0) -> str:
         """``cube.py``, its model's body ``body``: the model's id."""
         (self.project / "cube.py").write_text(SAID.format(name="cube", width=width, body=body), encoding="utf-8")
@@ -449,7 +513,7 @@ class CacheTest(unittest.TestCase):
         self.cached(ident)
         self.assertEqual(self.cli("stop").returncode, 0)
         self.file(ident).write_bytes(data)
-        Registry.for_port(self.state, port=int(self.env["CADGEN_PORT"])).update(ident, lambda record: {
+        Registry(self.state).update(ident, lambda record: {
             **record, "cache": {**record["cache"], "bytes": len(data)},
         })
         (self.project / "cube.py").unlink()
@@ -544,7 +608,7 @@ class CacheTest(unittest.TestCase):
         missing = self.project / "missing-hand-over.py"
         ident = model_id(missing, "legacy-shape")
         self.assertEqual(self.cli("stop").returncode, 0)
-        held = Registry.for_port(self.state, self.cache, port=int(self.env["CADGEN_PORT"]))
+        held = Registry(self.state, self.cache)
         held.put({"id": ident, "kind": "shape", "root": str(self.project), "home": missing.name,
                   "program": missing.name, "entry": "legacy-shape", "namespace": str(self.project),
                   "name": "legacy-shape", "revision": "old-shape", "built": 1.0,

@@ -144,9 +144,7 @@ describes the mechanism they constrain and cites them by that README's numbers -
 ## Architecture
 
 One server at the selected port owns the worker pool, served documents and HTTP listener.
-Its document records, cached bytes, Recents and thumbnails persist independently of
-other ports. The same model id can hold different last-built documents on two ports;
-restarting either server restores only its own copy.
+Document records, cached bytes, Recents and thumbnails are shared across ports.
 Start it explicitly with `cadgen server`, or through the MCP bootstrap.
 `cadgen serve` and `cadgen viewer` attach to it and return a page URL.
 The background process is implemented in `daemon.py`; warm workers remain separate.
@@ -325,6 +323,7 @@ only, and a file's id is derived again from its path after a restart.
 | `door.py` | how a client reaches the daemon on POSIX: the door, a named pipe, and a pair of pipes per connection (**The door**) |
 | `progress.py` | where a build is: the engine's stages heard where they begin, each body a model's body runs by name, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
+| `file_lock.py` | the shared operating-system file lock used by document transactions and application state writers |
 | `cache.py` | the document cache: each model document's bytes in the cache folder (`documents/<id>/document.xbf`), saved when idle, at its drain and at shutdown, once per revision; the index a restart reads; kept until a person deletes it, with no cap (`Cache`); saved documents are converted only when read, with runtime-less models rebuilt only on explicit calls |
 | `registry.py` | the registry of documents in the user's state folder (`Registry`: `get`, `put`, `list`, `delete`), the user's page token (`token`, `put_token`), each engine's connection metadata (keyed by selected port), and the one owner of every write under that folder (`Folder`); where the folder is, the distribution's (`FACTORY`) |
 | `identity.py` | identity beyond the formula, on records and file names alone (no kernel, no XBF read): an explicit name's claim in its folder (`claimed`), a shape refused a declared model's id (`handed`), a moved script's record re-attached (`reattach`, `repoint`, `relocated`), and the startup identity migration (`migrate`) |
@@ -844,14 +843,12 @@ declares -- handed over from a REPL in a folder one of whose scripts gives a mod
 or from a script one of whose functions has its name -- naming that declaration (`identity.handed`):
 one id is one document.
 
-**The registry.** One record per document the selected engine built, and per CAD file
-its pages opened, at `documents/<id>/document.json` under that server's state root
-([registry.py](registry.py), `Registry.for_port`). Port 3245 retains the user's existing
-state root (`cadgen.viewer.recents.state_dir`); another port uses `servers/<port>`
-below it. Recents and `recents/thumbnails` use the same scoped root. The common
-preferences, installation registry, page token and engine connection records use
-`Registry.shared_state`, the original unscoped state root. A record points; a
-document's bytes are in that server's cache root (**The cache**).
+**The registry.** One record per built document and opened CAD file, at
+`documents/<id>/document.json` under the shared state root
+([registry.py](registry.py), `cadgen.viewer.recents.state_dir`). All ports use the same
+records, Recents and `recents/thumbnails`. Preferences, installation records, the page
+token and engine connection records use that root too. A record points; a document's
+bytes are in the shared cache root (**The cache**).
 Every record has one shape, `{schema, id, kind, root, home, entry, namespace, name, fingerprint?, module?, line?, declares?, relocated?, revision, built, created?, facts?,
 program?, cache?{revision, bytes}, opened?, pinned?, preview?}`, and holds what a restart needs
 and no more. `kind` says what it is: `model` (`home` and `entry`, its script and function; the
@@ -879,6 +876,9 @@ its Python module qualifier (`module`); an explicit declaration keeps its first 
 the name and a collision's words (`line`, dropped when its script's run gives the name up), and a
 model of the run's script the explicit names that script declared (`declares`). Recents passes
 `namespace` and `name` through (`CadRecent`): a named model's row shows its name.
+
+Updated engines serialize shared record/cache transactions with one persistent `documents.lock`;
+known-id reads check the current record without a catalog watcher.
 
 **Re-attachment.** A run's models with nothing to take up -- no document its worker built or took,
 and no cache file at the model's id (its script moved, or new), or a named model whose record points
@@ -926,16 +926,15 @@ first, then by last activity, the later of a row's `opened` (a page opened it) a
 file's time on disk, a model's run), each row carrying both; a model's script is never read for it.
 
 **The cache.** For every model and shape document -- never a file's, which is its own
-file -- the engine keeps `documents/<id>/document.xbf` in its own cache root
-([cache.py](cache.py)). Port 3245 uses the base cache folder; another port uses
-`servers/<port>` beneath it. The base is `cadgen.viewer.recents.cache_dir`:
+file -- the engine keeps `documents/<id>/document.xbf` in the shared cache root
+([cache.py](cache.py)), selected by `cadgen.viewer.recents.cache_dir`:
 `CADGEN_CACHE_DIR`, else `$XDG_CACHE_HOME/cadgen` or `%LOCALAPPDATA%\cadgen`, else
 `~/.cache/cadgen`, the folder 0.7's store used. Writes go through a `registry.Folder`
-with `replace_atomic`; records stay in the matching server-scoped state root. The bytes are the hold's (`document.to_bytes`: the document, its closure record and its
+with `replace_atomic`; records stay in the shared state root. The bytes are the hold's (`document.to_bytes`: the document, its closure record and its
 compiled animations), the engine's own file always: a declared `@xbf` or an exported xbf is the
 author's, never used as the cache nor pointed at by it. The folder is shared with any 0.7 install's
-store: document bytes are read, written, sized and removed only under the selected
-server's `documents/` (process bytecode remains under `pycache/` in the base cache), and lists, counts and removes nothing else there (`cadgen doctor
+store: document bytes are read, written, sized and removed only under `documents/`
+(process bytecode remains under `pycache/`), and lists, counts and removes nothing else there (`cadgen doctor
 --prune` removes 0.7's store once nothing has written it for seven days). It is written never on the run path:
 
 - after `CACHE_IDLE_SECONDS` (10 s) with no build and no read of the document: the daemon asks the

@@ -1,13 +1,11 @@
 """Recents: the engine's registry of documents, as every CAD view's home lists it.
 
-Every CAD view of the selected server writes here -- the MCP app's views and the CAD Viewer --
-and that server's home shows all of it (``GET /__cad/recents``, which the MCP app's views reach
-through its tunnel).
+Every CAD view writes here, across engine ports: the MCP app's views and the CAD Viewer.
+Each home lists the shared registry through ``GET /__cad/recents``.
 
-Recents is a view of the selected port's registry (``cadgen.engine.registry``):
-the default port uses ``<state>/documents/<id>/document.json``; other ports use
-``<state>/servers/<port>/documents/<id>/document.json``. In that scope,
-a CAD file opened on a page is a record of its own (``kind: "file"``: its path, when it was first
+Recents is a view of ``cadgen.engine.registry``:
+``<state>/documents/<id>/document.json``.
+A CAD file opened on a page is a record of its own (``kind: "file"``: its path, when it was first
 opened, ``created``, and last, ``opened``, whether it is pinned), and every model a script built is one already (``kind: "model"``, which the
 engine writes when it registers the build), as is every shape a program handed over (``kind:
 "shape"``). The home's picture of each is UI state on its record (``preview``), the PNG under
@@ -176,7 +174,7 @@ class RecentStore:
     def __init__(self, root: Path | None = None) -> None:
         from cadgen.engine.registry import Registry
 
-        self.registry = Registry.for_port(root or state_dir(), cache=cache_dir())
+        self.registry = Registry(root or state_dir(), cache=cache_dir())
         self.state = self.registry.state
         self.root = self.state.root / "recents"
         self.thumbnails = self.state.path(THUMBNAILS)

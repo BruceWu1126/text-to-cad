@@ -76,16 +76,13 @@ Laws 1 to 13 and 19 to 23 are the engine's; 14 to 18 hold for the whole package.
    documents it has built, been handed or opened, one record each that points at its script or
    file, the user's one page token, each engine's connection metadata (keyed by its selected port; this user's alone), and each registered installation's record
    (`installations/<version>.json`: its python, its console script, its environment).
-   Document records, Recents, thumbnails and document bytes belong to the selected
-   port: 3245 retains the existing state/cache roots; other ports use `servers/<port>`
-   below those roots. The same model id on different ports keeps independent last-built
-   states across restarts. Preferences, the page token and installation registry stay
-   shared. State stores neither geometry nor source. In the
-   platform's cache folder (`~/.cache/cadgen`, by 0.7's rule), under the selected
-   server's `documents/`, it keeps each model document's bytes as it last built them: its own file, never a
+   Document records, Recents, thumbnails and cached document bytes are shared across
+   ports, as are preferences, the page token and installation registry. State stores
+   neither geometry nor source. In the platform's cache folder (`~/.cache/cadgen`, by
+   0.7's rule), under `documents/`, it keeps each model document's last-built bytes: its own file, never a
    declared or exported xbf (the same bytes), kept until a person deletes it -- nothing evicts it
    -- and made again by a run of its script (a shape's by the program that handed it over), so a
-   restart opens that server's saved documents; and under `pycache/` the bytecode its own processes compile of the libraries they load
+   restart opens saved documents; and under `pycache/` the bytecode its own processes compile of the libraries they load
    (`PYTHONPYCACHEPREFIX`, with worker bytecode separated by its startup dependency snapshot), regenerable too, so nothing is written
    beside a library or a model. The code stays the only source of truth: a document is what its
    last run made, the engine never checks the code on disk against it, and nothing reruns -- when
@@ -248,8 +245,7 @@ Laws 1 to 13 and 19 to 23 are the engine's; 14 to 18 hold for the whole package.
     release mismatch fails, with no automatic start, local fallback, rollover or retirement
     of another engine. Model workers run in the calling project's interpreter,
     with that environment's dependencies and the same cadgen release as the engine.
-    Each port owns its persistent documents and Recents; restarting or deleting on one
-    port never adopts or removes another port's copy of the same id.
+    The persistent document library, cache, Recents and thumbnails are shared across ports.
     No decorator selects a port and no Python connection API selects an engine.
     A tab names a model's id, or a registered file's id; scripts are never documents.
     A page never replaces or re-executes the engine. Its page and document reads
@@ -460,8 +456,8 @@ and tests use that environment's actual `python`, never the proxy.
 Coming from 0.7: cadgen 0.7.x kept a cache store, which can hold gigabytes, at
 `~/.cache/cadgen` (macOS and Linux; `$XDG_CACHE_HOME/cadgen` when that is set),
 `%LOCALAPPDATA%\cadgen` (Windows) or the folder `CADGEN_CACHE_DIR` named: its `objects/` and
-`index/`. 0.8 keeps the default port's document cache in that folder's `documents/`,
-other ports' under `servers/<port>/documents/`, and the engine's bytecode under `pycache/`, and neither reads nor writes 0.7's store beside it, nor the state files only 0.7 writes
+`index/`. 0.8 keeps the shared document cache in that folder's `documents/`
+and the engine's bytecode under `pycache/`, and neither reads nor writes 0.7's store beside it, nor the state files only 0.7 writes
 (its sidebar views, its snapshot browser's lock, its viewer's log, its Recents log). Whether a 0.7
 is still installed cannot be told from here (0.7 never registered itself; it lives in uv's
 environments and the agent apps' plugin configs), so they retire themselves: `cadgen doctor` says

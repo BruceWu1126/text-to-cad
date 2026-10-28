@@ -148,9 +148,9 @@ def _pycache() -> str | None:
     from cadgen.engine import registry
 
     held = registry.current()
-    if held is None or held.shared_cache is None:
+    if held is None or held.cache is None:
         return None
-    root = Path(held.shared_cache.root) / PYCACHE
+    root = Path(held.cache.root) / PYCACHE
     folder = root / _tag()
     try:
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -1153,7 +1153,7 @@ def registered() -> str | None:
     held = registry.current()
     if held is None:
         return None
-    return _registered(str(held.shared_state.root), os.path.normcase(os.path.realpath(sys.prefix)), version())
+    return _registered(str(held.state.root), os.path.normcase(os.path.realpath(sys.prefix)), version())
 
 
 @functools.cache

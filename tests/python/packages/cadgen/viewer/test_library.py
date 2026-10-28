@@ -102,7 +102,7 @@ class LibraryTest(unittest.TestCase):
         script = self.tmp / "parts.py"
         script.write_text("", encoding="utf-8")
         ident = model_id(script, "cube")
-        Registry.for_port(self.tmp / "state").put({"id": ident, "kind": "model", "root": str(self.tmp),
+        Registry(self.tmp / "state").put({"id": ident, "kind": "model", "root": str(self.tmp),
                                           "home": "parts.py", "entry": "cube", "revision": "r1", "built": 1.0})
         status, body = self.request("GET", "/__cad/recents")
         [entry] = json.loads(body)["recents"]
@@ -118,7 +118,7 @@ class LibraryTest(unittest.TestCase):
         cached.write_bytes(b"its document")
         self.assertEqual(self.change("remove", ident)[0], 400, "a model is deleted, never removed: the word is Delete")
         self.assertEqual(self.change("delete", ident), (200, {"recents": []}))
-        self.assertIsNone(Registry.for_port(self.tmp / "state").get(ident))
+        self.assertIsNone(Registry(self.tmp / "state").get(ident))
         self.assertFalse(cached.parent.exists(), "its document in the engine's cache goes with its record")
         self.assertTrue(script.is_file(), "its script stays")
 

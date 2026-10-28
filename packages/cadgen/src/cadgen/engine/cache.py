@@ -135,10 +135,10 @@ class Cache:
             raise ValueError(f"{ident!r} is not a document id")
         return f"{DOCUMENTS}/{ident}/{FILE}"
 
-    def ensure_index(self) -> None:
-        """Index the cache files once (the module): a listing and a stat each, nothing read."""
+    def ensure_index(self, *, refresh: bool = False) -> None:
+        """Index saved files, refreshing only for an explicit listing/statistics request."""
         with self.lock:
-            if self.indexed:
+            if self.indexed and not refresh:
                 return
             self.indexed = True
         held = self.registry()
@@ -157,67 +157,65 @@ class Cache:
                 continue
             found[ident] = {"bytes": stat.st_size, "revision": None}
         with self.lock:
-            for ident, entry in found.items():
-                self.index.setdefault(ident, entry)
+            if refresh:
+                self.index = found
+            else:
+                for ident, entry in found.items():
+                    self.index.setdefault(ident, entry)
 
     def documents(self) -> list[str]:
-        """The ids of the documents with a cache file."""
-        self.ensure_index()
+        """The current saved ids, including documents another running engine just saved."""
+        self.ensure_index(refresh=True)
         with self.lock:
             return list(self.index)
 
     def found(self, ident: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
-        """Document ``ident``'s record and its ``cache`` field when its cache file is there and is the
-        one the record names (its size); None otherwise -- a missing file is forgotten."""
-        self.ensure_index()
-        with self.lock:
-            if ident not in self.index:
-                return None
+        """The current saved record/file pair, including documents another engine just saved."""
         held = self.registry()
-        record = held.get(ident) if held is not None else None
-        meta = (record or {}).get("cache")
-        if record is None or record.get("kind") not in ("model", "shape") or not isinstance(meta, dict) \
-                or not meta.get("revision"):
+        if held is None:
             return None
-        try:
-            size = held.cache.path(self.inside(ident)).stat().st_size
-        except OSError:
-            size = None
-        if size != meta.get("bytes"):
+        with held._lock(ident):
+            record = held.get(ident)
+            meta = (record or {}).get("cache")
+            if record is None or record.get("kind") not in ("model", "shape") or not isinstance(meta, dict) \
+                    or not meta.get("revision"):
+                return None
+            try:
+                size = held.cache.path(self.inside(ident)).stat().st_size
+            except OSError:
+                size = None
+            if size != meta.get("bytes"):
+                with self.lock:
+                    self.index.pop(ident, None)
+                return None
             with self.lock:
-                self.index.pop(ident, None)
-            return None
-        with self.lock:
-            entry = self.index.get(ident)
-            if entry is not None:
-                entry["revision"] = meta["revision"]
-        return record, meta
+                self.index[ident] = {"bytes": size, "revision": meta["revision"]}
+            return record, meta
 
     def current(self, ident: str, revision: str | None) -> bool:
-        """Whether the cache file of document ``ident`` is at ``revision``."""
+        """Whether the shared saved file is at ``revision``, checked against its current record."""
         if not revision:
             return False
-        self.ensure_index()
         with self.lock:
             if ident in self.refreshing:
                 return False
-            entry = self.index.get(ident)
-            known = None if entry is None else entry["revision"]
-        if entry is None:
-            return False
-        if known is None:
-            found = self.found(ident)
-            known = found[1]["revision"] if found is not None else None
-        return known == revision
+        found = self.found(ident)
+        return found is not None and found[1]["revision"] == revision
 
-    def read(self, ident: str) -> bytes | None:
-        """The bytes of document ``ident``'s cache file; None when it is gone."""
+    def read(self, ident: str, revision: str | None = None) -> bytes | None:
+        """Read the saved bytes under the record transaction, optionally at an expected revision."""
         held = self.registry()
-        data = held.cache.read(self.inside(ident)) if held is not None else None
-        if data is None:
-            with self.lock:
-                self.index.pop(ident, None)
-        return data
+        if held is None:
+            return None
+        with held._lock(ident):
+            found = self.found(ident)
+            if found is None or revision is not None and found[1]["revision"] != revision:
+                return None
+            data = held.cache.read(self.inside(ident))
+            if data is None:
+                with self.lock:
+                    self.index.pop(ident, None)
+            return data
 
 
     # --- when ----------------------------------------------------------------------------
@@ -315,19 +313,22 @@ class Cache:
     def _write(self, ident: str, revision: str, data: bytes) -> None:
         """The file and its record's ``cache`` field, when the record is still at ``revision``."""
         held = self.registry()
-        if held is None or self.current(ident, revision):
+        if held is None:
             return
-        record = held.get(ident)
-        if record is None or record.get("revision") != revision:
-            return  # a build since recorded a newer revision: its own save follows
-        meta = {"revision": revision, "bytes": len(data)}
-        held.cache.write(self.inside(ident), data)
-        held.update(ident, lambda found: {**found, "cache": meta}
-                    if found is not None and found.get("revision") == revision else None)
-        with self.lock:
-            self.index[ident] = {"bytes": len(data), "revision": revision}
-            self.refreshing.discard(ident)
-            self.written += 1
+        with held._lock(ident):
+            if self.current(ident, revision):
+                return
+            record = held.get(ident)
+            if record is None or record.get("revision") != revision:
+                return  # another engine or a newer build owns the shared saved revision
+            meta = {"revision": revision, "bytes": len(data)}
+            held.cache.write(self.inside(ident), data)
+            held.update(ident, lambda found: {**found, "cache": meta}
+                        if found is not None and found.get("revision") == revision else None)
+            with self.lock:
+                self.index[ident] = {"bytes": len(data), "revision": revision}
+                self.refreshing.discard(ident)
+                self.written += 1
 
     def refresh(self, ident: str) -> None:
         """A successful build found unreadable saved bytes: replace them on its next save,
@@ -379,7 +380,7 @@ class Cache:
                  "written": self.written, "failures": list(self.failures), "idleSeconds": self.idle}
         if held is None:
             return found
-        self.ensure_index()
+        self.ensure_index(refresh=True)
         with self.lock:
             return {**found, "enabled": True, "documents": len(self.index),
                     "bytes": sum(entry["bytes"] for entry in self.index.values())}

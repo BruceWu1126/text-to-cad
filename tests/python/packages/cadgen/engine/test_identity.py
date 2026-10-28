@@ -226,8 +226,7 @@ class ReattachmentDaemonTest(unittest.TestCase):
                     "CADGEN_PORT": str(engine_daemon.free_port()), "CADGEN_ENGINE_STANDBY": "0", "DO_NOT_TRACK": "1"}
         self.addCleanup(self.stop)
         engine_daemon.bootstrap(self.env)
-        self.registry = Registry.for_port(self.env["CADGEN_STATE_DIR"], self.env["CADGEN_CACHE_DIR"],
-                                          port=int(self.env["CADGEN_PORT"]))
+        self.registry = Registry(self.env["CADGEN_STATE_DIR"], self.env["CADGEN_CACHE_DIR"])
 
     def stop(self):
         engine_daemon.run([sys.executable, "-m", "cadgen.engine", "stop"], env=self.env)

@@ -3,8 +3,8 @@
 The page an agent host renders for CAD: the same `@text-to-cad/ui` FileViewer and
 renderers `apps/web` composes, behind a different host — an MCP Apps bridge
 instead of an HTTP origin. The engine selected by `CADGEN_PORT` (default 3245) serves
-its tools, page resource and HTTP routes. Its persistent document library, Recents and
-thumbnails belong to that port; another port's copy of the same model id stays independent.
+its tools, page resource and HTTP routes. The persistent document library, cached bytes,
+Recents and thumbnails are shared across ports.
 Preferences, installation records and the user's page token remain shared.
 `cadgen mcp` is the stateless stdio shim that agent hosts launch: it ensures that
 engine, then forwards JSON-RPC to `/mcp` using its installation token. Each shim

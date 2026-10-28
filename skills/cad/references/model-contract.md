@@ -306,10 +306,9 @@ imports, runs or builds a script: editing the script changes nothing until Pytho
 it again. A live document handle retains its original engine selection. Changing
 `CADGEN_PORT` or `CADGEN_ENGINE_DIR` makes its shape reads, exports and snapshots
 fail instead of redirecting them; restore the selection to use that handle again.
-A raw document id addresses the currently selected engine explicitly. Each port's
-saved documents, Recents and thumbnails stay independent, so the same id on another
-port may name a different last-built state. Restarting a server restores its own
-copy. Preferences and the user token remain shared.
+A raw document id addresses the currently selected engine explicitly. Saved documents,
+cached bytes, Recents and thumbnails are shared across ports, as are preferences and
+the user token. Live workers remain with their engine.
 
 - **Documents outlive their workers.** A document stays held after its script's worker
   retires (`cadgen status`: `live` with its worker, `held` without one, where `made_by`
@@ -327,12 +326,10 @@ copy. Preferences and the user token remain shared.
   script is gone is detached: listed, saying so, with no rebuild command. Nothing else is
   written beside your files: no record of a run.
 - **A restart reopens what was built.** The engine keeps each model document's bytes in
-  the selected server's cache root (`documents/` at default 3245;
-  `servers/<port>/documents/` at other ports), once it is idle, so after a
+  the shared cache folder's `documents/`, once it is idle, so after a
   restart its id answers every verb as last built (`cadgen status`: `held`, on `disk`),
-  provided its original native producer is compatible. An incompatible cache is
-  refused without deleting it; an old handed-over shape with no producer stamp
-  must be handed over again.
+  when its saved format is supported. An unsupported format or failed conversion
+  reports an error while preserving the saved bytes and document record.
   A document is what its last run made: the engine never checks the code on disk against
   it, no surface says the script changed, and nothing reruns. After an edit, run the script
   (`python /work/arm.py`) to update the document and its open pages.

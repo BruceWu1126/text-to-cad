@@ -1,7 +1,7 @@
 """The registry: one self-describing record per document the engine knows, in the user's state folder.
 
-``<state>/documents/<id>/document.json`` is the default port's document record. Other ports
-use ``<state>/servers/<port>/documents``; their cache has the same scope. Each record has one shape:
+``<state>/documents/<id>/document.json`` is a document's record, shared by every engine.
+Each record has one shape:
 ``{schema, id, kind, root, home, entry, namespace, name, fingerprint?, module?, line?, declares?, relocated?,
 revision, built, facts?, program?, cache?, opened?, pinned?, preview?}`` (identity's fields: ``identity``). ``kind`` is ``model``, a model built from a script (``home`` and ``entry``: the
 script and the function it points at; the command that builds it again is always ``python``
@@ -44,6 +44,7 @@ engine records nothing and caches nothing (``current`` is None).
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -53,10 +54,11 @@ import stat
 import subprocess
 import threading
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from cadgen.engine.atomic_replace import replace_atomic
 from cadgen.engine.ids import is_id
+from cadgen.engine.file_lock import exclusive
 
 __all__ = ["DOCUMENTS", "ENGINES", "ENGINE_FIELDS", "ENGINE_SCHEMA", "FACTORY", "Folder", "OBSERVERS", "RECORD", "Registry", "SCHEMA", "TOKEN", "command", "current",
            "detached", "home", "program", "relative"]
@@ -82,6 +84,7 @@ _TOKEN = re.compile(r"[A-Za-z0-9_-]{32,256}")
 
 _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_LOCK = threading.Lock()
+_HELD = threading.local()
 WINDOWS = os.name == "nt"
 
 
@@ -181,27 +184,8 @@ class Registry:
 
     def __init__(self, state: Folder | Path | str, cache: Folder | Path | str | None = None) -> None:
         self.state = state if isinstance(state, Folder) else Folder(state)
-        self.shared_state = self.state  # credentials and installation records are never port-scoped
         # Where the engine's cache keeps documents' bytes (``cache``), or None: nothing is cached.
         self.cache = cache if isinstance(cache, Folder) or cache is None else Folder(cache)
-        self.shared_cache = self.cache  # compiled Python caches stay outside document scopes
-
-    @classmethod
-    def for_port(cls, state: Folder | Path | str, cache: Folder | Path | str | None = None, *,
-                 port: int | None = None) -> "Registry":
-        """Production document storage for the selected port, preserving the default's old paths."""
-        from cadgen.engine.daemon import DEFAULT_PORT, selected_port
-
-        port = selected_port() if port is None else port
-        if not 1 <= port <= 65535:
-            raise ValueError("CADGEN_PORT must be between 1 and 65535")
-        held = cls(state, cache)
-        if port != DEFAULT_PORT:
-            scope = Path("servers") / str(port)
-            held.state = Folder(held.state.root / scope)
-            if held.cache is not None:
-                held.cache = Folder(held.cache.root / scope)
-        return held
 
     # --- records ----------------------------------------------------------------------------
 
@@ -273,7 +257,7 @@ class Registry:
         mode, its owner), or holds anything but a token's characters (it goes into a cookie and a
         URL) is refused (``ValueError``), naming the file and what is wrong with it: never taken for
         none, so never replaced, which would end every link shared before."""
-        path = self.shared_state.path(TOKEN)
+        path = self.state.path(TOKEN)
         try:
             data = path.read_bytes()
         except FileNotFoundError:
@@ -301,15 +285,15 @@ class Registry:
         """Make the user's page token ``token`` where there is none, this user's alone; False, and
         nothing written, when there is one (``Folder.create``): of two engines starting at once, one
         makes it and the other serves the one it reads."""
-        return self.shared_state.create(TOKEN, (token + "\n").encode("ascii"), mode=0o600)
+        return self.state.create(TOKEN, (token + "\n").encode("ascii"), mode=0o600)
 
     def put_token(self, token: str) -> None:
         """Replace the user's page token (``cadgen server --rotate-token``), this user's alone."""
-        self.shared_state.write(TOKEN, (token + "\n").encode("ascii"), mode=0o600)
+        self.state.write(TOKEN, (token + "\n").encode("ascii"), mode=0o600)
 
     def engine(self, installation: str) -> dict[str, Any]:
         """The installation's recorded port, or ``{}`` with none; never a server-selection input."""
-        data = self.shared_state.read(f"{ENGINES}/{installation}.json")
+        data = self.state.read(f"{ENGINES}/{installation}.json")
         try:
             record = json.loads(data) if data is not None else {}
         except ValueError:
@@ -327,15 +311,30 @@ class Registry:
             raise ValueError(f"{installation!r} is not an installation")
         kept = {key: record[key] for key in ENGINE_FIELDS if key != "schema" and record.get(key)}
         text = json.dumps({**kept, "schema": ENGINE_SCHEMA}, indent=1, sort_keys=True) + "\n"
-        self.shared_state.write(f"{ENGINES}/{installation}.json", text.encode("utf-8"), mode=0o600)
+        self.state.write(f"{ENGINES}/{installation}.json", text.encode("utf-8"), mode=0o600)
 
     def root(self, record: dict[str, Any]) -> Path:
         """The folder a record's paths are relative to: its ``root``."""
         return Path(record["root"])
 
-    def _lock(self, ident: str) -> threading.RLock:
+    @contextlib.contextmanager
+    def _lock(self, ident: str) -> Iterator[None]:
+        """One reentrant document transaction across threads and cooperating processes."""
+        key = os.path.normcase(str(self.state.root.resolve()))
         with _LOCKS_LOCK:
-            return _LOCKS.setdefault(f"{self.state.root}|{ident}", threading.RLock())
+            lock = _LOCKS.setdefault(key, threading.RLock())
+        with lock:
+            held = getattr(_HELD, "roots", set())
+            if key in held:
+                yield
+                return
+            self.state.root.mkdir(parents=True, exist_ok=True)
+            with exclusive(self.state.root / "documents.lock"):
+                _HELD.roots = held | {key}
+                try:
+                    yield
+                finally:
+                    _HELD.roots = held
 
 
 def _unreadable(path: Path, error: OSError) -> str:

@@ -36,7 +36,7 @@ def registry():
     from cadgen.engine.registry import Registry
     from cadgen.viewer.recents import cache_dir, state_dir
 
-    return Registry.for_port(state_dir(), cache=cache_dir())
+    return Registry(state_dir(), cache=cache_dir())
 
 
 def diagnostics_inventory():

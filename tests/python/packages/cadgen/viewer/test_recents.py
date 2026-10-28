@@ -23,7 +23,7 @@ class RecentStoreTest(unittest.TestCase):
         self.tmp = Path(os.path.realpath(tempfile.mkdtemp()))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
 
-    def test_ports_have_separate_recents_pins_and_thumbnails(self) -> None:
+    def test_ports_share_recents_pins_and_thumbnails(self) -> None:
         path = str(self.tmp / 'part.step')
         with mock.patch.dict(os.environ, {'CADGEN_PORT': '3246', 'CADGEN_CACHE_DIR': str(self.tmp / 'cache')}):
             first = RecentStore(self.tmp)
@@ -32,14 +32,13 @@ class RecentStoreTest(unittest.TestCase):
             image = first.thumbnail(path, b'\x89PNG first')
         with mock.patch.dict(os.environ, {'CADGEN_PORT': '3247', 'CADGEN_CACHE_DIR': str(self.tmp / 'cache')}):
             second = RecentStore(self.tmp)
-            self.assertEqual(second.list(), [])
-            self.assertIsNone(second.read_thumbnail(image))
+            self.assertEqual([entry.path for entry in second.list()], [path])
+            self.assertEqual(second.read_thumbnail(image), b'\x89PNG first')
             second.opened(path)
-            self.assertFalse(second.list()[0].pinned)
+            self.assertTrue(second.list()[0].pinned)
             second.remove(path)
-        self.assertTrue(first.list()[0].pinned)
-        self.assertEqual(first.read_thumbnail(image), b'\x89PNG first')
-        self.assertEqual(first.registry.shared_state.root, second.registry.shared_state.root)
+        self.assertEqual(first.list(), [])
+        self.assertEqual(first.registry.state.root, second.registry.state.root)
 
     def test_pins_lead_then_the_most_recent_and_a_removal_forgets(self) -> None:
         store = RecentStore(self.tmp)
@@ -56,8 +55,8 @@ class RecentStoreTest(unittest.TestCase):
         # A picture says when it was taken: a file changed since has an old one.
         self.assertIsNotNone(entries[1].pictured)
         self.assertIsNone(entries[0].public()["pictured"])
-        self.assertEqual(len(Registry.for_port(self.tmp).list()), 2, "one record per file; the removed one's folder went")
-        self.assertEqual(set(Registry.for_port(self.tmp).list()[0]) - {"pinned", "preview"},
+        self.assertEqual(len(Registry(self.tmp).list()), 2, "one record per file; the removed one's folder went")
+        self.assertEqual(set(Registry(self.tmp).list()[0]) - {"pinned", "preview"},
                          {"schema", "id", "kind", "root", "home", "opened", "created", "namespace", "name"}, "its path, and when it was opened, first and last")
 
     def test_a_picture_no_record_shows_goes_once_no_writer_can_still_name_it(self) -> None:
@@ -96,7 +95,7 @@ class RecentStoreTest(unittest.TestCase):
         script.write_text("", encoding="utf-8")
         os.utime(script, (1_800_000_000, 1_800_000_000))  # edited after the run: no row says so
         ident, built = model_id(script, "plate"), 1_700_000_000.0
-        Registry.for_port(self.tmp).put({"id": ident, "kind": "model", "root": str(self.tmp), "home": "parts.py",
+        Registry(self.tmp).put({"id": ident, "kind": "model", "root": str(self.tmp), "home": "parts.py",
                                 "entry": "plate", "revision": "r1", "built": built})
         store = RecentStore(self.tmp)
         timed = []
@@ -109,7 +108,7 @@ class RecentStoreTest(unittest.TestCase):
         [entry] = [recent.public() for recent in store.list()]
         self.assertEqual(entry["updated"], built)
         self.assertGreater(entry["opened"], built)
-        self.assertEqual(Registry.for_port(self.tmp).get(ident)["built"], built)
+        self.assertEqual(Registry(self.tmp).get(ident)["built"], built)
         self.assertIsNone(entry["created"], "an opening makes no creation time up")
 
     def test_a_file_is_created_at_its_first_open_and_a_model_at_its_first_run(self) -> None:
@@ -125,7 +124,7 @@ class RecentStoreTest(unittest.TestCase):
         self.assertGreater(again["opened"], first["opened"])
         # A model's run writes its record with the time it was first built (``Models.record``).
         ident = model_id(self.tmp / "parts.py", "plate")
-        Registry.for_port(self.tmp).put({"id": ident, "kind": "model", "root": str(self.tmp), "home": "parts.py",
+        Registry(self.tmp).put({"id": ident, "kind": "model", "root": str(self.tmp), "home": "parts.py",
                                 "entry": "plate", "revision": "r2", "built": 1_700_000_100.0, "created": 1_700_000_000.0})
         by_path = {recent.path: recent.public() for recent in store.list()}
         self.assertEqual((by_path[ident]["created"], by_path[ident]["updated"]), (1_700_000_000.0, 1_700_000_100.0))
@@ -146,7 +145,7 @@ class RecentStoreTest(unittest.TestCase):
         script = self.tmp / "parts.py"
         script.write_text("", encoding="utf-8")
         ident = model_id(script, "plate")
-        Registry.for_port(self.tmp).put({"id": ident, "kind": "model", "root": str(self.tmp),
+        Registry(self.tmp).put({"id": ident, "kind": "model", "root": str(self.tmp),
                                 "home": "parts.py", "entry": "plate", "revision": "r1",
                                 "built": time.time()})
         store = RecentStore(self.tmp)
@@ -157,13 +156,13 @@ class RecentStoreTest(unittest.TestCase):
         script.unlink()  # moved away: detached, still listed, and says so
         self.assertTrue(store.list()[0].public()["missing"])
         store.remove(ident)
-        self.assertEqual((store.list(), Registry.for_port(self.tmp).get(ident)), ([], None))
+        self.assertEqual((store.list(), Registry(self.tmp).get(ident)), ([], None))
 
     def test_a_shape_handed_over_from_a_folder_is_present_and_says_what_it_is(self) -> None:
         from cadgen.engine.ids import derived_id
 
         ident, built = derived_id(self.tmp, "plate"), time.time() - 60
-        Registry.for_port(self.tmp).put({"id": ident, "kind": "shape", "root": str(self.tmp), "home": ".",
+        Registry(self.tmp).put({"id": ident, "kind": "shape", "root": str(self.tmp), "home": ".",
                                 "entry": "plate", "revision": "h1", "built": built})
         [entry] = [recent.public() for recent in RecentStore(self.tmp).list()]
         self.assertEqual((entry["id"], entry["missing"], entry["rebuild"], entry["kind"], entry["updated"], entry["folder"]),
@@ -177,7 +176,7 @@ class RecentStoreTest(unittest.TestCase):
         writers = [subprocess.Popen([sys.executable, "-c", code, str(self.tmp), name], env={**os.environ}) for name in ("x", "y")]
         for writer in writers:
             self.assertEqual(writer.wait(120), 0)
-        documents = Registry.for_port(self.tmp).state.root / "documents"
+        documents = Registry(self.tmp).state.root / "documents"
         # A record of another schema, a torn one, and a folder that is no id: none of them is read.
         for name, text in (("00000000-0000-4000-8000-000000000001", json.dumps({"schema": 99})),
                            ("00000000-0000-4000-8000-000000000002", '{"schema": 1, "id": "00000000'), ("notes", "{}")):

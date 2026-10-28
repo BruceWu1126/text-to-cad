@@ -342,8 +342,7 @@ class Server:
             from cadgen.analytics import Recorder
             from cadgen.settings import FILE
 
-            # Preferences stay global even when the selected port has its own document library.
-            path = self._recents.registry.shared_state.root / FILE if self._recents is not None else None
+            path = self._recents.registry.state.root / FILE if self._recents is not None else None
             self._analytics = Recorder(path=path)
         return self._analytics
 
