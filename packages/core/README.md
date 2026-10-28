@@ -98,6 +98,11 @@ protocol relationship never imports Python or discovers an interpreter.
 - **Direct GLB stays native**: a direct GLB is its glTF scene graph (nodes, skins,
   morph targets, authored materials) with its translation, rotation, scale, skin and
   morph-weight tracks for a Three `AnimationMixer`, in the viewer and in a snapshot.
+  Explicit glTF Standard and Physical materials keep their PBR finish in regular
+  shaded views and Preview, with the fixed Inspect reflection fill; a primitive
+  without a material keeps the viewer's fallback. Parts and X-ray remain intentional
+  overrides. World attenuation distance is converted once from metres to CAD world
+  units on load; thickness stays mesh-local and the file bytes stay untouched.
   Its documents are mutable, uncached, and explicitly disposed by their one owner; a
   bounded load-time pose sample supplies a stable framing estimate rather than
   resizing the stage during playback.

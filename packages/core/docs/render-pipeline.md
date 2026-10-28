@@ -332,9 +332,13 @@ colour the structure gives them (`lib/xbf/xbfLook.js`); a part with none wears t
 surface (`PHOTOGRAPHIC_STUDIO_MATERIAL_SETTINGS`).
 A GLB, a mesh file and a robot reach the studio as the scene their viewer renderer
 builds. A GLB is its native glTF hierarchy, so its textures and PBR channels stay
-attached and Render wears them as authored. Preview converts a GLB's world-space
-attenuation distance from glTF metres into its millimetre scene coordinates on its
-private materials; the source and editor materials remain unchanged. The native XBF
+attached. Regular Solid and Shaded views retain explicit glTF Standard and Physical
+finishes, using the fixed neutral Inspect reflection fill; Parts, X-ray and Flat keep
+their intentional overrides, and a primitive with no material uses the viewer's fallback.
+Render also wears the file's materials as authored. The native GLB loader converts
+world-space attenuation distance from glTF metres into CAD millimetres once per shared
+material, before any view or sibling is made. Mesh-local thickness is not scaled, sibling
+creation does not repeat the conversion, and the file bytes are unchanged. The native XBF
 renderer currently uses the part's bounding-box extent for transmission thickness;
 this can overestimate attenuation and refraction for a hollow shell. Three's raster
 transmission buffer includes opaque geometry, not other transmissive layers, so a
