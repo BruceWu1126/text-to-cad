@@ -166,7 +166,11 @@ export function estimatePreviewResources({ admission, viewport, profile, texture
   // guide MRT has two RGBA8 attachments+4xMSAA+depth. OIDN keeps two full-image
   // outputs per network and current/previous RGBA16f publications. Presentation
   // reserves worker/main RGBA canvases and copies. Include all at full size.
-  const targets = { tracing: pixels * 52, guides: pixels * 56, denoising: pixels * 80, presentation: pixels * 16 };
+  // Motion's single-pass filter has one RGBA16f output (8 B/pixel). Keep a
+  // second output allowance for resize retirement, in addition to the existing
+  // neural publication/resize reserve; neither renderer borrows the other's slack.
+  const targets = { tracing: pixels * 52, guides: pixels * 56, denoising: pixels * 80,
+    motionFiltering: pixels * 16, presentation: pixels * 16 };
   const targetBytes = Object.values(targets).reduce((sum, value) => sum + value, 0);
   const atlasBytes = texturePlan.atlas.bytes;
   const guideInputs = estimatePreviewGuideInputs(admission, texturePlan);
@@ -213,7 +217,7 @@ export function planPreviewResources({ admission, viewport = { width: 1, height:
     // Packed GPU buffers and networks are forbidden until a second admission
     // measures the actual completed BVH. Try larger output tiles only at this
     // same settled detail before considering a lower resource profile.
-    const tileSizes = denoiseTileSize === null ? [128, 64] : [denoiseTileSize];
+    const tileSizes = denoiseTileSize === null ? [256, 128, 64] : [denoiseTileSize];
     for (const tileSize of tileSizes) {
       if (!PREVIEW_OIDN_PROFILE.tiles[tileSize]) return { ok: false, reason: 'Invalid Preview denoising tile size' };
       profile = { ...profile, denoiseTileSize: tileSize };
@@ -234,19 +238,11 @@ export function planPreviewResources({ admission, viewport = { width: 1, height:
   return last;
 }
 
-// Upstream advances five wavefront steps per low-resolution update. The worker
-// can finish a whole 12+5-bounce picture in four updates only when every motion
-// pixel has a ray slot. Keep this true even after latency reduces the slot pool.
+// Image dimensions are independent of the path pool. The upstream pixel queue
+// schedules overflow pixels over later bounded submissions at the same pose.
 export function withPreviewRayBudget(profile, requested = profile.frameBudget) {
-  const frameBudget = Math.max(1, Math.floor(requested));
-  let low = 0, high = 0.3;
-  for (let step = 0; step < 32; step++) {
-    const scale = (low + high) / 2;
-    if (Math.ceil(profile.width * scale) * Math.ceil(profile.height * scale) <= frameBudget) low = scale;
-    else high = scale;
-  }
-  return { ...profile, frameBudget, motionScale: low,
-    motionWidth: Math.max(1, Math.ceil(profile.width * low)), motionHeight: Math.max(1, Math.ceil(profile.height * low)) };
+  return { ...profile, frameBudget: Math.max(1, Math.floor(requested)),
+    motionScale: 1, motionWidth: profile.width, motionHeight: profile.height };
 }
 
 // A page-local Preview-only reservation ledger. It coordinates the estimates of

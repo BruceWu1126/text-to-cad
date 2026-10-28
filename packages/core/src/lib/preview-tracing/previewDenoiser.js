@@ -2,6 +2,17 @@ import { OIDNDenoiser } from 'three-gpu-pathtracer/webgpu';
 import { Color, ExternalTexture, NearestFilter, NoToneMapping, RenderTarget, UnsignedByteType } from 'three/webgpu';
 import { diffuseColor, mrt, normalView, vec4 } from 'three/tsl';
 import { createPreviewGuideScene } from './previewGuides.js';
+import { PreviewFastFilter } from './previewFastFilter.js';
+
+// Keep diagnostics detached from the library's mutable runtime record. Missing
+// or unavailable diagnostics must never invalidate an otherwise complete image.
+function executionSummary(unet) {
+  try {
+    const last = unet.getRuntimeInfo?.().lastExecution;
+    return last ? { tileCount: last.tileCount, durationMs: last.durationMs,
+      tileTimeMs: { ...last.tileTimeMs }, inputPixelCount: last.inputPixelCount } : null;
+  } catch { return null; }
+}
 
 // OIDN is driven explicitly: the upstream tracer's automatic integration only starts
 // after convergence, does not expose tile errors, and presents partially denoised tiles.
@@ -18,18 +29,20 @@ export class PreviewDenoiser extends OIDNDenoiser {
     this.guideMRT = mrt({ output: diffuseColor, normal: vec4(normalView.mul(0.5).add(0.5), 1) });
     this.guidesValid = false;
     this.guideScene = null;
-    this.timings = { guideMs: 0, networkMs: 0, rgbMs: 0, alphaNetworkMs: 0, alphaMs: 0 };
+    this.timings = { guideMs: 0, networkMs: 0, rgbMs: 0, alphaNetworkMs: 0, alphaMs: 0, rgbExecution: null, alphaExecution: null };
     this.alphaUNet = null;
+    this.fastFilter = null; this.fastComplete = false; this.filterMode = 'oidn';
   }
 
   // Tell WebGPUPathTracer there is no automatic pass to start. Its presentation
   // still reads texture, which remains null until our whole pass has finished.
   get complete() { return true; }
-  get texture() { return this._complete ? this._texture : this.previousTexture; }
+  get texture() { return this.fastComplete ? this.fastFilter?.texture : (this._complete ? this._texture : this.previousTexture); }
   update() { return this.texture; }
 
   async run(color, { scheduling = 'animation-frame' } = {}) {
     if (this._running) return;
+    this.fastComplete = false; this.filterMode = 'oidn';
     if (this._complete) {
       this.previousTexture?.dispose();
       this.previousRawTexture?.destroy();
@@ -41,6 +54,7 @@ export class PreviewDenoiser extends OIDNDenoiser {
     }
     this._running = true;
     this.status = 'preparing';
+    this.timings.rgbExecution = null; this.timings.alphaExecution = null;
     this.source = color;
     const id = ++this._requestId;
     try {
@@ -65,11 +79,33 @@ export class PreviewDenoiser extends OIDNDenoiser {
         done: output => {
           if (id !== this._requestId || !this._running) return;
           this.timings.rgbMs = performance.now() - rgbStart;
+          this.timings.rgbExecution = executionSummary(unet);
           this._abort = null;
           void this._runAlphaPass(output, aux, width, height, id, scheduling);
         },
         error: error => this._fail(error, id),
       });
+    } catch (error) { this._fail(error, id); }
+  }
+
+  // Motion uses a single bounded GPU pass over the same HDR trace and guides.
+  // Its result becomes visible only after the submission fence has completed.
+  async runFast(color) {
+    if (this._running) return;
+    this._running = true; this.fastComplete = false; this.filterMode = 'spatial';
+    this.status = 'filtering'; this.source = color;
+    const id = ++this._requestId, start = performance.now();
+    try {
+      const guideStart = performance.now();
+      const aux = this._renderAuxiliaryBuffers(color.width, color.height);
+      this.timings.guideMs = performance.now() - guideStart;
+      this.fastFilter ||= new PreviewFastFilter(this.renderer);
+      this.fastFilter.apply(color, aux);
+      await this.renderer.backend.device.queue.onSubmittedWorkDone();
+      if (id !== this._requestId || !this._running) return;
+      this.timings.filterMs = performance.now() - start;
+      this._running = false; this.fastComplete = true; this.status = 'complete';
+      this.onComplete();
     } catch (error) { this._fail(error, id); }
   }
 
@@ -104,6 +140,7 @@ export class PreviewDenoiser extends OIDNDenoiser {
           if (id !== this._requestId || !this._running) return;
           try {
             this.timings.alphaMs = performance.now() - passStart;
+            this.timings.alphaExecution = executionSummary(unet);
             this._copyOutputToTexture(rgb, alpha, aux, width, height);
             this._abort = null;
             this._running = false;
@@ -131,6 +168,7 @@ export class PreviewDenoiser extends OIDNDenoiser {
 
   reset() {
     ++this._requestId;
+    this.fastComplete = false;
     super.reset();
     this.guidesValid = false;
     this.previousTexture?.dispose();
@@ -187,6 +225,7 @@ export class PreviewDenoiser extends OIDNDenoiser {
     this._auxTarget = null;
     this.guideScene?.dispose();
     this.guideScene = null;
+    this.fastFilter?.dispose(); this.fastFilter = null;
     this.alphaUNet?.then(unet => unet.dispose()).catch(() => {});
     this.alphaUNet = null;
     for (const key in this._unets) {

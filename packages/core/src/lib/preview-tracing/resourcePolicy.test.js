@@ -25,7 +25,7 @@ test('the memory allowance bounds actual installed OIDN allocations for the bund
   const bytes = await readFile(new URL('./weights/rt_hdr_calb_cnrm.tza', import.meta.url));
   const tensors = parseTZA(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
   const model = validateUNetModel(tensors, detectUNetModelSpec(tensors));
-  for (const shaderF16 of [false, true]) for (const [width, height, size] of [[256, 256, 64], [320, 320, 128], [128, 112, 64], [16, 16, 64]]) {
+  for (const shaderF16 of [false, true]) for (const [width, height, size] of [[256, 256, 64], [320, 320, 128], [1024, 1024, 256], [128, 112, 64], [16, 16, 64]]) {
     const device = new RecordingDevice({ features: shaderF16 ? ['shader-f16'] : [], adapterInfo: {}, limits: {
       ...deviceLimits, maxComputeWorkgroupStorageSize: 32768, maxComputeInvocationsPerWorkgroup: 256,
       maxComputeWorkgroupSizeX: 256, maxComputeWorkgroupSizeY: 256, maxComputeWorkgroupsPerDimension: 65535 } });
@@ -185,15 +185,23 @@ test('staged admission permits bounded BVH construction, then checks actual rend
 
 test('larger denoising tiles require room at the same settled detail and stay fixed on session replans', () => {
   const { admission, geometry, material } = model();
-  const full = planPreviewResources({ admission, viewport, deviceLimits });
-  assert.equal(full.profile.denoiseTileSize, 128);
-  const small = planPreviewResources({ admission, viewport, deviceLimits, denoiseTileSize: 64 });
-  const constrained = planPreviewResources({ admission, viewport, deviceLimits, budgetBytes: small.memory.peakBytes + 1024 });
-  assert.equal(constrained.profile.denoiseTileSize, 64);
-  assert.deepEqual([constrained.profile.width, constrained.profile.height, constrained.profile.samples],
-    [full.profile.width, full.profile.height, full.profile.samples]);
-  const fixed = planPreviewResources({ admission, viewport, deviceLimits, denoiseTileSize: 64, performance: { mode: 'manual', value: 0 } });
-  assert.equal(fixed.profile.denoiseTileSize, 64);
+  const limits = { ...deviceLimits, shaderF16: true };
+  const full = planPreviewResources({ admission, viewport, deviceLimits: limits });
+  assert.equal(full.profile.denoiseTileSize, 256);
+  for (const size of [128, 64]) {
+    const fixed = planPreviewResources({ admission, viewport, deviceLimits: limits, denoiseTileSize: size });
+    const constrained = planPreviewResources({ admission, viewport, deviceLimits: limits, budgetBytes: fixed.memory.peakBytes + 1024 });
+    assert.equal(constrained.profile.denoiseTileSize, size);
+    assert.deepEqual([constrained.profile.width, constrained.profile.height, constrained.profile.samples],
+      [full.profile.width, full.profile.height, full.profile.samples]);
+  }
+  const limitedBinding = planPreviewResources({ admission, viewport,
+    deviceLimits: { ...limits, maxStorageBufferBindingSize: 20 * 1024 ** 2 } });
+  assert.equal(limitedBinding.profile.denoiseTileSize, 128, 'the larger tile cannot exceed an individual device binding');
+  assert.deepEqual([limitedBinding.profile.width, limitedBinding.profile.height], [full.profile.width, full.profile.height]);
+  const fixedSession = planPreviewResources({ admission, viewport, deviceLimits: limits, denoiseTileSize: 128,
+    inferenceBounds: full.memory.inference, performance: { mode: 'manual', value: 0 } });
+  assert.equal(fixedSession.profile.denoiseTileSize, 128);
   geometry.dispose(); material.dispose();
 });
 
@@ -204,7 +212,7 @@ test('adopted worker arrays remove one private copy while retaining the editor s
   const worker = planPreviewResources({ admission, viewport, deviceLimits, ownedGeometry: true });
   assert.equal(ordinary.memory.cpuBytes - worker.memory.cpuBytes, admission.cloneBytes);
   assert.equal(ordinary.memory.sourceReserveBytes, worker.memory.sourceReserveBytes);
-  const fp16 = planPreviewResources({ admission, viewport, deviceLimits: { ...deviceLimits, shaderF16: true }, ownedGeometry: true });
+  const fp16 = planPreviewResources({ admission, viewport, deviceLimits: { ...deviceLimits, shaderF16: true }, ownedGeometry: true, denoiseTileSize: worker.profile.denoiseTileSize });
   assert.equal(fp16.memory.inference.precision, 'fp16');
   assert.ok(fp16.memory.inferenceBytes < worker.memory.inferenceBytes);
   geometry.dispose(); material.dispose();
@@ -229,5 +237,23 @@ test('a viewport resize budgets retained network shapes and targets alongside th
   const denied = planPreviewResources({ ...nextOptions, inferenceBounds: first.memory.inference,
     budgetBytes: Math.max(first.memory.peakBytes, unretained.memory.peakBytes) });
   assert.equal(denied.ok, false);
+  geometry.dispose(); material.dispose();
+});
+
+
+test('motion filtering reserves its own RGBA16f output and old/new resize overlap alongside OIDN', () => {
+  const { admission, geometry, material } = model();
+  const first = planPreviewResources({ admission, viewport, deviceLimits });
+  const pixels = first.profile.width * first.profile.height;
+  assert.equal(first.memory.targets.denoising, pixels * 80, 'neural headroom is not reclaimed for motion');
+  assert.equal(first.memory.targets.motionFiltering, pixels * 2 * 8);
+  const resized = planPreviewResources({ admission, viewport: { width: 800, height: 600 }, deviceLimits,
+    denoiseTileSize: first.profile.denoiseTileSize, performance: { mode: 'manual', value: 0 }, inferenceBounds: first.memory.inference });
+  assert.equal(resized.ok, true);
+  const replacementPixels = resized.profile.width * resized.profile.height;
+  assert.ok(replacementPixels < pixels);
+  assert.equal(resized.memory.targets.motionFiltering, pixels * 2 * 8, 'the previous larger filter stays reserved');
+  assert.ok(resized.memory.targets.motionFiltering >= (pixels + replacementPixels) * 8);
+  assert.ok(first.memory.gpuBytes >= Object.values(first.memory.targets).reduce((sum, bytes) => sum + bytes, 0));
   geometry.dispose(); material.dispose();
 });

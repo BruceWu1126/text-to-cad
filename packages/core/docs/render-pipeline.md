@@ -194,9 +194,11 @@ path tracer in a dedicated worker. The worker owns scene reconstruction, BVHs, p
 tracing and denoising; the page owns input, the displayed image and Exit. Source geometry
 copies yield in bounded chunks before transfer and never detach the editor's buffers.
 The view stays covered while the first usable traced image prepares. Motion
-presents bounded low-resolution traced frames with the same light transport and bounce
-limits. Each latched view receives guided colour and coverage denoising before presentation;
-new input is picked up after that pass. A still view then refines to its denoised sample budget. Camera, pose, material,
+traces each latched view at the admitted image resolution with the same light transport and
+bounce limits. It waits for every pixel to complete two samples, then applies a small
+edge-aware colour and coverage filter before presentation;
+new input is picked up after that pass. On release, the latest camera gets a complete
+small-sample filtered view before it refines with OIDN to the settled sample budget. Camera, pose, material,
 lighting and viewport changes invalidate accumulation. An unsupported scene or device
 shows an error with retry and exit; a late preparation cannot attach to a closed view.
 Preview ignores subpixel camera drift against the last sent view, so idle control updates
@@ -230,13 +232,13 @@ the floor's radial fade is represented as an alpha map. Screenshot capture compo
 Preview's **Auto** quality aims for a settled image of up to one million pixels and 128
 samples when its memory budget permits. Manual quality requests a resolution and refinement
 budget through the 0–100 slider, up to 256 samples. Memory admission may reduce that request.
-Completed GPU-work timings adjust the ray budget and moving image size, with a quarter-scale
-motion floor within the admitted budget. Slower devices accept a lower cadence at that floor.
+Completed GPU-work timings adjust the ray budget, not the image dimensions. A latched motion
+view spans as many bounded batches as it needs; slower devices present fewer views per second.
 The settled target
 stays fixed while it refines, so adaptation cannot keep restarting convergence. Quality never
 changes the light sources, authored material parameters or the 12 surface/5 transparent
-bounce limits. A moving image has no more pixels than its ray slots, so its bounded wavefront
-steps cover the whole picture before presentation.
+bounce limits. The tracer queues pixels beyond its ray pool for later batches and verifies full
+pixel coverage before presenting a moving image.
 
 `previewDenoiser.js` runs
 Open Image Denoise on linear HDR color and coverage in sequential passes with clean albedo and

@@ -12,9 +12,8 @@ import { createPreviewQualityController } from './adaptiveQuality.js';
 import { readPreviewSamples } from './sampleReadback.js';
 
 const FRAME_PATH_BUDGET = 250000;
-// Upstream low-res mode advances five wavefront steps per update. Four bounded
-// updates let paths traverse the full 12 surface plus 5 transparent bounces.
-const MOTION_UPDATES = 4;
+// Denoise only after every pixel has completed this many paths at the latched pose.
+const MOTION_SAMPLES = 2;
 const RAY_STATE_BYTES = 224;
 const PREVIEW_SAMPLES = 128;
 const MAX_BOUNCES = 12, MAX_TRANSPARENT_BOUNCES = 5;
@@ -29,16 +28,18 @@ export function createPreviewWorkerRenderer(runtime, { requestRender = () => {},
     throw new RangeError('rawReferenceSamples must be an integer between 1 and 1024');
   }
   const rawReference = rawReferenceSamples !== null;
+  const motionSamples = diagnostic?.motionSamples ?? MOTION_SAMPLES;
+  if (!Number.isInteger(motionSamples) || motionSamples < 1 || motionSamples > 32) throw new RangeError('motionSamples must be an integer between 1 and 32');
   let state = 'idle', reason = null, generation = 0, cameraEpoch = 0, abort = null, tracer = null;
   let gpu = null, scene = null, camera = null, canvas = null, background = null, presented = null, frames = 0, visible = false, renderWidth = 0, renderHeight = 0;
   let started = false, disposed = false, cameraDirty = false, transformsDirty = false, measuring = null, sample = 0, frameBudget = FRAME_PATH_BUDGET;
-  let inFlight = null, denoiser = null, denoisedSamples = 0, denoisingSamples = 0, budgetExhausted = false, motionRemaining = 0, motionActive = false, presentedFrames = 0, shownSamples = 0;
-  let motionReady = false, motionDenoising = false, motionQuad = null;
+  let inFlight = null, denoiser = null, denoisedSamples = 0, denoisingSamples = 0, budgetExhausted = false, motionActive = false, presentedFrames = 0, shownSamples = 0;
+  let motionDenoising = false, motionQuad = null, nextFrameBudget = null, motionSeen = false, quickStill = false, presentedCamera = null;
   let profile = null, adaptive = null, sceneAdmission = null, sceneLimits = null, sceneAllocation = null, sessionTileSize = null;
   const cache = createPreviewGeometryCache();
   let maxSamples = rawReferenceSamples ?? PREVIEW_SAMPLES;
   // The GPU canvas can be rewritten while tracing. Hold a completed traced frame
-  // on a separate canvas until its next complete low-resolution update is ready.
+  // on a separate canvas until its next complete traced view is ready.
   const show = (newFrame = true) => {
     if (presented.width !== canvas.width || presented.height !== canvas.height) { presented.width = canvas.width; presented.height = canvas.height; }
     const context = presented.getContext('2d');
@@ -46,17 +47,21 @@ export function createPreviewWorkerRenderer(runtime, { requestRender = () => {},
     context.clearRect(0, 0, presented.width, presented.height);
     context.drawImage(canvas, 0, 0);
     visible = true;
-    if (newFrame) { presentedFrames++; onPresent(presented, background); }
+    if (newFrame) {
+      presentedCamera = { position: camera.position.toArray(), quaternion: camera.quaternion.toArray(),
+        projection: camera.projectionMatrix.toArray(), width: canvas.width, height: canvas.height };
+      presentedFrames++; onPresent(presented, background);
+    }
   };
   const release = () => {
     visible = false; inFlight = null;
     tracer?.dispose(); tracer = null; denoiser = null; denoisedSamples = 0; denoisingSamples = 0;
-    motionQuad?.material.dispose(); motionQuad?.dispose(); motionQuad = null; motionReady = false; motionDenoising = false;
+    motionQuad?.material.dispose(); motionQuad?.dispose(); motionQuad = null; motionDenoising = false;
     disposePreviewScene(scene); scene = null;
     gpu?.dispose(); gpu = null;
     canvas = null; presented = null; background = null;
-    motionRemaining = 0; motionActive = false;
-    camera = null;
+    motionActive = false; nextFrameBudget = null; motionSeen = false; quickStill = false;
+    camera = null; presentedCamera = null;
     frames = 0; sample = 0; budgetExhausted = false;
   };
   // OIDN aborts between tiles. Wait for its already-submitted tile before the
@@ -78,19 +83,24 @@ export function createPreviewWorkerRenderer(runtime, { requestRender = () => {},
     });
   };
   const invalidate = ({ sceneChanged = false, transformsChanged = false } = {}) => {
-    cameraEpoch++; measuring = null;
+    // Keep measurements and inference for the current latched pose alive while
+    // newer camera and transform inputs coalesce for the next picture.
+    const latched = motionActive && runtime.moving && !sceneChanged && !isHidden();
+    if (!runtime.moving && motionSeen && !sceneChanged && !isHidden()) quickStill = true;
+    if (sceneChanged || isHidden()) { quickStill = false; motionSeen = false; }
+    if (!latched) { cameraEpoch++; measuring = null; }
     const wasDenoising = denoiser?.running;
     // Keep an in-progress interactive picture latched despite newer input.
-    if ((!motionReady && !motionDenoising) || sceneChanged || isHidden()) {
+    if (!latched) {
       denoiser?.reset(); denoisedSamples = 0; denoisingSamples = 0;
-      motionDenoising = false; motionReady = false;
+      motionDenoising = false; motionActive = false;
       if (wasDenoising) fenceDenoise();
     }
     if (sceneChanged) {
       generation++;
       // Abort also rejects an in-flight worker task, so its private geometry is released.
       abort?.abort(); abort = null;
-      motionRemaining = 0; motionActive = false; transformsDirty = false; started = false; state = 'idle'; reason = null; frames = 0; sample = 0; measuring = null; budgetExhausted = false;
+      motionActive = false; transformsDirty = false; started = false; state = 'idle'; reason = null; frames = 0; sample = 0; measuring = null; budgetExhausted = false;
     } else {
       cameraDirty = true; transformsDirty ||= transformsChanged;
     }
@@ -165,7 +175,7 @@ export function createPreviewWorkerRenderer(runtime, { requestRender = () => {},
         tracer = new WebGPUPathTracer(localGpu);
         denoiser = new PreviewDenoiser({ initUNetFromURL, auxWeightsUrl: OIDN_WEIGHTS_URL,
           maxTileSize: sessionTileSize, dynamicTile: false }, {
-          onComplete: () => { denoisedSamples = denoisingSamples; onStage('denoise'); requestRender(); },
+          onComplete: () => { denoisedSamples = denoisingSamples; onStage(denoiser.filterMode === 'spatial' ? 'filter' : 'denoise'); requestRender(); },
           onError: error => fail(error, generation),
         });
         tracer.setDenoiser(denoiser);
@@ -180,7 +190,7 @@ export function createPreviewWorkerRenderer(runtime, { requestRender = () => {},
       const limits = localGpu.backend.device.limits;
       const perBinding = Math.min(limits.maxStorageBufferBindingSize, limits.maxBufferSize);
       frameBudget = Math.max(1, Math.min(profile.frameBudget, Math.floor(perBinding / RAY_STATE_BYTES)));
-      tracer.frameBudget = frameBudget;
+      nextFrameBudget = null; tracer.frameBudget = frameBudget;
       tracer.dynamicLowRes = false;
       tracer.renderDelay = 0;
       tracer.minSamples = 0;
@@ -210,7 +220,7 @@ export function createPreviewWorkerRenderer(runtime, { requestRender = () => {},
     if (desiredSamples !== maxSamples) {
       const wasDenoising = denoiser?.running;
       maxSamples = desiredSamples; tracer.maxSamples = maxSamples; denoisedSamples = 0; denoisingSamples = 0; budgetExhausted = false;
-      if (motionReady || motionDenoising) { motionReady = false; motionDenoising = false; cameraDirty = true; }
+      if (motionActive) { motionDenoising = false; motionActive = false; cameraDirty = true; }
       if (wasDenoising) fenceDenoise();
     }
     // Do not queue more than one GPU batch; camera changes can then take effect
@@ -226,17 +236,25 @@ export function createPreviewWorkerRenderer(runtime, { requestRender = () => {},
         const previousTarget = gpu.getRenderTarget(), previousAutoClear = gpu.autoClear;
         try { gpu.setRenderTarget(null); gpu.autoClear = true; motionQuad.render(gpu); }
         finally { gpu.autoClear = previousAutoClear; gpu.setRenderTarget(previousTarget); }
-        show(); shownSamples = 0; motionDenoising = false; denoiser.reset();
+        show(); shownSamples = denoisedSamples; motionDenoising = false; motionActive = false;
+        // A completed moving picture is not the end of the gesture: a new
+        // final camera can arrive before the next pose is latched.
+        if (quickStill || (!runtime.moving && !cameraDirty && !transformsDirty)) motionSeen = false;
+        quickStill = false; denoiser.reset();
+        requestRender(); return { refining: false, visible };
       }
-      if (motionReady) {
-        motionReady = false; motionDenoising = true;
-        void denoiser.run(tracer.target, { scheduling: 'event-loop' }); onStage('denoise-start');
-        return { refining: false, visible };
-      }
+      // A small-sample final pose uses the same bounded filter before the
+      // accumulated paths continue toward the settled OIDN target.
+      const quickTarget = Math.min(motionSamples, profile.firstDenoiseSamples);
       const wantsMotion = moving || !still;
-      // Finish the current latched motion picture before sampling a newer pose;
-      // otherwise a continuous stream of pointer changes would reset every path.
-      if (motionRemaining === 0 && transformsDirty) {
+      // A latched motion view is allowed to finish even when newer poses arrive.
+      // Once published, the latest pose starts a fresh accumulation. This avoids
+      // starving the image during continuous input without mixing poses.
+      const beginMotion = wantsMotion && !motionActive && (cameraDirty || transformsDirty || !visible);
+      if (!motionActive && nextFrameBudget !== null) { frameBudget = nextFrameBudget; tracer.frameBudget = frameBudget; nextFrameBudget = null; }
+      const targetSamples = beginMotion || quickStill ? quickTarget : maxSamples;
+      if (!motionActive && tracer.maxSamples !== targetSamples) tracer.maxSamples = targetSamples;
+      if (!motionActive && (beginMotion || !wantsMotion) && transformsDirty) {
         transformsDirty = false;
         if (!scene || !syncPreviewSceneTransforms(scene, runtime.modelGroup, runtime.photographicStudio?.ground)) {
           invalidate({ sceneChanged: true });
@@ -244,56 +262,18 @@ export function createPreviewWorkerRenderer(runtime, { requestRender = () => {},
           return { refining: false, visible: false };
         }
         tracer.updateTransforms();
-        // Guide meshes are ordinary private copies, so rebuild them over the new matrices.
         denoiser.setScene(scene, camera);
       }
-      const rasterCanvas = runtime.renderer.domElement;
-      const width = Math.max(1, rasterCanvas.width || rasterCanvas.clientWidth);
-      const height = Math.max(1, rasterCanvas.height || rasterCanvas.clientHeight);
       const w = profile.width, h = profile.height;
       renderWidth = w; renderHeight = h;
-      if (canvas.width !== w || canvas.height !== h) { gpu.setSize(w, h, false); cameraDirty = true; motionRemaining = 0; }
-      if (motionRemaining === 0 && wantsMotion && (cameraDirty || !motionActive)) {
-        tracer.dynamicLowRes = true; tracer.lowResScale = adaptive.profile.motionScale; tracer.renderDelay = 60000000; tracer.fadeDuration = 0;
-        motionActive = true; motionRemaining = MOTION_UPDATES;
-      }
-      if (motionRemaining === 0 && !wantsMotion && motionActive) {
-        tracer.dynamicLowRes = false; tracer.renderDelay = 0; motionActive = false; cameraDirty = true;
-      }
-      if (cameraDirty && motionRemaining !== MOTION_UPDATES && motionRemaining > 0) {
-        // A newer camera waits until the latched low-resolution image completes.
-      } else if (cameraDirty) {
+      if (canvas.width !== w || canvas.height !== h) { gpu.setSize(w, h, false); cameraDirty = true; }
+      if (!motionActive && (beginMotion || !wantsMotion) && cameraDirty) {
         camera.copy(sourceCamera, false); camera.coordinateSystem = THREE.WebGPUCoordinateSystem;
         tracer.updateCamera(); cameraDirty = false; frames = 0; sample = 0; budgetExhausted = false; denoisedSamples = 0; denoisingSamples = 0; cameraEpoch++; measuring = null;
         drawPreviewBackdrop(background, sourceCamera, runtime.photographicStudio, w, h, runtime.renderer.getClearAlpha());
       }
-      if (motionRemaining > 0) {
-        // Submit one latched picture as one bounded GPU batch. Low-resolution
-        // updates each advance five wavefront steps, and are not tied to vsync.
-        while (motionRemaining > 0) { tracer.renderSample(); motionRemaining--; }
-        motionReady = true;
-        const batchStart = performance.now();
-        const fence = gpu.backend.device.queue.onSubmittedWorkDone();
-        inFlight = fence;
-        const token = generation;
-        fence.then(() => {
-          if (inFlight !== fence) return;
-          inFlight = null;
-          onStage('trace');
-          // This motion fence covers four wavefront updates, not one.
-          if (adaptive && token === generation) { const next = adaptive.observeBatch((performance.now() - batchStart) / MOTION_UPDATES); frameBudget = next.frameBudget; tracer.frameBudget = frameBudget; }
-          if (disposed || state !== 'ready') return;
-          // Start the latched guide/network work as soon as the trace batch
-          // finishes; waiting for another animation frame would add a whole
-          // display interval to every interactive picture.
-          if (token === generation && motionReady && !isHidden()) {
-            motionReady = false; motionDenoising = true;
-            void denoiser.run(tracer.target, { scheduling: 'event-loop' }); onStage('denoise-start');
-          } else requestRender();
-        }).catch(error => { if (inFlight !== fence) return; inFlight = null; if (token === generation) fail(error, token); });
-        return { refining: false, visible };
-      }
-      if (wantsMotion) return { refining: false, visible };
+      if (beginMotion) { motionActive = true; motionSeen = true; quickStill = false; }
+      if (wantsMotion && !motionActive) return { refining: false, visible };
       if (denoiser.running) return { refining: false, visible };
       const estimatedFrames = Math.ceil(w * h / frameBudget * maxSamples * (MAX_BOUNCES + MAX_TRANSPARENT_BOUNCES + 4));
       // Scale the work allowance with actual pixels, path budget, transport and
@@ -303,13 +283,15 @@ export function createPreviewWorkerRenderer(runtime, { requestRender = () => {},
         // Wait for an in-flight count before reporting the budget result; then
         // denoise the best available image instead of leaving the first pass up.
         if (measuring) return { refining: false, visible };
-        if (sample < 1) throw new Error('Preview could not complete a sample within its work budget');
+        if (sample < 1 || ((motionActive || quickStill) && sample < quickTarget)) throw new Error('Preview could not complete the image within its work budget');
         budgetExhausted = true;
       }
-      const nextDenoise = budgetExhausted ? sample : (denoisedSamples ? Math.min(maxSamples, denoisedSamples + profile.denoiseIntervalSamples) : profile.firstDenoiseSamples);
+      const nextDenoise = budgetExhausted ? sample : ((motionActive || quickStill) ? quickTarget : (denoisedSamples ? Math.min(maxSamples, denoisedSamples + profile.denoiseIntervalSamples) : profile.firstDenoiseSamples));
       if (!rawReference && sample >= nextDenoise && denoisedSamples < nextDenoise) {
         denoisingSamples = sample;
-        void denoiser.run(tracer.target); onStage('denoise-start');
+        if (motionActive || quickStill) {
+          motionDenoising = true; void denoiser.runFast(tracer.target); onStage('filter-start');
+        } else { void denoiser.run(tracer.target); onStage('denoise-start'); }
         return { refining: false, visible };
       }
       const wasPaused = tracer.pause;
@@ -326,7 +308,7 @@ export function createPreviewWorkerRenderer(runtime, { requestRender = () => {},
         const measurement = {};
         measuring = measurement;
         const token = generation, epoch = cameraEpoch;
-        readPreviewSamples(tracer).then(counts => {
+        readPreviewSamples(tracer, { fullCoverage: true }).then(counts => {
           if (token === generation && epoch === cameraEpoch && !disposed) { sample = counts.min; requestRender(); }
         }).catch(error => { if (epoch === cameraEpoch) fail(error, token); }).finally(() => { if (measuring === measurement) measuring = null; });
       }
@@ -341,8 +323,12 @@ export function createPreviewWorkerRenderer(runtime, { requestRender = () => {},
         if (inFlight !== fence) return;
         inFlight = null;
         onStage('trace');
-        if (adaptive && token === generation) { const next = adaptive.observeBatch(performance.now() - batchStart); frameBudget = next.frameBudget; tracer.frameBudget = frameBudget; }
-        if (!disposed && state === 'ready' && (token !== generation || cameraDirty || (!budgetExhausted && (frames >= limit || sample < maxSamples || (!rawReference && denoisedSamples < maxSamples))))) requestRender();
+        if (adaptive && token === generation) {
+          const next = adaptive.observeBatch(performance.now() - batchStart);
+          if (motionActive) nextFrameBudget = next.frameBudget;
+          else { frameBudget = next.frameBudget; tracer.frameBudget = frameBudget; }
+        }
+        if (!disposed && state === 'ready' && (token !== generation || cameraDirty || motionActive || (!budgetExhausted && (frames >= limit || sample < maxSamples || (!rawReference && denoisedSamples < maxSamples))))) requestRender();
       }).catch(error => {
         if (inFlight !== fence) return;
         inFlight = null;
@@ -354,21 +340,28 @@ export function createPreviewWorkerRenderer(runtime, { requestRender = () => {},
   };
   return {
     render, invalidate,
+    finishMotion() {
+      // If a newer pose arrived while this picture was latched, abandon the
+      // older one and give the final camera priority. An unchanged pose can
+      // finish and continue its existing samples toward the settled target.
+      if (motionActive && (cameraDirty || transformsDirty)) invalidate();
+    },
     async updateProfile(performance, viewport) {
       if (!sceneAdmission || !sceneLimits || !tracer) return;
       const token = generation;
       const plan = await onResource(sceneAdmission, sceneLimits, sceneAllocation, performance, viewport, sessionTileSize);
       if (disposed || token !== generation) return;
       const wasDenoising = denoiser.running;
-      denoiser.reset(); denoisedSamples = 0; denoisingSamples = 0; motionDenoising = false; motionReady = false;
+      denoiser.reset(); denoisedSamples = 0; denoisingSamples = 0; motionDenoising = false; motionActive = false; quickStill = false; motionSeen = false;
       if (wasDenoising) fenceDenoise();
       profile = plan.profile; adaptive = createPreviewQualityController({ performance, viewport, admittedProfile: profile });
-      frameBudget = profile.frameBudget; tracer.frameBudget = frameBudget;
+      frameBudget = profile.frameBudget; nextFrameBudget = null; tracer.frameBudget = frameBudget;
+      cameraEpoch++; measuring = null;
       maxSamples = rawReferenceSamples ?? profile.samples; tracer.maxSamples = maxSamples;
       cameraDirty = true; requestRender();
     },
     dispose() { if (disposed) return; disposed = true; generation++; abort?.abort(); abort = null; release(); cache.dispose(); state = 'disposed'; },
     get visible() { return visible; },
-    get progress() { return { state, motion: motionActive, motionRemaining, presentedFrames, traceWidth: motionActive ? adaptive?.profile.motionWidth : renderWidth, traceHeight: motionActive ? adaptive?.profile.motionHeight : renderHeight, effectiveQuality: adaptive?.profile, sample, samples: maxSamples, frames, renderWidth, renderHeight, denoise: denoiser?.status || 'idle', denoisedSamples, budgetExhausted, denoiseTimings: denoiser?.timings || null, fallbackReason: reason }; },
+    get progress() { return { state, motion: motionActive, quickStill, motionSamples, presentedFrames, presentedCamera, traceWidth: renderWidth, traceHeight: renderHeight, effectiveQuality: adaptive?.profile, sample, samples: maxSamples, frames, renderWidth, renderHeight, denoise: denoiser?.status || 'idle', denoisedSamples, budgetExhausted, filterMode: denoiser?.filterMode || null, denoiseTimings: denoiser?.timings || null, fallbackReason: reason }; },
   };
 }

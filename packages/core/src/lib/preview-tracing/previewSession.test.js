@@ -130,3 +130,40 @@ test('OrbitControls last-bit jitter does not reset a settled Preview, while real
   assert.equal(f.messages.filter(message => message.type === 'input').length, accumulated + 1, 'explicit movement still updates the view');
   f.controller.dispose();
 });
+
+test('movement-state changes do not invalidate an unchanged camera, but a newer camera is sent on release', async t => {
+  const f = setup(t, snapshot);
+  f.controller.render(null, null, f.camera); await setImmediate();
+  const worker = f.workers[0];
+  f.controller.render(null, null, f.camera); worker.emit({ type: 'input-ack' });
+  const inputs = () => f.messages.filter(message => message.type === 'input');
+  f.controller.render(null, null, f.camera, { moving: true });
+  assert.equal(inputs().at(-1).moving, true);
+  assert.equal(inputs().at(-1).frameChanged, false);
+  worker.emit({ type: 'input-ack' });
+  f.controller.render(null, null, f.camera, { moving: false });
+  assert.equal(inputs().at(-1).moving, false);
+  assert.equal(inputs().at(-1).frameChanged, false, 'ending an unchanged gesture keeps the accumulated image');
+  worker.emit({ type: 'input-ack' });
+  f.camera.position.x = 1;
+  f.controller.render(null, null, f.camera, { moving: true });
+  assert.equal(inputs().at(-1).frameChanged, true);
+  // The release must retain the latest pending camera even before the worker ACK.
+  f.camera.position.x = 2;
+  f.controller.render(null, null, f.camera, { moving: false });
+  worker.emit({ type: 'input-ack' });
+  assert.equal(inputs().at(-1).moving, false);
+  assert.equal(inputs().at(-1).frameChanged, true);
+  assert.equal(inputs().at(-1).camera.position[0], 2);
+  f.controller.dispose();
+});
+
+
+test('camera diagnostics describe the displayed bitmap, not an unpresented worker frame', async t => {
+  const f = setup(t, snapshot); f.controller.render(null, null, f.camera); await setImmediate();
+  const worker = f.workers[0], displayed = { position: [1, 2, 3], width: 320, height: 240 };
+  worker.emit({ type: 'frame', bitmap: { width: 2, height: 2, close() {} }, progress: { state: 'ready', presentedCamera: displayed } });
+  worker.emit({ type: 'progress', stage: 'trace', progress: { state: 'ready', presentedCamera: { position: [9, 9, 9] } } });
+  assert.deepEqual(f.controller.progress.presentedCamera, displayed);
+  f.controller.dispose();
+});

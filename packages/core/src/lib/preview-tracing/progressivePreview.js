@@ -30,7 +30,7 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, on
   const raw = diagnostic?.rawReferenceSamples ?? null;
   if (raw !== null && (!Number.isInteger(raw) || raw < 1 || raw > 1024)) throw new RangeError('rawReferenceSamples must be an integer between 1 and 1024');
   let generation = 0, worker = null, abort = null, timer = null, canvas = null, visible = false, disposed = false, started = false;
-  let rasterOpacity = null, inputBusy = false, pending = null, sources = null, dirtyTransforms = false, paused = false, inputDirty = false, lastSentFrame = null, lastPerformanceKey = null, lease = null, initialized = false, sourceGround = null, sourceNodes = null;
+  let rasterOpacity = null, inputBusy = false, pending = null, sources = null, dirtyTransforms = false, paused = false, inputDirty = false, lastSentFrame = null, lastSentMoving = null, lastPerformanceKey = null, lease = null, initialized = false, sourceGround = null, sourceNodes = null;
   let progress = { state: 'idle', presentedFrames: 0, sample: 0, samples: 0, fallbackReason: null };
   const cancelTimer = () => { if (timer !== null) clearTimer(timer); timer = null; };
   const arm = token => { cancelTimer(); timer = setTimer(() => fail(new Error('Preview worker stopped making progress'), token), stallMs); };
@@ -40,7 +40,7 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, on
     if (worker) { worker.onmessage = null; worker.onerror = null; worker.onmessageerror = null; worker.terminate(); }
     worker = null; lease?.release(); lease = null; inputBusy = false; pending = null; sources = null; sourceGround = null; sourceNodes = null; initialized = false;
     if (!retainFrame && canvas) { canvas.remove(); canvas = null; visible = false; }
-    lastSentFrame = null; lastPerformanceKey = null; inputDirty = false;
+    lastSentFrame = null; lastSentMoving = null; lastPerformanceKey = null; inputDirty = false;
     if (restore && rasterOpacity !== null) { runtime.renderer.domElement.style.opacity = rasterOpacity; rasterOpacity = null; }
   };
   const fail = (error, token) => {
@@ -73,6 +73,7 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, on
       if (input.transforms) local.postMessage(input, [input.transforms.buffer]);
       else local.postMessage(input);
       if (input.frameChanged) lastSentFrame = input;
+      lastSentMoving = input.moving;
       lastPerformanceKey = JSON.stringify(input.performance || {});
     } catch (error) { if (token === generation && error?.name !== 'AbortError') fail(error, token); }
   };
@@ -99,7 +100,7 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, on
           sources = snapshot.sourceMeshes; sourceNodes = snapshot.sourceNodes || []; sourceGround = snapshot.sourceGround || null; outgoing = snapshot.transfers;
           if (!canvas) {
             canvas = document.createElement('canvas');
-            Object.assign(canvas.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', pointerEvents: 'none', visibility: 'hidden' });
+            Object.assign(canvas.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center', pointerEvents: 'none', visibility: 'hidden' });
             view.parentElement.appendChild(canvas);
           }
           local.postMessage({ type: 'init', scene: snapshot.payload, width: view.width || view.clientWidth, height: view.height || view.clientHeight,
@@ -113,7 +114,7 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, on
         if (msg.type === 'probe') { void snapshotAfterProbe(msg.limits); return; }
         if (msg.type === 'error') { fail(new Error(msg.message), token); return; }
         if (msg.type === 'progress') {
-          progress = { ...progress, ...msg.progress, presentedFrames: progress.presentedFrames, state: msg.progress?.state === 'ready' && visible ? 'ready' : 'preparing', stage: msg.stage, stageMs: msg.stageMs };
+          progress = { ...progress, ...msg.progress, presentedFrames: progress.presentedFrames, presentedCamera: progress.presentedCamera, state: msg.progress?.state === 'ready' && visible ? 'ready' : 'preparing', stage: msg.stage, stageMs: msg.stageMs };
           const complete = (msg.progress?.budgetExhausted && msg.progress.sample > 0 && msg.progress.denoisedSamples >= msg.progress.sample) || (msg.progress?.samples > 0 && msg.progress.sample >= msg.progress.samples && msg.progress.denoisedSamples >= msg.progress.samples);
           if (complete) cancelTimer(); else arm(token);
           requestRender(); return;
@@ -184,9 +185,9 @@ export function createProgressivePreview(runtime, { requestRender = () => {}, on
         const target = runtime.controls?.target;
         const viewDistance = target && camera.position?.distanceTo ? camera.position.distanceTo(target) : 1;
         const frameChanged = inputDirty || dirtyTransforms || !lastSentFrame || !sameCamera(next.camera, lastSentFrame.camera, viewDistance)
-          || next.width !== lastSentFrame.width || next.height !== lastSentFrame.height || next.moving !== lastSentFrame.moving || next.quality !== lastSentFrame.quality;
+          || next.width !== lastSentFrame.width || next.height !== lastSentFrame.height || next.quality !== lastSentFrame.quality;
         const performanceKey = JSON.stringify(next.performance || {});
-        if (pending || frameChanged || performanceKey !== lastPerformanceKey) {
+        if (pending || frameChanged || next.moving !== lastSentMoving || performanceKey !== lastPerformanceKey) {
           next.frameChanged = Boolean(pending?.frameChanged || frameChanged);
           pending = next; inputDirty = false; sendInput();
         }

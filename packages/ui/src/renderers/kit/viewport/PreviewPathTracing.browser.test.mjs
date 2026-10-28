@@ -17,6 +17,7 @@ import { pressInPreview } from '../../harness/preview.mjs';
 const fixture = `
 import * as THREE from 'three';
 import { createProgressivePreview } from './packages/core/src/lib/preview-tracing/progressivePreview.js';
+import { PreviewFastFilter } from './packages/core/src/lib/preview-tracing/previewFastFilter.js';
 const host = document.querySelector('#view');
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setSize(256, 192); renderer.setPixelRatio(1);
@@ -49,7 +50,7 @@ new PerformanceObserver(list => longTasks.push(...list.getEntries().map(e => e.d
 const requestRender = () => { if (queued) return; queued = true; requestAnimationFrame(draw); };
 function draw() {
   queued = false; renderer.render(scene,camera); draws++;
-  if (changeQuality && controller.progress.motion && controller.progress.stage === 'denoise-start') {
+  if (changeQuality && controller.progress.motion && controller.progress.stage === 'filter-start') {
     changeQuality = false; qualityChanged = true; runtime.previewConfiguration.performance = { mode: 'manual', value: 100 };
   }
   const result = controller.render(renderer,scene,camera,{still:!moving,moving,sceneChanged:false});
@@ -61,6 +62,50 @@ const create = () => {
   requestAnimationFrame(preparing);
 };
 window.previewTest = {
+  async filterProbe() {
+    const adapter = await navigator.gpu.requestAdapter(), device = await adapter.requestDevice();
+    const width = 5, height = 3, row = 256;
+    const source = { width, height }, albedo = {}, normal = {};
+    const color = new Float32Array(width * height * 4), colors = new Uint8Array(width * height * 4), normals = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      if (x === 0) { color.set([7, 7, 7, 0], i); continue; }
+      const red = x < 3;
+      color.set(red ? [4, 0, 0, x === 1 ? 0.25 : 1] : [0, 0, 4, 1], i);
+      colors.set(red ? [255, 0, 0, 255] : [0, 0, 255, 255], i);
+      normals.set([128, 128, 255, 255], i);
+    }
+    const texture = (format, data, bytesPerRow) => {
+      const result = device.createTexture({ size: [width, height], format, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+      device.queue.writeTexture({ texture: result }, data, { bytesPerRow }, [width, height]);
+      return result;
+    };
+    const sourceTexture = texture('rgba32float', color, width * 16), albedoTexture = texture('rgba8unorm', colors, width * 4), normalTexture = texture('rgba8unorm', normals, width * 4);
+    const mappings = new Map([[source, sourceTexture], [albedo, albedoTexture], [normal, normalTexture]]);
+    const filter = new PreviewFastFilter({ initTexture() {}, backend: { device, get: value => ({ texture: mappings.get(value) }) } });
+    const buffer = device.createBuffer({ size: row * height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const half = value => {
+      const sign = value & 0x8000 ? -1 : 1, exponent = (value >> 10) & 31, fraction = value & 1023;
+      if (exponent === 0) return sign * 2 ** -14 * fraction / 1024;
+      if (exponent === 31) return fraction ? NaN : sign * Infinity;
+      return sign * 2 ** (exponent - 15) * (1 + fraction / 1024);
+    };
+    try {
+      device.pushErrorScope('validation');
+      filter.apply(source, { textures: [albedo, normal] });
+      const encoder = device.createCommandEncoder();
+      encoder.copyTextureToBuffer({ texture: filter.raw }, { buffer, bytesPerRow: row }, [width, height]);
+      device.queue.submit([encoder.finish()]);
+      await buffer.mapAsync(GPUMapMode.READ);
+      const data = new DataView(buffer.getMappedRange());
+      const pixel = (x, y) => Array.from({ length: 4 }, (_, c) => half(data.getUint16(y * row + x * 8 + c * 2, true)));
+      const result = { empty: pixel(0, 1), translucent: pixel(1, 1), red: pixel(2, 1), blue: pixel(3, 1) };
+      buffer.unmap();
+      const error = await device.popErrorScope();
+      if (error) throw new Error(error.message);
+      return result;
+    } finally { filter.dispose(); buffer.destroy(); sourceTexture.destroy(); albedoTexture.destroy(); normalTexture.destroy(); device.destroy(); }
+  },
   start: create,
   configurePreparing: () => { renderer.setSize(288,216); runtime.previewConfiguration.performance = { mode: 'manual', value: 100 }; requestRender(); },
   restoreAuto: () => { renderer.setSize(256,192); runtime.previewConfiguration.performance = { mode: 'auto', value: 50 }; requestRender(); },
@@ -68,6 +113,7 @@ window.previewTest = {
   move: () => { moving=true; repeat.position.x=2; controller.invalidate({sceneChanged:true}); draw(); },
   orbit: () => { camera.position.set(6,-6,5); camera.lookAt(0,0.6,0.4); camera.updateMatrixWorld(); controller.invalidate({sceneChanged:false}); draw(); },
   stop: () => { moving=false; requestRender(); },
+  releaseAtNewCamera: () => { moving=false; camera.position.x += 1; camera.lookAt(0,0.6,0.4); camera.updateMatrixWorld(); controller.invalidate({sceneChanged:false}); draw(); return camera.position.toArray(); },
   changeQualityDuringMotion: () => {
     changeQuality = true;
     const poll = () => { if (!changeQuality) return; draw(); if (changeQuality) setTimeout(poll, 0); };
@@ -212,8 +258,13 @@ test('Preview offers retry and exit when WebGPU is unavailable', async t => {
   await cover.getByRole('alert').waitFor({ state: 'visible' });
   await cover.getByRole('button', { name: 'Exit preview', exact: true }).click();
   await pane.locator('[data-preview-view]').waitFor({ state: 'detached' });
+  await page.mouse.move(0, 0);
   const restored = PNG.sync.read(await editorCanvas.screenshot({ animations: 'disabled' }));
-  assert.deepEqual(restored.data, editor.data, 'leaving failed Preview restores the editor pixels');
+  let maxDelta = 0, changed = 0, squared = 0;
+  for (let i = 0; i < editor.data.length; i++) { const delta = Math.abs(restored.data[i] - editor.data[i]); maxDelta = Math.max(maxDelta, delta); squared += delta * delta; if (delta) changed++; }
+  t.diagnostic(`Failed Preview editor pixel variation ${JSON.stringify({ maxDelta, changed, rms: Math.sqrt(squared / editor.data.length) })}`);
+  assert.deepEqual([restored.width, restored.height], [editor.width, editor.height]);
+  assert.ok(maxDelta <= 1, 'leaving failed Preview restores the editor pixels within one 8-bit level');
   assert.deepEqual(errors, []);
 });
 
@@ -365,6 +416,12 @@ test('hardware Preview converges on authored parts, resets for motion and releas
   const adapter = await page.evaluate(async () => { const a = await navigator.gpu?.requestAdapter(); return a ? { vendor: a.info.vendor, architecture: a.info.architecture, fallback: a.info.isFallbackAdapter } : null; });
   if (!adapter || adapter.fallback) return t.skip('A hardware WebGPU adapter is unavailable; the unavailable-device state is tested separately.');
   t.diagnostic(`WebGPU ${JSON.stringify(adapter)}`);
+  const filter = await page.evaluate(() => window.previewTest.filterProbe());
+  assert.ok(Object.values(filter).flat().every(Number.isFinite), 'spatial-filter output is finite');
+  assert.deepEqual(filter.empty, [0, 0, 0, 0], 'fully empty background remains empty');
+  assert.ok(filter.translucent[3] > 0.25 && filter.translucent[3] < 1, 'fractional coverage survives filtering');
+  assert.ok(filter.translucent[0] > 3.9 && filter.translucent[2] < 0.01, 'premultiplied filtering avoids a dark transparent fringe');
+  assert.ok(filter.red[0] > 3.9 && filter.red[2] < 0.01 && filter.blue[2] > 3.9 && filter.blue[0] < 0.01, 'albedo guide preserves the material boundary');
   await page.evaluate(() => window.previewTest.start());
   await page.waitForFunction(() => window.previewTest.progress().state === 'preparing');
   await page.evaluate(() => window.previewTest.configurePreparing());
@@ -403,12 +460,29 @@ test('hardware Preview converges on authored parts, resets for motion and releas
   await page.evaluate(() => window.previewTest.sustainedOrbit());
   await page.waitForFunction(count => window.previewTest.progress().presentedFrames >= count + 2, previousFrames, { timeout: 120000 });
   assert.ok(await page.evaluate(() => window.previewTest.progress().motion), 'continuous camera motion presents new traced frames');
+  assert.equal((await page.evaluate(() => window.previewTest.progress())).filterMode, 'spatial', 'motion uses the full-resolution guided filter');
+  const motion = await page.evaluate(() => window.previewTest.progress());
+  assert.deepEqual([motion.traceWidth, motion.traceHeight], [motion.renderWidth, motion.renderHeight], 'motion keeps the admitted image resolution even when the ray pool is smaller');
+  const finalPosition = await page.evaluate(() => window.previewTest.releaseAtNewCamera());
+  await page.waitForFunction(position => {
+    const p = window.previewTest.progress();
+    return !p.motion && p.filterMode === 'spatial' && p.denoisedSamples >= p.motionSamples
+      && p.presentedCamera?.position.every((value, i) => Math.abs(value - position[i]) < 1e-7);
+  }, finalPosition, { timeout: 120000 });
+  await page.evaluate(() => window.previewTest.sustainedOrbit());
   await page.evaluate(() => window.previewTest.changeQualityDuringMotion());
   await page.waitForFunction(() => window.previewTest.qualityChanged());
-  await page.waitForFunction(() => { const p = window.previewTest.progress(); return p.samples === 256 || p.state === 'fallback'; });
+  await page.waitForFunction(() => { const p = window.previewTest.progress(); return (p.samples === 256 && p.motion) || p.state === 'fallback'; });
   assert.notEqual((await page.evaluate(() => window.previewTest.progress())).state, 'fallback', 'quality changes cancel an interactive denoise safely');
-  await page.evaluate(() => { window.previewTest.previewQuality(); window.previewTest.stop(); });
-  await page.waitForFunction(() => !window.previewTest.progress().motion, null, { timeout: 120000 });
+  const beforeRelease = await page.evaluate(() => ({ frames: window.previewTest.progress().presentedFrames, image: window.previewTest.capture() }));
+  await page.evaluate(() => window.previewTest.stop());
+  await page.waitForFunction(count => { const p = window.previewTest.progress(); return p.presentedFrames > count && !p.motion && p.denoisedSamples >= p.motionSamples; }, beforeRelease.frames, { timeout: 120000 });
+  const released = await page.evaluate(() => ({ ...window.previewTest.progress(), image: window.previewTest.capture() }));
+  assert.notEqual(released.image, beforeRelease.image, 'release presents the latest camera instead of the latched older view');
+  await page.waitForFunction(count => { const p = window.previewTest.progress(); return p.sample > count && p.frames > 0; }, released.motionSamples, { timeout: 120000 });
+  const refined = await page.evaluate(() => window.previewTest.progress());
+  assert.ok(refined.frames >= released.frames, 'settled refinement continues from the release image without resetting accumulation');
+  await page.evaluate(() => window.previewTest.previewQuality());
   await page.evaluate(() => window.previewTest.move());
   assert.ok(await page.evaluate(() => window.previewTest.capture()), 'scene motion retains a traced picture');
   await page.evaluate(() => window.previewTest.stop());

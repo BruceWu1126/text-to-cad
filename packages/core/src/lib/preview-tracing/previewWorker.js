@@ -6,7 +6,7 @@ import { planPreviewResources } from './resourcePolicy.js';
 import { mergePreviewInput } from './previewWorkerInput.js';
 
 let controller, owned, camera, runtime, scheduled = false, paused = false, disposed = false;
-let awaitingFrame = false, missedFrame = false, presented, backdrop, composite;
+let awaitingFrame = false, missedFrame = false, presented, backdrop, composite, presentedProgress;
 let lastProgress = 0, stageStarted = performance.now(), admissionId = 0, profileKey = null;
 let queuedInput = null, applyingInput = false, inferenceBounds = null;
 const admissions = new Map();
@@ -20,7 +20,7 @@ function schedule() {
   scheduled = true;
   setTimeout(() => {
     scheduled = false;
-    if (disposed || paused || !controller || !camera || applyingInput || (queuedInput && controller.progress.state === 'ready')) return;
+    if (disposed || paused || !controller || !camera || applyingInput || (awaitingFrame && missedFrame) || (queuedInput && controller.progress.state === 'ready')) return;
     const result = controller.render(null, null, camera, { still: !runtime.moving, moving: runtime.moving });
     if (result.refining) schedule();
   }, 0);
@@ -36,7 +36,7 @@ function present() {
   context.drawImage(presented, 0, 0);
   const bitmap = composite.transferToImageBitmap();
   awaitingFrame = true; missedFrame = false;
-  postMessage({ type: 'frame', bitmap, progress: controller.progress }, [bitmap]);
+  postMessage({ type: 'frame', bitmap, progress: presentedProgress }, [bitmap]);
 }
 function updateCamera(value) {
   if (!camera || camera.type !== value.type) camera = value.type === 'OrthographicCamera' ? new THREE.OrthographicCamera() : new THREE.PerspectiveCamera();
@@ -51,6 +51,7 @@ async function applyInput(msg, acknowledge) {
     const nextProfileKey = JSON.stringify([msg.performance || {}, msg.width, msg.height]);
     if (profileKey !== nextProfileKey) await controller.updateProfile(msg.performance || {}, { width: msg.width, height: msg.height });
     profileKey = nextProfileKey;
+    const wasMoving = runtime.moving;
     updateCamera(msg.camera); runtime.moving = msg.moving;
     if (msg.floorMatrix && owned.photographicStudio.ground) { owned.photographicStudio.ground.matrix.fromArray(msg.floorMatrix); owned.photographicStudio.ground.matrixWorldNeedsUpdate = true; }
     if (msg.transforms) {
@@ -58,6 +59,7 @@ async function applyInput(msg, acknowledge) {
       for (let i = 0; i < owned.objects.length; i++) { owned.objects[i].matrix.fromArray(msg.transforms, i * 16); owned.objects[i].matrixWorldNeedsUpdate = true; }
     }
     if (msg.transforms || msg.frameChanged) controller.invalidate(msg.transforms ? { transformsChanged: true } : { sceneChanged: false });
+    else if (wasMoving && !msg.moving) controller.finishMotion();
     if (msg.quality) runtime.previewConfiguration.quality = msg.quality;
     if (msg.performance) runtime.previewConfiguration.performance = msg.performance;
   } catch (error) { postMessage({ type: 'error', message: error?.message || String(error) }); }
@@ -89,7 +91,7 @@ self.onmessage = async event => {
         isHidden: () => paused, diagnostic: msg.diagnostic,
         requestRender: schedule,
         onFailure: error => postMessage({ type: 'error', message: error?.message || String(error) }),
-        onPresent: (image, background) => { presented = image; backdrop = background; present(); },
+        onPresent: (image, background) => { presented = image; backdrop = background; presentedProgress = controller.progress; present(); },
         buildBVH: (geometry, options) => new MeshBVH(geometry, options),
         onStage: stage => { const name = typeof stage === 'string' ? stage : 'bvh'; if (name !== 'trace' || performance.now() - lastProgress >= 200) sendProgress(name, { detail: stage }); if (name === 'ready' && queuedInput && !applyingInput) { const latest = queuedInput; queuedInput = null; void applyInput(latest, false); } },
         onResource: async (admission, deviceLimits, packedNodes, requestedPerformance, viewport, fixedTileSize = null) => {
@@ -112,7 +114,7 @@ self.onmessage = async event => {
       if (controller.progress.state !== 'ready' || applyingInput) { queuedInput = mergePreviewInput(queuedInput, msg); postMessage({ type: 'input-ack' }); }
       else void applyInput(msg, true);
     } else if (msg.type === 'frame-ack') {
-      awaitingFrame = false; if (missedFrame) present();
+      awaitingFrame = false; if (missedFrame) present(); schedule();
     } else if (msg.type === 'pause') {
       paused = msg.paused;
       if (paused) controller?.invalidate(); else schedule();

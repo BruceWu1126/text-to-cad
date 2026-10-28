@@ -105,8 +105,9 @@ private material copies, never borrowed geometry, source materials or textures.
 
 One replaceable camera/pose input and one unacknowledged image bound the worker message queue.
 Pose matrices are copied together so a picture cannot combine different animation ticks.
-Motion retains the last completed traced picture while a new low-resolution traced frame is
-prepared; rigid pose changes refit the private scene. Scene changes cancel the old generation.
+Motion retains the last completed traced picture while the next admitted-resolution traced frame is
+prepared in bounded batches; a held picture keeps its aspect ratio during resize. Rigid pose
+changes refit the private scene. Scene changes cancel the old generation.
 Exit aborts copying and terminates the worker without awaiting a GPU fence. Stale images are
 closed, and a generation token prevents late results from attaching to a closed view.
 
@@ -124,7 +125,7 @@ geometry is refused rather than simplified. A worker stall, allocation error or 
 ends the session and reaches Preview's retry/exit presentation. Terminating a worker does not
 isolate the browser from a shared GPU driver failure.
 
-The denoiser owns its auxiliary targets, inference weights and intermediate GPU buffers,
+The denoiser owns its auxiliary targets, fast-filter output, inference weights and intermediate GPU buffers,
 and the current and previous completed output textures. It publishes a result only when
 every tile is complete. Motion, resize, scene changes and disposal cancel in-flight
 inference; a request token rejects late callbacks. A queue fence separates an already

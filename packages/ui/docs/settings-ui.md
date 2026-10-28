@@ -970,7 +970,7 @@ tile after Display, in every host. A press covers the view at once
 ("Preparing preview…", in the scene's backdrop colour) and enters Preview under the cover,
 which lifts once Preview has presented its first traced image and its published mesh is complete
 (`kit/shell/previewCover.js`). The traced image refines while visible. Orbiting or playing a
-routine uses bounded, low-resolution traced and denoised frames with the same material transport; at rest,
+routine uses traced and spatially filtered views at the admitted resolution with the same material transport; at rest,
 the picture refines and is denoised. Missing WebGPU, unsupported materials or geometry, and
 scenes beyond the resource budget show an error with Retry and Exit preview. The existing cover
 shows broad progress as **Preparing preview…**, **Rendering preview…**, then **Refining preview…**
