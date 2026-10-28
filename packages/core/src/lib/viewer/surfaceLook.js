@@ -189,7 +189,7 @@ export function createSurfaceLook(THREE, root) {
         }
         // The viewer lifts its surfaces by a trace of their own colour. A part that
         // authored a glow of its own keeps it, where the look keeps finishes.
-        if (preserveFinish && authored.glows) {
+        if (authored.glows && finishes) {
           target.emissive.copy(lit.emissive);
           target.emissiveIntensity = lit.emissiveIntensity;
         } else if (!authored.glows || !finishes) {

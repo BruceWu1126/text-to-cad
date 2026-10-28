@@ -207,9 +207,15 @@ test("an emitting authored finish restores its own glow after X-ray without chan
     assert.deepEqual([plate.material.emissive.getHexString(), plate.material.emissiveIntensity], ["336699", 0.02]);
   };
   surface.apply(original); check();
-  surface.apply({ ...original, materialSettings: { ...INSPECT, overrideSourceColors: true, defaultColor: "#ff0000", fillColors: ["#ff0000"] } });
+  const single = { ...original, materialSettings: { ...INSPECT, overrideSourceColors: true, defaultColor: "#ff0000", fillColors: ["#ff0000"] } };
+  surface.apply(single);
+  const direct = [lamp.material.color.getHexString(), lamp.material.emissive.getHexString(), lamp.material.emissiveIntensity];
+  assert.deepEqual(direct, ["ff0000", "ff8800", 2], "Single color keeps the authored glow");
   surface.apply({ ...original, finishes: false, surface: { style: "shaded", opacity: 0.22 } });
   assert.deepEqual([lamp.material.emissive.getHexString(), lamp.material.emissiveIntensity], ["336699", 0.02]);
+  surface.apply(single);
+  assert.deepEqual([lamp.material.color.getHexString(), lamp.material.emissive.getHexString(), lamp.material.emissiveIntensity], direct,
+    "X-ray → Single color matches direct Single color, independent of the previous mode");
   surface.apply(original); check();
   assert.deepEqual([emitting.emissive.getHexString(), emitting.emissiveIntensity], ["ff8800", 2]);
   assert.deepEqual([neutral.emissive.getHexString(), neutral.emissiveIntensity], ["000000", 1]);
