@@ -129,6 +129,8 @@ renderer.render(scene,camera);
 window.previewReady=true;
 `;
 
+// This is the actual launch branch below, not a guess about adapter capability.
+const hardwareLaunch = process.platform === 'darwin' && process.env.CAD_TEST_SWIFTSHADER !== '1';
 let browser, server, artifacts;
 before(async () => {
   if (process.env.CAD_TRACE_ARTIFACTS) artifacts = await mkdtemp(join(tmpdir(), 'preview-tracing-review-'));
@@ -161,7 +163,7 @@ before(async () => {
     else { response.setHeader('Content-Type', 'text/html'); response.end('<!doctype html><style>body{margin:0}#view{position:relative;width:256px;height:192px}</style><div id="view"></div><script type="module" src="/fixture.js"></script>'); }
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  browser = await chromium.launch({ headless: true, args: process.platform === 'darwin' && process.env.CAD_TEST_SWIFTSHADER !== '1'
+  browser = await chromium.launch({ headless: true, args: hardwareLaunch
     ? ['--use-angle=metal'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 });
 after(async () => { await browser?.close(); if (server) await new Promise(resolve => server.close(resolve)); });
@@ -192,10 +194,16 @@ test('a browser without WebGPU reports an unavailable tracer and disposes cleanl
 test('Preview offers retry and exit when WebGPU is unavailable', async t => {
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
   t.after(() => page.close());
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(() => Object.defineProperty(navigator, 'gpu', { value: undefined }));
   await page.goto(`http://127.0.0.1:${server.address().port}/ui/?file=pair.glb`);
   const pane = page.getByTestId('one');
   await page.waitForFunction(() => window.cadHarness?.a.controller?.readState().loading === false);
+  await page.evaluate(() => { const controller = window.cadHarness.a.controller; controller.setCamera(controller.readState().camera); });
+  await page.waitForFunction(() => window.__cadCamera()?.untouched === false && !window.__cadCamera()?.settling);
+  const editorCanvas = pane.locator('[aria-busy] > div > canvas').first();
+  const editor = PNG.sync.read(await editorCanvas.screenshot({ animations: 'disabled' }));
   await pane.getByRole('button', { name: 'Preview', exact: true }).click();
   const cover = pane.locator('[data-preview-cover]');
   await cover.getByRole('alert').waitFor({ state: 'visible' });
@@ -204,9 +212,13 @@ test('Preview offers retry and exit when WebGPU is unavailable', async t => {
   await cover.getByRole('alert').waitFor({ state: 'visible' });
   await cover.getByRole('button', { name: 'Exit preview', exact: true }).click();
   await pane.locator('[data-preview-view]').waitFor({ state: 'detached' });
+  const restored = PNG.sync.read(await editorCanvas.screenshot({ animations: 'disabled' }));
+  assert.deepEqual(restored.data, editor.data, 'leaving failed Preview restores the editor pixels');
+  assert.deepEqual(errors, []);
 });
 
 test('the real Preview viewport traces, captures and restores the editor on exit', async t => {
+  if (!hardwareLaunch) return t.skip('This browser launch explicitly uses SwiftShader; real hardware tracing is tested on Metal.');
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 }, deviceScaleFactor: 1 });
   t.after(() => page.close());
   await page.addInitScript(() => {
@@ -348,6 +360,7 @@ test('the real Preview viewport traces, captures and restores the editor on exit
 });
 
 test('hardware Preview converges on authored parts, resets for motion and releases its canvas on every exit', async t => {
+  if (!hardwareLaunch) return t.skip('This browser launch explicitly uses SwiftShader; real hardware tracing is tested on Metal.');
   const { page, errors, logs } = await open(t);
   const adapter = await page.evaluate(async () => { const a = await navigator.gpu?.requestAdapter(); return a ? { vendor: a.info.vendor, architecture: a.info.architecture, fallback: a.info.isFallbackAdapter } : null; });
   if (!adapter || adapter.fallback) return t.skip('A hardware WebGPU adapter is unavailable; the unavailable-device state is tested separately.');

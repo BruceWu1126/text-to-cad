@@ -55,7 +55,7 @@ after(async () => {
 });
 
 // `record` opens the page as a previous session left its tab (`window.__cadTabRecord`).
-async function open(t, file, { record = null, webgpu = true } = {}) {
+async function open(t, file, { record = null } = {}) {
   const page = await browser.newPage({ viewport: { width: 800, height: 500 }, deviceScaleFactor: 1 });
   t.after(() => page.close());
   page.setDefaultTimeout(15000);
@@ -67,7 +67,6 @@ async function open(t, file, { record = null, webgpu = true } = {}) {
       Object.defineProperty(window, name, { get() { throw new Error(`Renderer accessed ${name}`); } });
     }
   });
-  if (!webgpu) await page.addInitScript(() => { window.__cadTestPreviewUnavailable = true; Object.defineProperty(navigator, 'gpu', { value: undefined }); });
   if (record) await page.addInitScript(stored => { window.__cadTabRecord = stored; }, record);
   await page.goto(`http://127.0.0.1:${server.address().port}/?file=${file}`);
   return { page, errors, pane: page.getByTestId('one') };
@@ -448,19 +447,4 @@ test('a corrupt GLB raises the viewer\'s load alert, with reload and details', a
     assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, `no ${name} over a failed load`);
   }
   void page;
-});
-
-
-test('Preview without WebGPU reports an error and returns to the editor', async t => {
-  const { page, pane, errors } = await open(t, 'static.glb', { webgpu: false });
-  await ready(pane);
-  const editor = await stillCapture(page);
-  await pane.getByRole('button', { name: 'Preview', exact: true }).click();
-  const cover = pane.locator('[data-preview-cover]');
-  await cover.getByRole('alert').waitFor();
-  assert.match(await cover.innerText(), /WebGPU unavailable/);
-  await cover.getByRole('button', { name: 'Exit preview', exact: true }).click();
-  await pane.locator('[data-preview-view]').waitFor({ state: 'detached' });
-  await captureMatching(page, editor, 'leaving failed Preview restores the editor pixels');
-  assert.deepEqual(errors, []);
 });
