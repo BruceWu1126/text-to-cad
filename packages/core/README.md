@@ -106,6 +106,12 @@ protocol relationship never imports Python or discovers an interpreter.
   Its documents are mutable, uncached, and explicitly disposed by their one owner; a
   bounded load-time pose sample supplies a stable framing estimate rather than
   resizing the stage during playback.
+- **3MF display materials stay authored**: scalar base-material metallicness,
+  roughness and display-colour alpha survive decoding per material subset. Regular
+  shaded views and Preview retain explicit finishes, with the fixed Inspect reflection
+  fill; STL, unmaterialed and colour-only 3MF surfaces retain their fallback finish.
+  Parts/X-ray/Flat overrides are reversible. Mechanism and supported extension scope:
+  [docs/render-pipeline.md](docs/render-pipeline.md).
 - **No shipped bytes**: core neither meshes nor writes an export. cadgen's engine
   meshes every part with OCCT in its warm worker and writes STL, 3MF and GLB itself;
   core reads those meshes and draws them. The GLBs its tests and the UI's open

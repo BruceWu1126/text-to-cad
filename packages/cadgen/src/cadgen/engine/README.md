@@ -356,6 +356,7 @@ only, and a file's id is derived again from its path after a restart.
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names; a mesh face refused, `mesh_faces`), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP, and a saved document's main-label strings rewritten in its bytes (`relabel`) |
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a mesh file as data (`read_mesh`, `Mesh`); a read of a file the build writes refused (`refuse_written`) |
 | `refs.py` | references to geometry: the ref grammar and the element-name pattern it reads (`ELEMENT_NAME`, kernel-free), occurrence paths, resolution by name in the latest build, for `inspect` and the viewer (**References**) |
+| `step_style.py` | standard STEP surface reflectance/transparency written to styled geometry and read as an approximate PBR appearance |
 | `export/` | `translate` and the kind registry (`__init__`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); a mesh file read as a document of triangles, no kernel (`mesh_file`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a planar document's drawing through build123d's DXF exporter, with the drawing checks (`dxf`); a motion baked into a glTF clip (`motion`); a view made a document again, for a STEP of a document held without its XCAF document and an xbf written from a STEP (`tree`) |
 | `mesh.py`, `mesh_format.py` | per-part tessellation at a quarter per cent tolerance, element facts, a part's facts as a whole (`measured`: volume, solids, box); the part buffer, its wire format and edge classes (`mesh_format`, kernel-free) |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; each part's facts by geometry key, measured in batches (`FactCache`, `Server.measure`); the meshing pool and its queues (`Mesher`); a STEP read in a reader process, held by its bytes; a minimal three.js page |
@@ -1488,10 +1489,12 @@ changed or new one fails in one line naming the folder and its mode.
   part and per painted face, material names and densities, element names on face, edge and
   vertex sub-shape labels. Read back through the engine's own reader, the instance tree, every
   name (on the same elements: the reader numbers edges and vertices in its own order), colours
-  and materials' names and densities are the xbf's. OCCT's writer drops the look (metallic,
-  roughness, emissive and the rest: a material reads back matte), every physical field but the
-  density, a face's material (the face keeps its colour), the mechanism and its configurations,
-  and the model's key and provenance. The writer's run-dependent choices are settled: the
+  and materials' names and densities are the xbf's. Standard STEP surface rendering records
+  carry an approximate diffuse/specular finish and transparency for parts and material-painted
+  faces. Import converts that standard specular/gloss appearance back to metallic/roughness;
+  it is an approximation based on the [Khronos specular/gloss conversion](https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Archived/KHR_materials_pbrSpecularGlossiness), especially for third-party Phong materials. STEP does not retain the
+  original advanced PBR properties, textures, emission, physical fields beyond name and density,
+  mechanism, configurations, model key or provenance. Use XBF or GLB for full PBR looks. The writer's run-dependent choices are settled: the
   header's time stamp is `step.WRITTEN_STAMP` (the xbf's date); the colour presentations, which
   it keeps in a map keyed by shape, are put in the order of the shapes they style; the assembly
   occurrences, which it numbers on from every STEP the process wrote, are numbered from 1; and
@@ -1990,7 +1993,7 @@ file's geometry into the model's document (`reader.py`). The result is a compoun
 file's assembly: an assembly a `Compound` of its components, a part a handle of its own on its
 product's geometry (a move places that occurrence, never its siblings), every node named as the
 file names that occurrence (its own name, else its product's), coloured and given its material
-as the file has them; an xbf's painted faces and face materials come too, and each element keeps
+as the file has them; XBF painted faces and material-painted STEP faces come too, and each element keeps
 the name its file gives it (**Element names**). An xbf's joints, configurations and motions are
 not imported: a part is a part. Linking between models is done by importing code, never by a
 file reference. Both are file reads the memo keys by the file's bytes, so a later build's read

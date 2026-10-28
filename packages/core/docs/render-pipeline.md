@@ -343,8 +343,19 @@ renderer currently uses the part's bounding-box extent for transmission thicknes
 this can overestimate attenuation and refraction for a hollow shell. Three's raster
 transmission buffer includes opaque geometry, not other transmissive layers, so a
 transmissive liquid inside glass cannot be composed correctly through the outer shell.
-An STL, a 3MF and a robot author no finish, so they wear the studio's surface over their colours (a 3MF's object colours, a
-robot description's colour, else its link mesh's own).
+A 3MF base-material group may author scalar metallicness and roughness through
+`pbmetallicdisplayproperties`, indexed alongside its base entries
+([Materials extension 1.2.1](https://github.com/3MFConsortium/spec_materials/blob/master/3MF%20Materials%20Extension.md)).
+The loader bridges Three's base-entry reference expectation without changing the input archive,
+then retains finish and display-colour alpha per material subset in mesh data. Solid/Shaded and
+Preview keep those finishes; Inspect supplies the existing fixed neutral reflection fill.
+Parts, X-ray and Flat remain reversible overrides, and display opacity multiplies source alpha.
+Sibling scenes own their materials and share geometry; mode changes never modify decoded metadata.
+This covers scalar base-material display properties, not textured PBR or translucent extension
+transport. A material-bearing package the loader cannot decode fails instead of taking the
+geometry-only compatibility fallback and silently losing its finish. Ordinary fallback packages
+remain supported. An STL, a colour-only 3MF and a robot use the viewer/studio fallback finish over
+their source colours (a 3MF's object colours, a robot description's colour, else its link mesh's own).
 
 Snapshots use the same grouped display contract. Photographic lighting supports
 only the `view` capture mode. Camera,
