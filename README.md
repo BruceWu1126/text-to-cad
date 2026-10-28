@@ -86,6 +86,9 @@ you run `uv cache prune`.
 
 ### Claude Code
 
+Claude Desktop's Code tab uses this plugin. Its regular Chat tab needs separate
+local MCP setup; Cowork uses the plugin's bundled MCP server.
+
 ```bash
 claude plugin marketplace add earthtojake/text-to-cad#latest
 claude plugin install text-to-cad@earthtojake
@@ -110,7 +113,10 @@ claude plugin uninstall text-to-cad@earthtojake
 claude plugin marketplace remove earthtojake
 ```
 
-### Claude Desktop
+### Claude Desktop: Chat tab
+
+Use this setup for CAD in Claude Desktop's **Chat** tab. Claude Code and Cowork
+use the plugin's bundled MCP server and do not need this separate configuration.
 
 CAD shows models in the chat: ask Claude to show one and it appears as a viewer
 card you can orbit, add to your prompt, and open full size; Claude can read what
@@ -257,9 +263,10 @@ The command asks which agents to install for, and where. To skip the questions,
 name the agent and install for your user:
 `npx skills add earthtojake/text-to-cad#latest -g -a <agent> -y`.
 
-Each skill runs cadgen through uv with the same pinned command the plugin's server
-uses, so uv must be installed. Without the plugin there is no CAD server, so the
-skills open models in the CAD Viewer in your browser.
+Follow the skill's setup instructions to install cadgen and start `cadgen server`.
+Run model scripts with the project's Python environment, with the matching cadgen
+release and any other project dependencies installed. The skills open models in
+the CAD Viewer in your browser.
 
 **To update or reinstall, run the same command again**, then restart the app.
 `add` re-fetches the package and overwrites what is already installed, so it both

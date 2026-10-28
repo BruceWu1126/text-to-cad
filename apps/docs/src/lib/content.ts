@@ -54,6 +54,7 @@ export const installs = [
   {
     id: "claude-code",
     agent: "Claude Code",
+    note: "Claude Desktop's Code tab uses this plugin. Its regular Chat tab needs separate local MCP setup; Cowork uses the plugin's bundled MCP server.",
     command:
       "claude plugin marketplace add earthtojake/text-to-cad#latest\nclaude plugin install text-to-cad@earthtojake",
     update: "claude plugin marketplace update earthtojake\nclaude plugin update text-to-cad@earthtojake",
@@ -100,7 +101,7 @@ export const installs = [
   {
     id: "other-agents",
     agent: "Other Agents",
-    note: "For an agent without plugin support: the skills give you everything you need for core CAD workflows and let you view CAD files in a localhost web app.",
+    note: "For an agent without plugin support: the skills give you everything you need for core CAD workflows and let you view CAD files in a localhost web app. Follow the skill's setup instructions to install cadgen and start `cadgen server`. Run model scripts with the project's Python environment, with the matching cadgen release and any other project dependencies installed.",
     command: "npx skills add earthtojake/text-to-cad#latest",
   },
 ];
