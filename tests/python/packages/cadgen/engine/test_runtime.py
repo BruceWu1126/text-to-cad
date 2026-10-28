@@ -63,7 +63,7 @@ class RuntimeTest(unittest.TestCase):
             self.assertEqual(worker["metadata"], [str(wheel)])
             self.assertEqual(plain["execution"], worker["execution"])
 
-    def test_editable_metadata_layouts_canonicalize_without_losing_live_mutations(self):
+    def test_editable_metadata_layouts_canonicalize_installation_changes_only(self):
         from importlib import metadata
 
         self.addCleanup(runtime._records.clear)
@@ -88,8 +88,11 @@ class RuntimeTest(unittest.TestCase):
                         target.write_text(content, encoding="utf-8")
                         if stamp is not None:
                             os.utime(target, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
-                        self.assertNotEqual(before, runtime.dependencies(), target)
-                    # A new RECORD entry is picked up even with a warm inventory cache.
+                        if target == wheel / "METADATA":
+                            self.assertNotEqual(before, runtime.dependencies(), target)
+                        else:
+                            self.assertEqual(before, runtime.dependencies(), target)
+                    # Managed reinstalls update RECORD even when their release is unchanged.
                     (site / "another.py").write_text("VALUE=1\n", encoding="utf-8")
                     before = runtime.dependencies()
                     with (wheel / "RECORD").open("a", encoding="utf-8") as record:
@@ -160,7 +163,7 @@ class RuntimeTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, words):
                 runtime.validate(wrong)
 
-    def test_distribution_version_and_editable_source_changes_invalidate(self):
+    def test_distribution_metadata_changes_invalidate_without_source_tree_scans(self):
         import importlib.metadata as metadata
 
         with tempfile.TemporaryDirectory() as folder:
@@ -177,24 +180,28 @@ class RuntimeTest(unittest.TestCase):
                 first = runtime.dependencies()
                 self.assertEqual(first, runtime.dependencies())
                 source.write_text("WIDTH=2\n", encoding="utf-8")
-                second = runtime.dependencies()
-                self.assertNotEqual(first, second)
+                self.assertEqual(first, runtime.dependencies())
                 (info / "METADATA").write_text("Name: custom\nVersion: 2\n", encoding="utf-8")
-                self.assertNotEqual(second, runtime.dependencies())
+                self.assertNotEqual(first, runtime.dependencies())
 
-    def test_runtime_inventory_reads_quoted_record_paths_and_preserves_legacy_fallback(self):
+    def test_metadata_signatures_cover_modern_and_legacy_installs_without_file_inventory(self):
         from importlib import metadata
 
         self.addCleanup(runtime._records.clear)
-        for inventory in ("record", "legacy", "empty-record"):
+        for inventory in ("record", "legacy", "empty-record", "single-file-egg"):
             with self.subTest(inventory=inventory), tempfile.TemporaryDirectory() as folder:
                 root = Path(folder)
                 source, stub = root / "custom,geometry.py", root / "custom.pyi"
                 source.write_text("WIDTH=1\n", encoding="utf-8")
                 stub.write_text("WIDTH: int\n", encoding="utf-8")
-                info = root / "custom-1.dist-info"
-                info.mkdir()
-                (info / "METADATA").write_text("Name: custom\nVersion: 1\n", encoding="utf-8")
+                info = root / ("custom.egg-info" if inventory in ("legacy", "single-file-egg") else "custom-1.dist-info")
+                if inventory == "single-file-egg":
+                    info.write_text("Name: custom\nVersion: 1\n", encoding="utf-8")
+                    metadata_file = info
+                else:
+                    info.mkdir()
+                    metadata_file = info / ("PKG-INFO" if inventory == "legacy" else "METADATA")
+                    metadata_file.write_text("Name: custom\nVersion: 1\n", encoding="utf-8")
                 if inventory == "record":
                     (info / "RECORD").write_text(
                         '"custom,geometry.py",,\ncustom.pyi,,\nmissing.py,,\ncustom-1.dist-info/METADATA,,\n',
@@ -202,31 +209,41 @@ class RuntimeTest(unittest.TestCase):
                 elif inventory == "empty-record":
                     (info / "RECORD").write_text("", encoding="utf-8")
                 dist = metadata.Distribution.at(info)
-                listing = mock.PropertyMock(side_effect=AssertionError("full distribution inventory walked")) if (
-                    inventory == "record") else mock.PropertyMock(return_value=[
-                        Path(source.name), Path(stub.name), Path("missing.py"), Path("custom-1.dist-info/METADATA")])
+                listing = mock.PropertyMock(side_effect=AssertionError("full distribution inventory walked"))
                 runtime._records.clear()
                 with mock.patch.object(runtime.metadata, "distributions", return_value=[dist]), mock.patch.object(
-                        type(dist), "files", listing):
+                        type(dist), "files", listing), mock.patch.object(runtime.os, "walk", side_effect=AssertionError("source tree walked")):
                     first = runtime.dependencies()
                     stub.write_text("WIDTH: float\n", encoding="utf-8")
                     self.assertEqual(first, runtime.dependencies(), "type-only stubs do not affect execution")
                     stamp = source.stat()
                     source.write_text("WIDTH=2\n", encoding="utf-8")
                     os.utime(source, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
-                    changed = runtime.dependencies()
-                    self.assertNotEqual(first, changed, "a quoted runtime path retains mutation-time validation")
                     (root / "missing.py").write_text("VALUE=1\n", encoding="utf-8")
-                    reappeared = runtime.dependencies()
-                    self.assertNotEqual(changed, reappeared, "a recorded missing source can reappear")
                     source.unlink()
-                    removed = runtime.dependencies()
-                    self.assertNotEqual(reappeared, removed, "removing runtime source invalidates the snapshot")
+                    self.assertEqual(first, runtime.dependencies(), "installed source edits require reinstall/restart")
+                    # A same-version reinstall may preserve both size and mtime. Mutation
+                    # time still changes, including Windows FILE_BASIC_INFO.ChangeTime.
+                    stamp = metadata_file.stat()
+                    metadata_file.write_bytes(metadata_file.read_bytes())
+                    os.utime(metadata_file, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                    changed = runtime.dependencies()
+                    self.assertNotEqual(first, changed)
+                    if inventory in ("record", "empty-record"):
+                        for name in ("RECORD", "direct_url.json"):
+                            target = info / name
+                            before = runtime.dependencies()
+                            if target.exists():
+                                stamp = target.stat()
+                                target.write_bytes(target.read_bytes())
+                                os.utime(target, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                            else:
+                                target.write_text('{}', encoding="utf-8")
+                            self.assertNotEqual(before, runtime.dependencies(), name)
+                        changed = runtime.dependencies()
                     runtime._records.clear()
-                    self.assertEqual(removed, runtime.dependencies(), "cold and warm inventories agree after deletion")
-                    source.write_text("WIDTH=2\n", encoding="utf-8")
-                    self.assertNotEqual(removed, runtime.dependencies(), "restoring source invalidates the snapshot")
-                self.assertEqual(listing.call_count, 0 if inventory == "record" else 2)
+                    self.assertEqual(changed, runtime.dependencies())
+                listing.assert_not_called()
 
     def test_pool_keeps_venvs_warm_and_replaces_changed_dependencies(self):
         def start(script, environment, cwd, execution):
@@ -331,27 +348,46 @@ finally:
             result = engine_daemon.run([sys.executable, "-c", program], env=env, cwd=Path.cwd())
             self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_cadgen_snapshot_uses_actual_source_independently_of_editable_metadata_order(self):
+    def test_cadgen_identity_uses_actual_root_release_and_only_matching_installation_metadata(self):
         from importlib import metadata
 
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            source = root / "src" / "cadgen" / "engine" / "runtime.py"
-            source.parent.mkdir(parents=True)
-            source.write_text("VALUE=1\n", encoding="utf-8")
-            locations = [root / "cadgen-0.8.0.dist-info", root / "cadgen.egg-info"]
-            for info in locations:
-                info.mkdir()
-                name = "METADATA" if info.name.endswith("dist-info") else "PKG-INFO"
-                (info / name).write_text("Name: cadgen\nVersion: 0.8.0\n", encoding="utf-8")
-            distributions = [metadata.Distribution.at(path) for path in locations]
-            with mock.patch.object(runtime, "__file__", str(source)), \
-                    mock.patch.object(runtime.metadata, "distributions", return_value=distributions) as discover:
-                first = runtime.dependencies()
-                discover.return_value = list(reversed(distributions))
-                self.assertEqual(first, runtime.dependencies())
-                source.write_text("VALUE=2\n", encoding="utf-8")
-                self.assertNotEqual(first, runtime.dependencies())
+        self.addCleanup(runtime._records.clear)
+        for layout in ("wheel", "editable"):
+            with self.subTest(layout=layout), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder).resolve()
+                site = root / "site"
+                source = (site if layout == "wheel" else root / "project/src") / "cadgen/engine/runtime.py"
+                source.parent.mkdir(parents=True)
+                source.write_text("VALUE=1\n", encoding="utf-8")
+                matching = site / "cadgen-0.8.2.dist-info"
+                unrelated = root / "other/cadgen-0.0.1.dist-info"
+                for info in (matching, unrelated):
+                    info.mkdir(parents=True, exist_ok=True)
+                    (info / "METADATA").write_text("Name: cadgen\nVersion: 0.8.2\n", encoding="utf-8")
+                if layout == "editable":
+                    (matching / "direct_url.json").write_text(json.dumps({
+                        "url": (root / "project").as_uri(), "dir_info": {"editable": True}}), encoding="utf-8")
+                installed, other = metadata.Distribution.at(matching), metadata.Distribution.at(unrelated)
+                with mock.patch.object(runtime, "__file__", str(source)), \
+                        mock.patch("cadgen.engine.previous.version", return_value="actual-release") as release, \
+                        mock.patch.object(runtime.metadata, "distributions", return_value=[]) as discover:
+                    bare = runtime.dependencies()
+                    discover.return_value = [other]
+                    self.assertEqual(bare, runtime.dependencies(), "unrelated cadgen metadata is ignored")
+                    discover.return_value = [other, installed]
+                    first = runtime.dependencies()
+                    discover.return_value = [installed, other]
+                    self.assertEqual(first, runtime.dependencies())
+                    self.assertNotEqual(first, bare, "matching install metadata is retained")
+                    source.write_text("VALUE=2\n", encoding="utf-8")
+                    self.assertEqual(first, runtime.dependencies(), "cadgen source is not recursively scanned")
+                    (unrelated / "METADATA").write_text("Name: cadgen\nVersion: 9\n", encoding="utf-8")
+                    self.assertEqual(first, runtime.dependencies())
+                    (matching / "METADATA").write_text("Name: cadgen\nVersion: 0.8.2\nSummary: reinstalled\n", encoding="utf-8")
+                    changed = runtime.dependencies()
+                    self.assertNotEqual(first, changed)
+                    release.return_value = "new-actual-release"
+                    self.assertNotEqual(changed, runtime.dependencies())
 
     def test_live_result_refuses_changed_installed_kernel_before_serializing(self):
         from types import SimpleNamespace
@@ -417,12 +453,20 @@ class CrossVenvTest(unittest.TestCase):
                     time.sleep(.01)
                 try:
                     project = root / "model.py"
-                    project.write_text("from cadgen import model\nimport json\n@model\ndef cube():\n"
+                    helper, editable = root / "helper.py", root / "editable/parts.py"
+                    helper.write_text("SCALE=1\n", encoding="utf-8")
+                    editable.parent.mkdir()
+                    editable.write_text("HEIGHT=1\n", encoding="utf-8")
+                    unrelated = root / "unrelated.py"
+                    unrelated.write_text("VALUE=1\n", encoding="utf-8")
+                    project.write_text("from cadgen import model\nimport json\nfrom helper import SCALE\n"
+                                       "from editable_parts import HEIGHT\n@model\ndef cube():\n"
                                        "    import build123d as bd\n    from custom_dependency import WIDTH\n"
-                                       "    return bd.Box(WIDTH,1,1)\n"
+                                       "    return bd.Box(WIDTH*SCALE,HEIGHT,1)\n"
                                        "if __name__ == '__main__':\n    r=cube.build()\n"
                                        "    print(json.dumps({'id':r.models[0]['id'],'fresh':r.fresh,"
-                                       "'key':r.models[0]['closure']['key'],'cache':r.models[0]['cache'],'width':r.models[0].get('delta',{}).get('bounds',{}).get('now',[None])[0]}))\n", encoding="utf-8")
+                                       "'key':r.models[0]['closure']['key'],'cache':r.models[0]['cache'],"
+                                       "'bounds':r.models[0].get('delta',{}).get('bounds',{}).get('now')}))\n", encoding="utf-8")
                     interpreters, sites = [], []
                     for index in (1, 2):
                         location = root / f"venv{index}"
@@ -437,34 +481,84 @@ class CrossVenvTest(unittest.TestCase):
                         info.mkdir()
                         (info / "METADATA").write_text(f"Name: custom-dependency\nVersion: {index}\n", encoding="utf-8")
                         (info / "RECORD").write_text(f"custom_dependency.py,,\ncustom_dependency-{index}.dist-info/METADATA,,\n", encoding="utf-8")
+                        # A real PEP660-style meta-path hook, rather than a source-path .pth.
+                        (site / "fixture_editable_hook.py").write_text(
+                            "import sys\nfrom importlib.abc import MetaPathFinder\n"
+                            "from importlib.util import spec_from_file_location\n"
+                            "class Finder(MetaPathFinder):\n"
+                            "    def find_spec(self, fullname, path=None, target=None):\n"
+                            f"        if fullname == 'editable_parts': return spec_from_file_location(fullname, {str(editable)!r})\n"
+                            "def install(): sys.meta_path.append(Finder())\n", encoding="utf-8")
+                        (site / "fixture_editable.pth").write_text(
+                            "import fixture_editable_hook; fixture_editable_hook.install()\n", encoding="utf-8")
+                        installed = site / "editable_parts-1.dist-info"
+                        installed.mkdir()
+                        (installed / "METADATA").write_text("Name: editable-parts\nVersion: 1\n", encoding="utf-8")
+                        (installed / "direct_url.json").write_text(json.dumps({
+                            "url": editable.parent.as_uri(), "dir_info": {"editable": True}}), encoding="utf-8")
                         interpreters.append(python)
                         sites.append(site)
                     def build(python):
                         result = engine_daemon.run([str(python), str(project)], env=env, cwd=root)
                         self.assertEqual(result.returncode, 0, result.stderr)
                         return json.loads(result.stdout.splitlines()[-1])
-                    a, b = [build(python) for python in interpreters]
+                    def workers():
+                        status = client.request({"op": "status"}, start=False)
+                        self.assertEqual(status["pid"], server.pid)
+                        return {row["pid"] for row in status["workers"]}
+                    a = build(interpreters[0])
+                    first_workers = workers()
+                    b = build(interpreters[1])
+                    other_worker = workers() - first_workers
                     self.assertEqual(a["id"], b["id"])
                     self.assertNotEqual(a["key"], b["key"])
-                    self.assertEqual((a["width"], b["width"]), (1, 2))
+                    self.assertEqual((a["bounds"], b["bounds"]), ([1, 1, 1], [2, 1, 1]))
                     self.assertTrue(a["fresh"] and b["fresh"])
                     again = build(interpreters[0])
                     self.assertFalse(again["fresh"])
                     self.assertEqual(a["key"], again["key"])
                     self.assertTrue(again["cache"]["used"])
-                    # A same-sized edit can retain Python's integer-mtime pyc timestamp. A new
-                    # dependency snapshot still replaces that worker and imports the changed code.
+                    warm_workers = workers()
+                    # Source belongs to the build loader, not environment identity. Both
+                    # ordinary helpers and editable-hook modules reload inside the same worker.
+                    for target, text, bounds in ((helper, "SCALE=4\n", [4, 1, 1]),
+                                                  (editable, "HEIGHT=2\n", [4, 2, 1])):
+                        import py_compile
+                        py_compile.compile(str(target), doraise=True)
+                        stamp = target.stat()
+                        target.write_text(text, encoding="utf-8")
+                        os.utime(target, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                        edited = build(interpreters[0])
+                        self.assertFalse(edited["fresh"])
+                        self.assertEqual(edited["id"], a["id"])
+                        self.assertEqual(edited["bounds"], bounds, {"helper": str(target), "report": edited})
+                        self.assertEqual(workers(), warm_workers)
+                    # Comments and unreachable files do not change the build's semantic key.
+                    helper.write_text("# comment only\nSCALE=4\n", encoding="utf-8")
+                    unrelated.write_text("VALUE=2\n", encoding="utf-8")
+                    reused = build(interpreters[0])
+                    self.assertEqual(reused["key"], edited["key"])
+                    self.assertTrue(reused["cache"]["used"])
+                    self.assertEqual(workers(), warm_workers)
+                    # A managed same-version reinstall changes installation metadata and code.
+                    # Its new worker must not take the prior environment's persisted document.
                     changed_file = sites[0] / "custom_dependency.py"
                     stamp = changed_file.stat()
                     changed_file.write_text("WIDTH=3\n", encoding="utf-8")
                     os.utime(changed_file, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                    metadata_file = sites[0] / "custom_dependency-1.dist-info/METADATA"
+                    stamp = metadata_file.stat()
+                    metadata_file.write_bytes(metadata_file.read_bytes())
+                    os.utime(metadata_file, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
                     changed = build(interpreters[0])
                     self.assertTrue(changed["fresh"])
-                    self.assertEqual(changed["width"], 3)
-                    self.assertNotEqual(changed["key"], again["key"])
-                    status = client.request({"op": "status"}, start=False)
-                    self.assertEqual(status["pid"], server.pid)
-                    self.assertEqual(len(status["workers"]), 2)
+                    self.assertEqual(changed["id"], a["id"])
+                    self.assertEqual(changed["bounds"], [12, 2, 1])
+                    self.assertFalse(changed["cache"]["used"])
+                    self.assertNotEqual(changed["key"], reused["key"])
+                    self.assertTrue(other_worker <= workers())
+                    self.assertFalse(first_workers & workers())
+                    self.assertEqual(len(workers()), 2)
                 finally:
                     client.request({"op": "stop"}, start=False)
                     server.communicate(timeout=30)

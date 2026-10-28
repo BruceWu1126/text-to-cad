@@ -646,14 +646,28 @@ architecture and effective OCP provider version as the server.
 
 A warm worker is keyed by its script, requested interpreter, virtual-environment
 prefix, import setup and dependency snapshot. Different environments keep separate
-warm workers behind the same server and viewer. The effective installed distribution
-metadata/files and editable source stats are checked on each call; a dependency
-change within one interpreter retires its stale worker before reuse. cadgen itself is
-fingerprinted from its actual imported source and release, so duplicate editable
-metadata does not select a different snapshot. The conservative
-editable scan includes Python/native source throughout an effective editable
-distribution's project root, so editing model code inside that root can retire its
-worker and lose its warm memo. A standby follows the requested execution environment too.
+warm workers behind the same server and viewer. Each call checks installed distribution
+metadata, including installation records and editable source-root identities. A package
+manager's install, upgrade or reinstall changes that snapshot and retires the affected
+worker before reuse. It does not enumerate installed runtime files or walk editable
+source trees. cadgen's actual imported root and release remain authoritative; unrelated
+or duplicate metadata cannot select another installation. A standby follows the requested
+execution environment too.
+
+Project Python modules, including editable packages whose source lives outside the
+interpreter and library folders, use the existing source loader and build closure.
+Running the model again reads changed helpers and rebuilds the work that depends on
+them while retaining the worker and kernel. Source edits do not replace the worker.
+The existing build-closure rules decide which bodies can be reused: symbol-based keys
+ignore comments and unrelated bindings; conservative source-byte fallbacks can rebuild
+even for a comment change.
+
+Directly modifying installed library, native-extension or import-hook files without a
+package-manager operation is outside this installation check. Reinstall the affected
+distribution to invalidate its dependency snapshot, and restart processes that already
+imported it; changing cadgen or the server's native libraries requires restarting an
+engine you own. Restart alone can still reuse a saved build when its installation
+metadata has not changed. Ordinary project/helper edits need neither reinstall nor restart.
 
 The import setup (`daemon.RESTARTS`) includes `PYTHONPATH`, `PYTHONHOME`, `PYTHONSAFEPATH`,
 `PYTHONNOUSERSITE`, `PYTHONUSERBASE` and `PYTHONPLATLIBDIR`. Relative `PYTHONPATH`
@@ -2669,9 +2683,10 @@ bd_materials and threejs_materials), the operating system and architecture, the 
 runtime dependency fingerprint and Python version, along with the model's code and inputs.
 An arm64 kernel and an x86-64 one write other bytes of one model; a system, architecture,
 library, dependency or Python change rebuilds it, saying what moved. The `engine.release`
-and engine-code digest fields are descriptive; the runtime dependency snapshot also
-covers the actual imported cadgen source and release, so a cadgen code or installation
-change can invalidate a cached build even when the format stays the same. Exact release
+and engine-code digest fields are descriptive; the runtime dependency snapshot covers
+the actual cadgen import root and release and matching installation metadata. A managed
+installation change invalidates a cached build even when the format stays the same;
+direct in-place library edits require the reinstall/restart procedure above. Exact release
 equality is a separate connection requirement. `FORMAT` is bumped deliberately when the
 stored representation changes. A new format or build key can invalidate reuse for a new
 build; keeping a saved document readable is a separate obligation (**Document compatibility**

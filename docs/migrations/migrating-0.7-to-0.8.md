@@ -68,6 +68,11 @@ are gone.
    python -m pip install -r requirements.txt  # if the project has other requirements
    ```
 
+   Project/helper Python edits, including an editable project (`pip install -e .`),
+   take effect on the next model run without reinstalling or restarting the engine.
+   The worker keeps its kernel and rebuilds affected work. Package installations and
+   upgrades can replace the worker for that environment.
+
 2. **Start the engine explicitly.** The plugin's MCP bootstrap starts or attaches
    to it. Without the plugin, leave this running in another terminal, outside a
    sandbox that cannot bind its listener:

@@ -59,8 +59,10 @@ if __name__ == "__main__":
   module search path, so a module beside it imports by its own name. A script inside a
   package (its folder holds an `__init__.py`) is that package's module, so its relative
   imports (`from ..lib.dims import WIDTH`) work under `python proj/parts/block.py` and
-  `python -m proj.parts.block` alike. An edit to any module it imports is read on the
-  next run.
+  `python -m proj.parts.block` alike. An edit to a project module it imports is read on
+  the next run, including source in an editable project (`pip install -e .`). No manual
+  reload or engine restart is needed; the worker keeps its kernel and rebuilds affected
+  work. Installing or upgrading dependencies can replace that worker.
 - **`import build123d as bd` costs nothing until it is used.** cadgen makes the import of
   `build123d` (and `OCP`) lazy: the module binds at once and the kernel loads on the
   first attribute anything reads from it, in the worker that builds the model. `from

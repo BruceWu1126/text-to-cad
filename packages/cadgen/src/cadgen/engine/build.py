@@ -37,6 +37,7 @@ import importlib.util
 import json
 import os
 import sys
+import threading
 import time
 import traceback
 from collections import OrderedDict
@@ -160,26 +161,56 @@ class _SourceOnlyLoader(importlib.machinery.SourceFileLoader):
 
 class _FirstPartyFromSource(importlib.abc.MetaPathFinder):
     """Every first-party module (``trace.first_party_file``) through ``_SourceOnlyLoader``.
-    It asks the path finder itself, never the rest of ``sys.meta_path`` (two finders that
-    each ask the other would hand one lookup back and forth), and answers nothing else."""
+    Ask the remaining finders in their original order, including editable import hooks;
+    returning their first spec also leaves library and native loader semantics intact."""
+
+    def __init__(self) -> None:
+        from cadgen.engine.kernel.trace import _library_roots, first_party_file
+
+        _library_roots()  # finish classifier imports before this finder intercepts them
+        self._first_party_file = first_party_file
+        self._finding = threading.local()
 
     def find_spec(self, fullname: str, path: Any, target: Any = None) -> Any:
-        from cadgen.engine.kernel.trace import first_party_file
-
-        spec = importlib.machinery.PathFinder.find_spec(fullname, path, target)
-        if (spec is None or type(spec.loader) is not importlib.machinery.SourceFileLoader or not spec.origin
-                or not first_party_file(spec.origin)):
+        finding = getattr(self._finding, "names", None)
+        if finding is None:
+            finding = self._finding.names = set()
+        if fullname in finding:  # a finder that delegates through the import machinery again
             return None
-        spec.loader = _SourceOnlyLoader(spec.loader.name, spec.loader.path)
-        return spec
+        finding.add(fullname)
+        try:
+            finders = iter(tuple(sys.meta_path))
+            for finder in finders:
+                if finder is self:
+                    break
+            for finder in finders:
+                method = getattr(finder, "find_spec", None)
+                if method is None:  # Python 3.11 also admits legacy import finders
+                    loader = finder.find_module(fullname, path)
+                    spec = importlib.util.spec_from_loader(fullname, loader) if loader else None
+                else:
+                    spec = method(fullname, path, target)
+                if spec is None:
+                    continue
+                if type(spec.loader) is importlib.machinery.SourceFileLoader and spec.origin:
+                    if self._first_party_file(spec.origin):
+                        spec.loader = _SourceOnlyLoader(spec.loader.name, spec.loader.path)
+                return spec
+            return None
+        finally:
+            finding.remove(fullname)
 
 
 def _from_source() -> None:
     """The model's code runs from its source: no bytecode read or written for a first-party
     module (a library's is the interpreter's to cache: a worker's under the engine's own folder,
-    ``daemon.bytecode``). Once per process, first on the meta path."""
-    if not any(isinstance(finder, _FirstPartyFromSource) for finder in sys.meta_path):
+    ``daemon.bytecode``). One finder per process, ahead of the current import hooks."""
+    finder = next((finder for finder in sys.meta_path if isinstance(finder, _FirstPartyFromSource)), None)
+    if finder is None:
         sys.meta_path.insert(0, _FirstPartyFromSource())
+    elif sys.meta_path[0] is not finder:
+        sys.meta_path.remove(finder)
+        sys.meta_path.insert(0, finder)
 
 
 def _say(stage: str, *args: Any) -> None:
@@ -448,7 +479,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
                 stats = {path: _stat(Path(path)) for path in _loaded_files(script, heard)}
                 sources = [stats.get(getattr(sys.modules.get(name), "__file__", None) or "") for name in context.loaded]
                 # A module edited while it loaded: the load may hold either version, so it is not kept.
-                if all(stat is None or stat[0] < began for stat in sources):
+                if all(stat is None or max(stat[0], stat[-1]) < began for stat in sources):
                     fresh = _Load(load_key, stats, environment, module, dict(_MODELS), context.loaded)
         loaded = time.perf_counter()
         context.base = script.parent
@@ -1182,11 +1213,13 @@ def _signature(tree: Any) -> tuple:
 
 
 def _stat(path: Path) -> tuple | None:
+    from cadgen.engine.sources import _version
+
     try:
         stat = os.stat(path)
+        return _version(path, stat)
     except OSError:
         return None
-    return (stat.st_mtime_ns, stat.st_size)
 
 
 def _last_feature(name: str) -> str:

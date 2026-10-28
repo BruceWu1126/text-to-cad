@@ -148,6 +148,13 @@ locally. `Model.build(daemon=False)`, `export(..., daemon=False)` and
 `snapshot(..., daemon=False)` are explicit offline operations: cold, in the calling
 process, with no live document or page.
 
+Project/helper source changes are loaded on the next model run, including editable
+project packages, while the worker keeps its kernel. Worker identity tracks installed
+distribution metadata rather than recursively scanning dependency source. When editing
+cadgen itself or files inside installed libraries, reinstall that distribution and restart
+your own engine: a restart alone does not invalidate unchanged installation metadata in
+a saved build's key.
+
 The engine is selected by port: `--port` where the CLI accepts it, else
 `CADGEN_PORT`, else 3245. A port must be 1–65535. Bootstrap reuses a compatible
 selected engine; a conflicting listener fails. There is no rollover or retirement
